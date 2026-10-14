@@ -1,0 +1,7 @@
+{
+  "name": "@fvh/domain",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "test": "vitest run", "typecheck": "tsc --noEmit -p tsconfig.json" }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "@fvh/adapter-freelancer",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "@fvh/domain": "workspace:*" },
+  "scripts": { "typecheck": "tsc --noEmit -p tsconfig.json" }
+}

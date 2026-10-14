@@ -1,0 +1,8 @@
+{
+  "name": "@fvh/application",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "@fvh/domain": "workspace:*", "@fvh/contracts": "workspace:*", "@fvh/knowledge": "workspace:*" },
+  "scripts": { "typecheck": "tsc --noEmit -p tsconfig.json" }
+}

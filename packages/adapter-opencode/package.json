@@ -1,0 +1,8 @@
+{
+  "name": "@fvh/adapter-opencode",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "@fvh/application": "workspace:*", "@fvh/contracts": "workspace:*", "zod": "latest" },
+  "scripts": { "test": "vitest run", "typecheck": "tsc --noEmit -p tsconfig.json" }
+}

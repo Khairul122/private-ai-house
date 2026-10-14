@@ -1,0 +1,27 @@
+{
+  "name": "@fvh/server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:smoke": "vitest run src/smoke.test.ts"
+  },
+  "dependencies": {
+    "@fastify/static": "latest",
+    "fastify": "latest",
+    "@fvh/adapter-freelancer": "workspace:*",
+    "@fvh/adapter-github": "workspace:*",
+    "@fvh/adapter-opencode": "workspace:*",
+    "@fvh/application": "workspace:*",
+    "@fvh/contracts": "workspace:*",
+    "@fvh/domain": "workspace:*",
+    "@fvh/knowledge": "workspace:*",
+    "@fvh/persistence": "workspace:*",
+    "zod": "latest"
+  },
+  "devDependencies": { "tsx": "latest" }
+}

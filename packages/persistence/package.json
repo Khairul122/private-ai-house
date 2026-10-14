@@ -1,0 +1,21 @@
+{
+  "name": "@fvh/persistence",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@fvh/domain": "workspace:*",
+    "@fvh/knowledge": "workspace:*",
+    "better-sqlite3": "^12.11.1",
+    "drizzle-orm": "latest"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0"
+  }
+}

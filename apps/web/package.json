@@ -1,0 +1,25 @@
+{
+  "name": "@fvh/web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@react-three/fiber": "latest",
+    "@tanstack/react-query": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "react-router": "latest",
+    "three": "0.182.0"
+  },
+  "devDependencies": {
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@types/three": "0.182.0",
+    "@vitejs/plugin-react": "latest",
+    "vite": "latest"
+  }
+}
