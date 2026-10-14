@@ -156,9 +156,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .activity-copy p { margin: 2px 0 3px; color: var(--muted); font-size: 12px; }
 .activity-copy small { color: var(--muted); font-size: 10px; }
 .state-label { display: inline-flex; max-width: max-content; align-items: center; padding: 4px 7px; border: 1px solid var(--line); border-radius: 2px; background: var(--surface); color: var(--muted); font-size: 10px; font-weight: 700; white-space: nowrap; }
-.state-active, .state-recorded, .state-won { border-color: var(--success); background: var(--success-soft); color: var(--success); }
-.state-paused, .state-blocked, .state-failed, .state-error { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); }
-.state-draft, .state-draft_ready, .state-new, .state-scored { border-color: #a66a4e; background: var(--copper-soft); color: var(--copper); }
+.state-active, .state-connected, .state-supported, .state-recorded, .state-won { border-color: var(--success); background: var(--success-soft); color: var(--success); }
+.state-paused, .state-blocked, .state-failed, .state-error, .state-invalid, .state-unavailable { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); }
+.state-draft, .state-unverified, .state-draft_ready, .state-new, .state-scored { border-color: #a66a4e; background: var(--copper-soft); color: var(--copper); }
 .state-submitted, .state-in_conversation, .state-policy_check { border-color: var(--pine); background: var(--pine-light); color: var(--pine); }
 
 .notice { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 0 0 17px; padding: 11px 13px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-size: 12px; }

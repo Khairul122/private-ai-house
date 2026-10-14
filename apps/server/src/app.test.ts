@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WorkspaceRepository } from '@fvh/persistence';
 import { createApp } from './app.js';
 
@@ -34,23 +34,61 @@ describe('local API', () => {
   it('serves health, capabilities, and clearly labeled fixture opportunities', async () => {
     const health = await app.inject({ method: 'GET', url: '/api/health' });
     const capabilities = await app.inject({ method: 'GET', url: '/api/capabilities' });
+    const settings = await app.inject({ method: 'GET', url: '/api/settings' });
     const projects = await app.inject({ method: 'GET', url: '/api/projects' });
 
     expect(health.json()).toMatchObject({ ok: true, mode: 'local', liveWrites: false });
-    expect(capabilities.json().marketplace.every((item: { status: string }) => item.status === 'unknown')).toBe(true);
-    expect(capabilities.json().freelancerCredentials).toEqual({ accessTokenConfigured: false });
+    expect(capabilities.json().marketplace.find((item: { operation: string }) => item.operation === 'read_profile').status).toBe('supported');
+    expect(capabilities.json().marketplace.find((item: { operation: string }) => item.operation === 'read_projects').status).toBe('supported');
+    expect(capabilities.json().marketplace.find((item: { operation: string }) => item.operation === 'submit_bid').status).toBe('unknown');
+    expect(capabilities.json().freelancerCredentials).toMatchObject({ accessTokenConfigured: false, verificationStatus: 'unverified', readProfile: false, readProjects: false });
+    expect(settings.json().capabilities.freelancer).toMatchObject({ readProfile: 'supported', readProjects: 'supported', writes: 'unknown' });
     expect(capabilities.json().linkedin.clientConfigured).toBe(false);
     expect(projects.json()).toHaveLength(4);
     expect(projects.json()[0].source).toBe('fixture');
   });
 
   it('reports credential presence without exposing credential values', async () => {
-    const credentialApp = createApp({ credentialStatus: { freelancerAccessTokenConfigured: true, linkedinClientConfigured: true } });
+    const credentialApp = createApp({ credentialStatus: { freelancerAccessTokenConfigured: true, linkedinClientConfigured: true, linkedinAccessTokenConfigured: false, linkedinAccessTokenExpiresAt: null } });
     const response = await credentialApp.inject({ method: 'GET', url: '/api/capabilities' });
 
-    expect(response.json().freelancerCredentials).toEqual({ accessTokenConfigured: true });
+    expect(response.json().freelancerCredentials).toMatchObject({ accessTokenConfigured: true, verificationStatus: 'unverified' });
     expect(response.json().linkedin.clientConfigured).toBe(true);
     expect(JSON.stringify(response.json())).not.toContain('secret-value');
+    await credentialApp.close();
+  });
+
+  it('verifies Freelancer with read-only evidence and never returns marketplace writes as supported', async () => {
+    const credentialApp = createApp({
+      credentialStatus: { freelancerAccessTokenConfigured: true, linkedinClientConfigured: false, linkedinAccessTokenConfigured: false, linkedinAccessTokenExpiresAt: null },
+      verifyFreelancer: async () => ({ connected: true, readProfile: true, readProjects: true, reason: 'verified' }),
+    });
+    const verification = await credentialApp.inject({ method: 'POST', url: '/api/freelancer/verify' });
+    const capabilities = await credentialApp.inject({ method: 'GET', url: '/api/capabilities' });
+    const rows = capabilities.json().marketplace as Array<{ operation: string; status: string }>;
+
+    expect(verification.json()).toMatchObject({ connected: true, readProfile: true, readProjects: true });
+    expect(capabilities.json().freelancerCredentials.verificationStatus).toBe('connected');
+    expect(rows.find((item) => item.operation === 'read_profile')?.status).toBe('supported');
+    expect(rows.find((item) => item.operation === 'read_projects')?.status).toBe('supported');
+    expect(rows.filter((item) => ['submit_bid', 'edit_profile', 'send_message'].includes(item.operation)).every((item) => item.status !== 'supported')).toBe(true);
+    await credentialApp.close();
+  });
+
+  it('starts LinkedIn consent only for a local application origin', async () => {
+    const start = vi.fn(async (returnUrl: string) => ({ authorizationUrl: `https://www.linkedin.com/oauth/v2/authorization?redirect=${encodeURIComponent(returnUrl)}` }));
+    const handleCallback = vi.fn(async () => ({ statusCode: 200, title: 'LinkedIn terhubung', message: 'Profil ringan terverifikasi.', returnUrl: 'http://localhost:5173/capabilities' }));
+    const credentialApp = createApp({ linkedinOAuth: { redirectUri: 'http://127.0.0.1:3001/api/linkedin/callback', start, handleCallback, close: () => {} } });
+    const response = await credentialApp.inject({ method: 'POST', url: '/api/linkedin/connect', headers: { origin: 'http://localhost:5173' } });
+    const denied = await credentialApp.inject({ method: 'POST', url: '/api/linkedin/connect', headers: { origin: 'https://attacker.example' } });
+    const callback = await credentialApp.inject({ method: 'GET', url: '/api/linkedin/callback?state=opaque&code=temporary' });
+
+    expect(response.statusCode).toBe(200);
+    expect(start).toHaveBeenCalledWith('http://localhost:5173/capabilities');
+    expect(denied.statusCode).toBe(403);
+    expect(callback.statusCode).toBe(303);
+    expect(callback.headers.location).toBe('http://localhost:5173/capabilities?linkedin=connected');
+    expect(handleCallback).toHaveBeenCalledWith({ state: 'opaque', code: 'temporary' });
     await credentialApp.close();
   });
 

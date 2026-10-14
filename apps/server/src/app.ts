@@ -11,7 +11,8 @@ import { transitionPipeline } from '@fvh/domain';
 import type { AutonomyPolicy, BidDraft } from '@fvh/domain';
 import { prepareKnowledgeFile } from '@fvh/knowledge';
 import { WorkspaceRepository } from '@fvh/persistence';
-import type { CredentialStatus } from './credential-store.js';
+import type { CredentialStatus, FreelancerVerification } from './credential-store.js';
+import type { LinkedInOAuthService } from './linkedin-oauth.js';
 
 const paramsSchema = z.object({ id: z.string().min(1).max(150) });
 const draftUpdateSchema = z.object({ proposal: z.string().trim().min(40).max(4_000), proposedPrice: z.number().finite().positive() });
@@ -22,6 +23,10 @@ export type AppOptions = {
   repository?: WorkspaceRepository;
   githubToken?: string;
   credentialStatus?: CredentialStatus;
+  getCredentialStatus?: () => CredentialStatus;
+  verifyFreelancer?: () => Promise<FreelancerVerification>;
+  linkedinOAuth?: Pick<LinkedInOAuthService, 'redirectUri' | 'start' | 'handleCallback' | 'close'>;
+  disconnectLinkedIn?: () => Promise<void>;
   fetcher?: typeof fetch;
   clock?: () => Date;
   drafting?: AiDraftingPort;
@@ -64,6 +69,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   const drafting = options.drafting ?? new FixtureDraftingAdapter();
   const draftingMode = options.draftingMode ?? 'fixture';
   const app = Fastify({ logger: false, bodyLimit: 2_500_000, trustProxy: false });
+  let freelancerVerification: FreelancerVerification | null = null;
 
   app.addHook('onRequest', async (request, reply) => {
     const origin = request.headers.origin;
@@ -80,14 +86,24 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   });
 
   app.get('/api/health', async () => ({ ok: true, mode: 'local', database: 'sqlite', ai: 'fixture', liveWrites: false }));
-  app.get('/api/capabilities', async () => ({
-    marketplace: getFreelancerCapabilities(),
-    freelancerCredentials: { accessTokenConfigured: options.credentialStatus?.freelancerAccessTokenConfigured ?? false },
+  app.get('/api/capabilities', async () => {
+    const credentialStatus = options.getCredentialStatus?.() ?? options.credentialStatus;
+    return {
+    marketplace: getFreelancerCapabilities(freelancerVerification),
+    freelancerCredentials: {
+      accessTokenConfigured: credentialStatus?.freelancerAccessTokenConfigured ?? false,
+      verificationStatus: freelancerVerification?.connected ? 'connected' : freelancerVerification?.reason === 'invalid_token' ? 'invalid' : freelancerVerification ? 'unavailable' : 'unverified',
+      readProfile: freelancerVerification?.readProfile ?? false,
+      readProjects: freelancerVerification?.readProjects ?? false,
+    },
     github: { read: 'supported', scope: 'selected repository Contents: read', tokenConfigured: Boolean(options.githubToken ?? process.env.GITHUB_TOKEN) },
     linkedin: {
-      read: 'manual-only',
-      clientConfigured: options.credentialStatus?.linkedinClientConfigured ?? false,
-      reason: 'Profile API access requires developer approval; this workspace supports user-provided text imports.',
+      read: credentialStatus?.linkedinAccessTokenConfigured && credentialStatus.linkedinAccessTokenExpiresAt && Date.parse(credentialStatus.linkedinAccessTokenExpiresAt) > now().getTime() ? 'oidc-lite' : 'manual-only',
+      clientConfigured: credentialStatus?.linkedinClientConfigured ?? false,
+      authorized: Boolean(credentialStatus?.linkedinAccessTokenConfigured && credentialStatus.linkedinAccessTokenExpiresAt && Date.parse(credentialStatus.linkedinAccessTokenExpiresAt) > now().getTime()),
+      accessTokenExpiresAt: credentialStatus?.linkedinAccessTokenExpiresAt ?? null,
+      redirectUri: options.linkedinOAuth?.redirectUri ?? null,
+      reason: 'Hanya profil OIDC ringan yang diminta. Produk OIDC LinkedIn harus disetujui dan URL callback yang ditampilkan harus diterima di Developer Portal; akses profil lengkap tetap tidak tersedia.',
     },
     opencode: {
       draft: 'optional', active: draftingMode === 'opencode',
@@ -95,7 +111,59 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
         ? 'Selected project details, supplied profile facts, and up to four relevant local evidence chunks are sent to the configured OpenCode provider; marketplace credentials are excluded.'
         : 'Fixture drafting is the default until a provider is configured and data-processing consent is set.',
     },
-  }));
+  };
+  });
+
+  app.post('/api/freelancer/verify', async (_request, reply) => {
+    const credentialStatus = options.getCredentialStatus?.() ?? options.credentialStatus;
+    if (!credentialStatus?.freelancerAccessTokenConfigured) return reply.code(409).send({ error: 'Token Freelancer belum tersimpan di secure store Windows.' });
+    if (!options.verifyFreelancer) return reply.code(503).send({ error: 'Pemeriksaan koneksi Freelancer belum tersedia di server ini.' });
+    freelancerVerification = await options.verifyFreelancer();
+    return {
+      ...freelancerVerification,
+      message: freelancerVerification.connected
+        ? 'Koneksi Freelancer terverifikasi. Akses profil dan pencarian proyek baca-saja tersedia.'
+        : 'Koneksi belum terverifikasi. Periksa token, scope, atau koneksi jaringan lalu coba lagi.',
+    };
+  });
+
+  app.post('/api/linkedin/connect', async (request, reply) => {
+    if (!options.linkedinOAuth) return reply.code(503).send({ error: 'Alur OAuth LinkedIn belum tersedia di server ini.' });
+    const origin = request.headers.origin;
+    const returnOrigin = origin && allowedDevOrigins.has(origin) ? origin : `http://127.0.0.1:${Number.parseInt(process.env.FVH_PORT ?? '3001', 10)}`;
+    try {
+      return await options.linkedinOAuth.start(`${returnOrigin}/capabilities`);
+    } catch {
+      return reply.code(409).send({ error: 'OAuth LinkedIn tidak dapat dimulai. Periksa kredensial aplikasi dan pastikan tidak ada alur otorisasi lain yang sedang berjalan.' });
+    }
+  });
+
+  app.get('/api/linkedin/callback', async (request, reply) => {
+    if (!options.linkedinOAuth) return reply.code(503).send({ error: 'Alur OAuth LinkedIn belum tersedia di server ini.' });
+    const query = request.query as Record<string, unknown>;
+    const result = await options.linkedinOAuth.handleCallback({
+      ...(typeof query.state === 'string' ? { state: query.state } : {}),
+      ...(typeof query.code === 'string' ? { code: query.code } : {}),
+      ...(typeof query.error === 'string' ? { error: query.error } : {}),
+    });
+    const destination = new URL(result.returnUrl);
+    destination.searchParams.set('linkedin', result.statusCode === 200 ? 'connected' : 'error');
+    return reply
+      .code(303)
+      .header('Cache-Control', 'no-store')
+      .header('Referrer-Policy', 'no-referrer')
+      .redirect(destination.toString());
+  });
+
+  app.post('/api/linkedin/disconnect', async (_request, reply) => {
+    if (!options.disconnectLinkedIn) return reply.code(503).send({ error: 'Pemutusan LinkedIn belum tersedia di server ini.' });
+    try {
+      await options.disconnectLinkedIn();
+      return { disconnected: true };
+    } catch {
+      return reply.code(500).send({ error: 'Token LinkedIn tidak dapat dihapus dari secure store.' });
+    }
+  });
 
   app.get('/api/profile', async () => repository.getProfile());
   app.put('/api/profile', async (request, reply) => {
@@ -345,13 +413,22 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     return { deleted: true, id: params.data.id };
   });
 
-  app.get('/api/settings', async () => ({
-    workspace: { id: 'workspace_local', name: 'Freelancer Virtual House', accountMode: 'single-user lokal' },
-    fields: ['Fullstack Engineer', 'Backend Engineer', 'Android Engineer', 'iOS Engineer', 'Frontend Engineer', 'DevOps Engineer', 'QA Engineer', 'UI/UX Designer', 'Data Engineer', 'Technical Writer'],
-    profile: repository.getProfile(),
-    capabilities: { freelancer: 'unknown', github: 'read-only', linkedin: 'manual-only', opencode: 'optional' },
-    externalWrites: false,
-  }));
+  app.get('/api/settings', async () => {
+    const credentialStatus = options.getCredentialStatus?.() ?? options.credentialStatus;
+    const linkedinAuthorized = Boolean(credentialStatus?.linkedinAccessTokenConfigured && credentialStatus.linkedinAccessTokenExpiresAt && Date.parse(credentialStatus.linkedinAccessTokenExpiresAt) > now().getTime());
+    return {
+      workspace: { id: 'workspace_local', name: 'Freelancer Virtual House', accountMode: 'single-user lokal' },
+      fields: ['Fullstack Engineer', 'Backend Engineer', 'Android Engineer', 'iOS Engineer', 'Frontend Engineer', 'DevOps Engineer', 'QA Engineer', 'UI/UX Designer', 'Data Engineer', 'Technical Writer'],
+      profile: repository.getProfile(),
+      capabilities: {
+        freelancer: { connection: freelancerVerification?.connected ? 'connected' : 'unverified', readProjects: 'supported', readProfile: 'supported', writes: 'unknown' },
+        github: 'read-only',
+        linkedin: { read: linkedinAuthorized ? 'oidc-lite' : 'manual-only', clientConfigured: credentialStatus?.linkedinClientConfigured ?? false, authorized: linkedinAuthorized },
+        opencode: 'optional',
+      },
+      externalWrites: false,
+    };
+  });
 
   app.setErrorHandler((_error, _request, reply) => reply.code(500).send({ error: 'Permintaan tidak dapat diproses.' }));
   app.setNotFoundHandler((request, reply) => {
@@ -362,6 +439,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     return reply.code(404).send({ error: 'Endpoint tidak ditemukan.' });
   });
   app.addHook('onClose', async () => {
+    options.linkedinOAuth?.close();
     if (!options.repository) repository.close();
   });
   return app;

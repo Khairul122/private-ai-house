@@ -10,7 +10,7 @@ function createStore(contents: unknown): string {
   const directory = mkdtempSync(join(tmpdir(), 'fvh-credentials-'));
   directories.push(directory);
   const path = join(directory, 'credentials.dpapi.json');
-  writeFileSync(path, JSON.stringify(contents), 'utf8');
+  writeFileSync(path, `\uFEFF${JSON.stringify(contents)}`, 'utf8');
   return path;
 }
 
@@ -23,6 +23,8 @@ describe('encrypted credential status', () => {
     expect(readCredentialStatus(join(tmpdir(), 'fvh-missing-credentials.dpapi.json'), 'win32')).toEqual({
       freelancerAccessTokenConfigured: false,
       linkedinClientConfigured: false,
+      linkedinAccessTokenConfigured: false,
+      linkedinAccessTokenExpiresAt: null,
     });
   });
 
@@ -37,6 +39,8 @@ describe('encrypted credential status', () => {
     expect(readCredentialStatus(path, 'win32')).toEqual({
       freelancerAccessTokenConfigured: true,
       linkedinClientConfigured: true,
+      linkedinAccessTokenConfigured: false,
+      linkedinAccessTokenExpiresAt: null,
     });
   });
 
@@ -51,6 +55,33 @@ describe('encrypted credential status', () => {
     expect(readCredentialStatus(path, 'linux')).toEqual({
       freelancerAccessTokenConfigured: false,
       linkedinClientConfigured: false,
+      linkedinAccessTokenConfigured: false,
+      linkedinAccessTokenExpiresAt: null,
+    });
+  });
+
+  it('reports a locally encrypted LinkedIn member token and its expiry without exposing it', () => {
+    const path = createStore({
+      version: 1,
+      linkedinAccessToken: '01000000d08c9ddf-encrypted-token',
+      linkedinAccessTokenExpiresAt: '2026-10-15T00:00:00.000Z',
+    });
+
+    expect(readCredentialStatus(path, 'win32')).toMatchObject({
+      linkedinAccessTokenConfigured: true,
+      linkedinAccessTokenExpiresAt: '2026-10-15T00:00:00.000Z',
+    });
+  });
+
+  it('treats a malformed local store as unconfigured without preventing server startup', () => {
+    const path = createStore({ version: 1, freelancerAccessToken: 'not encrypted' });
+    writeFileSync(path, '{ invalid json', 'utf8');
+
+    expect(readCredentialStatus(path, 'win32')).toEqual({
+      freelancerAccessTokenConfigured: false,
+      linkedinClientConfigured: false,
+      linkedinAccessTokenConfigured: false,
+      linkedinAccessTokenExpiresAt: null,
     });
   });
 });

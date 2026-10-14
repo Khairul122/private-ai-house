@@ -32,9 +32,9 @@ function formatDate(value: string) {
 
 function StateLabel({ state }: { state: string }) {
   const labels: Record<string, string> = {
-    active: 'Aktif', paused: 'Dijeda', draft: 'Belum aktif', recorded: 'Tercatat', blocked: 'Dilewati', failed: 'Gagal',
+    active: 'Aktif', connected: 'Terhubung', supported: 'Didukung API', unverified: 'Belum diuji', invalid: 'Token tidak valid', unavailable: 'Tidak dapat diperiksa', expired: 'Kedaluwarsa', paused: 'Dijeda', draft: 'Belum aktif', recorded: 'Tercatat', blocked: 'Dilewati', failed: 'Gagal',
     new: 'Baru', scored: 'Dinilai', draft_ready: 'Draf siap', policy_check: 'Pemeriksaan kebijakan', submitted: 'Terkirim',
-    in_conversation: 'Percakapan', won: 'Berhasil', lost: 'Tidak lanjut', skipped: 'Dilewati', expired: 'Kedaluwarsa',
+    in_conversation: 'Percakapan', won: 'Berhasil', lost: 'Tidak lanjut', skipped: 'Dilewati',
     reconciliation_required: 'Perlu rekonsiliasi', error: 'Kesalahan',
   };
   return <span className={`state-label state-${state}`}>{labels[state] ?? state}</span>;
@@ -508,16 +508,72 @@ function ActivityPage() {
 }
 
 function CapabilitiesPage() {
+  const queryClient = useQueryClient();
+  const [notice, setNotice] = useState(() => {
+    const oauthResult = new URLSearchParams(window.location.search).get('linkedin');
+    return oauthResult === 'connected'
+      ? 'LinkedIn terhubung. Profil ringan berhasil diverifikasi.'
+      : oauthResult === 'error' ? 'LinkedIn belum terhubung. Periksa konfigurasi aplikasi dan coba lagi.' : '';
+  });
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.has('linkedin')) {
+      url.searchParams.delete('linkedin');
+      window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    }
+  }, []);
   const query = useQuery({ queryKey: ['capabilities'], queryFn: () => api<{
     marketplace: Array<{ operation: string; status: string; evidence: string }>;
-    freelancerCredentials: { accessTokenConfigured: boolean };
+    freelancerCredentials: { accessTokenConfigured: boolean; verificationStatus: string; readProfile: boolean; readProjects: boolean };
     github: { read: string; scope: string; tokenConfigured: boolean };
-    linkedin: { read: string; reason: string; clientConfigured: boolean };
+    linkedin: { read: string; reason: string; redirectUri: string | null; clientConfigured: boolean; authorized: boolean; accessTokenExpiresAt: string | null };
     opencode: { draft: string; active: boolean; reason: string };
   }>('/capabilities') });
+  const verifyFreelancer = useMutation({
+    mutationFn: () => api<{ message: string }>('/freelancer/verify', jsonRequest('POST')),
+    onSuccess: async (result) => { setNotice(result.message); await queryClient.invalidateQueries({ queryKey: ['capabilities'] }); },
+    onError: (error: Error) => setNotice(error.message),
+  });
+  const connectLinkedIn = useMutation({
+    mutationFn: () => api<{ authorizationUrl: string }>('/linkedin/connect', jsonRequest('POST')),
+    onSuccess: (result) => {
+      const destination = new URL(result.authorizationUrl);
+      if (destination.origin !== 'https://www.linkedin.com') {
+        setNotice('Alamat otorisasi LinkedIn ditolak karena bukan domain resmi.');
+        return;
+      }
+      window.location.assign(destination.toString());
+    },
+    onError: (error: Error) => setNotice(error.message),
+  });
+  const disconnectLinkedIn = useMutation({
+    mutationFn: () => api<{ disconnected: boolean }>('/linkedin/disconnect', jsonRequest('POST')),
+    onSuccess: async () => { setNotice('Token LinkedIn dihapus dari perangkat ini. Cabut izin aplikasi dari pengaturan LinkedIn bila akses juga perlu dicabut di sana.'); await queryClient.invalidateQueries({ queryKey: ['capabilities'] }); },
+    onError: (error: Error) => setNotice(error.message),
+  });
   if (query.isPending) return <LoadingPanel />;
   if (query.isError) return <ErrorNotice message="Status integrasi belum dapat dimuat." onRetry={() => query.refetch()} />;
-  return <><PageIntro eyebrow="Koneksi dan capability" title="Status provider sesuai bukti yang tersedia." description="Aplikasi tidak menganggap endpoint, scope, sandbox, atau izin tersedia sebelum diverifikasi." /><div className="capability-grid"><section className="form-card"><div className="section-heading"><div><p className="eyebrow">Freelancer.com</p><h2>Capability marketplace</h2></div></div>{query.data.marketplace.map((item) => <div className="capability-row" key={item.operation}><div><strong>{item.operation.replaceAll('_', ' ')}</strong><p>{item.evidence}</p></div><StateLabel state={item.status} /></div>)}<p className="provider-limit">Token API {query.data.freelancerCredentials.accessTokenConfigured ? 'tersimpan terenkripsi untuk akun Windows ini' : 'belum diatur'}. Semua request marketplace tetap nonaktif sampai capability API diverifikasi.</p></section><section className="form-card"><div className="section-heading"><div><p className="eyebrow">Sumber lain</p><h2>Knowledge dan drafting</h2></div></div><div className="capability-row"><div><strong>GitHub</strong><p>{query.data.github.scope}; mode read-only. Token server {query.data.github.tokenConfigured ? 'diatur' : 'belum diatur'}.</p></div><StateLabel state="active" /></div><div className="capability-row"><div><strong>LinkedIn</strong><p>{query.data.linkedin.reason} Kredensial aplikasi {query.data.linkedin.clientConfigured ? 'tersimpan terenkripsi untuk akun Windows ini' : 'belum diatur'}; OAuth/API belum aktif.</p></div><StateLabel state="draft" /></div><div className="capability-row"><div><strong>OpenCode CLI</strong><p>{query.data.opencode.reason}</p></div><StateLabel state="draft" /></div></section></div></>;
+  return <>
+    <PageIntro eyebrow="Koneksi dan capability" title="Status provider sesuai bukti yang tersedia." description="Koneksi diperiksa dengan operasi baca-saja. Aksi tulis tetap mati sampai endpoint dan policy-nya diverifikasi." />
+    {notice && <div className="notice notice-success" role="status">{notice}</div>}
+    <div className="capability-grid">
+      <section className="form-card">
+        <div className="section-heading"><div><p className="eyebrow">Freelancer.com</p><h2>Capability marketplace</h2></div><StateLabel state={query.data.freelancerCredentials.verificationStatus} /></div>
+        {query.data.marketplace.map((item) => <div className="capability-row" key={item.operation}><div><strong>{item.operation.replaceAll('_', ' ')}</strong><p>{item.evidence}</p></div><StateLabel state={item.status} /></div>)}
+        <p className="provider-limit">Token API {query.data.freelancerCredentials.accessTokenConfigured ? 'tersimpan terenkripsi untuk akun Windows ini' : 'belum diatur'}. Pemeriksaan hanya membaca profil dan satu hasil pencarian proyek.</p>
+        <button type="button" className="button button-secondary" disabled={!query.data.freelancerCredentials.accessTokenConfigured || verifyFreelancer.isPending} onClick={() => verifyFreelancer.mutate()}>{verifyFreelancer.isPending ? 'Memeriksa koneksi…' : 'Periksa koneksi Freelancer'}</button>
+      </section>
+      <section className="form-card">
+        <div className="section-heading"><div><p className="eyebrow">Sumber lain</p><h2>Knowledge dan drafting</h2></div></div>
+        <div className="capability-row"><div><strong>GitHub</strong><p>{query.data.github.scope}; mode read-only. Token server {query.data.github.tokenConfigured ? 'diatur' : 'belum diatur'}.</p></div><StateLabel state="active" /></div>
+        <div className="capability-row"><div><strong>LinkedIn</strong><p>{query.data.linkedin.reason} Kredensial aplikasi {query.data.linkedin.clientConfigured ? 'sudah diatur untuk server ini' : 'belum diatur'}; {query.data.linkedin.authorized ? 'izin anggota tersimpan' : 'consent anggota belum diberikan'}{query.data.linkedin.accessTokenExpiresAt ? `; token berlaku hingga ${formatDate(query.data.linkedin.accessTokenExpiresAt)}` : ''}.</p>{query.data.linkedin.redirectUri && <p>URL callback yang harus terdaftar di LinkedIn Developer Portal: <code>{query.data.linkedin.redirectUri}</code></p>}</div><StateLabel state={query.data.linkedin.authorized ? 'connected' : query.data.linkedin.accessTokenExpiresAt ? 'expired' : query.data.linkedin.clientConfigured ? 'unverified' : 'draft'} /></div>
+        {query.data.linkedin.authorized
+          ? <button type="button" className="button button-secondary" disabled={disconnectLinkedIn.isPending} onClick={() => disconnectLinkedIn.mutate()}>{disconnectLinkedIn.isPending ? 'Menghapus…' : 'Hapus token LinkedIn lokal'}</button>
+          : <button type="button" className="button button-secondary" disabled={!query.data.linkedin.clientConfigured || connectLinkedIn.isPending} onClick={() => connectLinkedIn.mutate()}>{connectLinkedIn.isPending ? 'Menyiapkan OAuth…' : 'Hubungkan LinkedIn'}</button>}
+        <div className="capability-row"><div><strong>OpenCode CLI</strong><p>{query.data.opencode.reason}</p></div><StateLabel state="draft" /></div>
+      </section>
+    </div>
+  </>;
 }
 
 function OfficePage() {
