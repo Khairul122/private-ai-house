@@ -23,6 +23,22 @@ describe('GitHubReadAdapter', () => {
     expect(JSON.stringify(fetcher.mock.calls)).not.toContain('Authorization');
   });
 
+  it('lists owned repositories across pages, skipping forks and archived ones', async () => {
+    const page1 = Array.from({ length: 100 }, (_, index) => ({ full_name: `me/repo-${index}`, fork: index === 1, archived: index === 2 }));
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(page1))
+      .mockResolvedValueOnce(jsonResponse([{ full_name: 'me/last', fork: false, archived: false }]));
+    const adapter = new GitHubReadAdapter({ token: 'token-value-1234567890', fetcher: fetcher as typeof fetch });
+
+    const names = await adapter.listOwnRepositories(200);
+
+    expect(names).toHaveLength(99);
+    expect(names).not.toContain('me/repo-1');
+    expect(names).not.toContain('me/repo-2');
+    expect(names.at(-1)).toBe('me/last');
+    expect(String(fetcher.mock.calls[1]![0])).toContain('page=2');
+  });
+
   it('fails closed for truncated trees, unauthorized repositories, and invalid repo names', async () => {
     const truncated = new GitHubReadAdapter({ fetcher: vi.fn()
       .mockResolvedValueOnce(jsonResponse({ default_branch: 'main' }))

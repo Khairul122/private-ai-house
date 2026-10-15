@@ -181,8 +181,9 @@ export class FreelancerAutopilot {
       }
       const repository = this.dependencies.repository;
       const currentProfile = repository.getProfile();
-      const profile = seedLocalProfile(remote, jobs, currentProfile);
-      repository.saveProfile(profile);
+      // Seed from Freelancer only once; afterwards the owner's saved profile wins over the remote one.
+      const profile = currentProfile.specializations.length ? currentProfile : seedLocalProfile(remote, jobs, currentProfile);
+      if (profile !== currentProfile) repository.saveProfile(profile);
       const currentPolicy = repository.getPolicy();
       if (currentPolicy.state === 'paused') {
         this.status = { ...this.status, state: 'paused', lastMessage: 'Automasi dijeda melalui kill switch.' };

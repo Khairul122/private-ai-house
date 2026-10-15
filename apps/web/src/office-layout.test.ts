@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Autopilot } from './api.js';
-import { dayPhase, planPath, spotsFor, SPINE_X } from './office-layout.js';
+import { BOARD_SIZE, BOARDS, dayPhase, FLOOR, planPath, spotsFor, SPINE_X } from './office-layout.js';
 import { deriveOfficeAgents } from './office-state.js';
 
 const autopilot = (cycleInProgress: boolean): Autopilot => ({
@@ -30,5 +30,16 @@ describe('office layout', () => {
   it('labels the time of day from the clock', () => {
     expect(dayPhase(12).label).toBe('Siang');
     expect(dayPhase(22).night).toBe(true);
+  });
+
+  it('mounts every board inside its wall without overlap and with a unique route', () => {
+    expect(new Set(BOARDS.map((board) => board.route)).size).toBe(BOARDS.length);
+    for (const wall of [0, Math.PI / 2]) {
+      const along = BOARDS.filter((board) => board.rotY === wall).map((board) => (wall === 0 ? board.x : board.z)).sort((a, b) => a - b);
+      along.forEach((value, index) => { if (index) expect(value - along[index - 1]!).toBeGreaterThan(BOARD_SIZE.w); });
+      const [min, max] = wall === 0 ? [FLOOR.minX, FLOOR.maxX] : [FLOOR.minZ, FLOOR.maxZ];
+      expect(along[0]! - BOARD_SIZE.w / 2).toBeGreaterThan(min);
+      expect(along.at(-1)! + BOARD_SIZE.w / 2).toBeLessThan(max);
+    }
   });
 });

@@ -112,6 +112,8 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   const now = options.clock ?? (() => new Date());
   const drafting = options.drafting ?? new UnavailableDraftingAdapter();
   const draftingMode = options.drafting ? options.draftingMode ?? 'fixture' : 'disabled';
+  // Lets the office show the Hermes lead as working only while a draft request is actually running.
+  let draftsInProgress = 0;
   const app = Fastify({ logger: false, bodyLimit: 2_500_000, trustProxy: false });
   let freelancerVerification: FreelancerVerification | null = null;
   const freelancerSandboxWriteChecks = new Map<FreelancerSandboxWriteOperation, FreelancerSandboxWriteCheck>();
@@ -307,7 +309,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       reason: 'Hanya profil OIDC ringan yang diminta. Produk OIDC LinkedIn harus disetujui dan URL callback yang ditampilkan harus diterima di Developer Portal; akses profil lengkap tetap tidak tersedia.',
     },
     hermes: {
-      draft: 'optional', active: draftingMode === 'hermes',
+      draft: 'optional', active: draftingMode === 'hermes', draftsInProgress,
       reason: draftingMode === 'hermes'
         ? 'Data proyek terpilih, fakta profil yang diberikan, dan hingga empat potongan bukti lokal dikirim ke profil Hermes yang dikonfigurasi; kredensial marketplace tidak disertakan.'
         : options.draftingReason ?? 'Hermes belum aktif. Draf AI tidak dibuat sampai profil Hermes dikonfigurasi dan persetujuan pemrosesan data diberikan.',
@@ -606,6 +608,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     const profile = repository.getProfile();
     const score = assessProject(project, profile.specializations).score;
     let generated;
+    draftsInProgress += 1;
     try {
       generated = await drafting.draftBid({
         project,
@@ -617,6 +620,8 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     } catch {
       repository.appendAudit({ type: 'bid.draft_failed', resourceId: project.id, status: 'failed', reason: 'Adapter drafting gagal atau mengembalikan output yang tidak valid. Tidak ada tindakan marketplace.', policyVersion: repository.getPolicy().version, payloadHash: null });
       return reply.code(503).send({ error: 'Draf tidak dapat dibuat saat ini. Tidak ada tindakan marketplace yang dijalankan.' });
+    } finally {
+      draftsInProgress -= 1;
     }
     const draft: BidDraft = {
       id: createId('draft'), projectId: project.id, ...generated, currency: project.currency,
@@ -688,7 +693,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
         openProjects: projects.filter((project) => project.status === 'open').length,
         drafts: projects.filter((project) => repository.getLatestDraft(project.id)).length,
         submittedBids: projects.filter((project) => project.pipelineStatus === 'submitted').length,
-        policySkips: repository.listAudit(200).filter((event) => event.status === 'blocked').length,
+        policySkips: repository.countAuditByStatus('blocked'),
         knowledgeSources: sources.length,
       },
       policy: { state: policy.state, version: policy.version, simulationOnly: policy.simulationOnly },
@@ -731,32 +736,64 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     repository.appendAudit({ type: 'knowledge.imported', resourceId: sourceId, status: 'recorded', reason: `${chunks.length} potongan teks ditambahkan; ${rejected.length} file dikecualikan.`, policyVersion: repository.getPolicy().version, payloadHash: null });
     return reply.code(201).send({ source, chunks: chunks.length, rejected });
   });
+  const githubAdapter = () => {
+    const token = options.getGitHubToken?.() ?? options.githubToken;
+    return new GitHubReadAdapter({ ...(token ? { token } : {}), ...(options.fetcher ? { fetcher: options.fetcher } : {}) });
+  };
+  // Re-syncing a repository replaces its previous source instead of indexing it twice.
+  const syncGitHubRepository = async (adapter: GitHubReadAdapter, name: string) => {
+    const result = await adapter.readRepository(name);
+    const sourceId = createId('source');
+    const updatedAt = now().toISOString();
+    const repositoryUrl = `https://github.com/${result.repository}`;
+    const chunks = [];
+    let rejected = 0;
+    for (const file of result.files) {
+      const prepared = prepareKnowledgeFile({ sourceId, provider: 'github', label: result.repository, referenceUrl: repositoryUrl, sourceRef: result.ref, updatedAt, path: file.path, content: file.content });
+      if (prepared.ok) chunks.push(...prepared.chunks);
+      else rejected += 1;
+    }
+    if (!chunks.length) return { result, chunks: 0, rejected, source: null };
+    for (const old of repository.listKnowledgeSources()) if (old.provider === 'github' && old.label === result.repository) repository.deleteKnowledgeSource(old.id);
+    const source = repository.createKnowledgeSource({ id: sourceId, provider: 'github', label: result.repository, referenceUrl: repositoryUrl, updatedAt }, chunks);
+    repository.appendAudit({ type: 'knowledge.github_sync', resourceId: sourceId, status: 'recorded', reason: `${result.repository}: ${result.fetched} file dibaca pada ${result.ref}; ${rejected + result.skipped} file dilewati.`, policyVersion: repository.getPolicy().version, payloadHash: null });
+    return { result, chunks: chunks.length, rejected, source };
+  };
+
   app.post('/api/knowledge/github/sync', async (request, reply) => {
     const parsed = parseBody(githubSyncSchema, request.body);
     if ('issues' in parsed) return reply.code(400).send({ error: 'Repositori tidak valid.', issues: parsed.issues });
-    const token = options.getGitHubToken?.() ?? options.githubToken;
-    const adapter = new GitHubReadAdapter({ ...(token ? { token } : {}), ...(options.fetcher ? { fetcher: options.fetcher } : {}) });
     try {
-      const result = await adapter.readRepository(parsed.value.repository);
-      const sourceId = createId('source');
-      const updatedAt = now().toISOString();
-      const repositoryUrl = `https://github.com/${result.repository}`;
-      const chunks = [];
-      let rejected = 0;
-      for (const file of result.files) {
-        const prepared = prepareKnowledgeFile({ sourceId, provider: 'github', label: result.repository, referenceUrl: repositoryUrl, sourceRef: result.ref, updatedAt, path: file.path, content: file.content });
-        if (prepared.ok) chunks.push(...prepared.chunks);
-        else rejected += 1;
-      }
-      if (!chunks.length) return reply.code(422).send({ error: 'Tidak ada file yang lolos pemeriksaan sebelum indeks.', filesSeen: result.fetched, rejected });
-      const source = repository.createKnowledgeSource({ id: sourceId, provider: 'github', label: result.repository, referenceUrl: repositoryUrl, updatedAt }, chunks);
-      repository.appendAudit({ type: 'knowledge.github_sync', resourceId: sourceId, status: 'recorded', reason: `${result.fetched} file dibaca pada ${result.ref}; ${rejected + result.skipped} file dilewati.`, policyVersion: repository.getPolicy().version, payloadHash: null });
-      return reply.code(201).send({ source, branch: result.branch, ref: result.ref, filesSeen: result.fetched, chunks: chunks.length, rejected: rejected + result.skipped, complete: result.skipped === 0 });
+      const { result, chunks, rejected, source } = await syncGitHubRepository(githubAdapter(), parsed.value.repository);
+      if (!source) return reply.code(422).send({ error: 'Tidak ada file yang lolos pemeriksaan sebelum indeks.', filesSeen: result.fetched, rejected });
+      return reply.code(201).send({ source, branch: result.branch, ref: result.ref, filesSeen: result.fetched, chunks, rejected: rejected + result.skipped, complete: result.skipped === 0 });
     } catch (error) {
       if (error instanceof GitHubReadError) return reply.code(error.code === 'permission_denied' ? 403 : error.code === 'repository_not_found' ? 404 : 502).send({ error: error.message, code: error.code });
       return reply.code(502).send({ error: 'Sinkronisasi GitHub gagal; tidak ada data yang ditambahkan.' });
     }
   });
+
+  app.post('/api/knowledge/github/sync-all', async (_request, reply) => {
+    if (!(options.getGitHubToken?.() ?? options.githubToken)) return reply.code(400).send({ error: 'Token GitHub belum diatur; daftar repositori milik Anda tidak dapat dibaca.' });
+    const adapter = githubAdapter();
+    let names: string[];
+    try {
+      names = await adapter.listOwnRepositories();
+    } catch (error) {
+      return reply.code(error instanceof GitHubReadError && error.code === 'permission_denied' ? 403 : 502).send({ error: error instanceof Error ? error.message : 'Daftar repositori tidak dapat dibaca.' });
+    }
+    const repositories: Array<{ repository: string; chunks: number; error: string | null }> = [];
+    for (const name of names) {
+      try {
+        const { chunks } = await syncGitHubRepository(adapter, name);
+        repositories.push({ repository: name, chunks, error: chunks ? null : 'Tidak ada file teks yang lolos pemeriksaan.' });
+      } catch (error) {
+        repositories.push({ repository: name, chunks: 0, error: error instanceof Error ? error.message : 'Gagal dibaca.' });
+      }
+    }
+    return { repositories, synced: repositories.filter((item) => item.chunks > 0).length, chunks: repositories.reduce((total, item) => total + item.chunks, 0) };
+  });
+
   app.post('/api/knowledge/search', async (request, reply) => {
     const parsed = parseBody(knowledgeSearchSchema, request.body);
     if ('issues' in parsed) return reply.code(400).send({ error: 'Pencarian tidak valid.', issues: parsed.issues });

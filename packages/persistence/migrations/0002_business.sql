@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS bid_outcomes (
+CREATE TABLE IF NOT EXISTS bid_results (
   project_id TEXT PRIMARY KEY,
   bid_id TEXT NOT NULL,
   amount REAL,

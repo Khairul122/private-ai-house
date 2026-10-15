@@ -2,10 +2,12 @@ import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { FLOOR, PODS, POD_SIZE, planPath, spotsFor, ZONES, type dayPhase, type P2, type Spot } from './office-layout.js';
+import { BOARD_SIZE, BOARDS, FLOOR, LEAD_DESK, LEAD_ID, PODS, POD_SIZE, planPath, spotsFor, ZONES, type BoardId, type BoardSlot, type dayPhase, type P2, type Spot } from './office-layout.js';
 import { STATE_COLORS, type OfficeAgent } from './office-state.js';
 
-export type CameraCommand = { kind: 'overview' | 'zone' | 'agent'; id?: string; n: number };
+export type CameraCommand = { kind: 'overview' | 'zone' | 'agent' | 'board'; id?: string; n: number };
+/** Live summary drawn on a wall board; lines come from real API data. */
+export type BoardContent = { id: BoardId; title: string; lines: string[]; accent: string; alert?: boolean };
 type Phase = ReturnType<typeof dayPhase>;
 type V3 = [number, number, number];
 
@@ -19,6 +21,8 @@ export type VisualOfficeProps = {
   tour: boolean;
   phase: Phase;
   reducedMotion: boolean;
+  boards: BoardContent[];
+  onOpenBoard: (id: BoardId) => void;
 };
 
 const GLASS = '#dff1f7';
@@ -178,6 +182,22 @@ function Pantry() {
   </group>;
 }
 
+function LeadDesk({ active }: { active: boolean }) {
+  const screen = active ? { c: '#8fe3b0', e: '#5ad08b' } : { c: '#2a3038', e: undefined };
+  return <group position={[LEAD_DESK.x, 0, LEAD_DESK.z]}>
+    <mesh position={[0, 0.02, -0.4]} receiveShadow><cylinderGeometry args={[2.2, 2.2, 0.04, 28]} /><meshLambertMaterial color="#343a40" transparent opacity={0.18} /></mesh>
+    <B p={[0, 0.75, 0]} s={[2.8, 0.1, 1]} c="#5b4636" />
+    {[-1.25, 1.25].map((x) => <B key={x} p={[x, 0.37, 0]} s={[0.12, 0.74, 0.9]} c="#3d2f25" />)}
+    {[-0.55, 0.55].map((x) => <group key={x}>
+      <B p={[x, 1.25, 0.25]} s={[0.95, 0.6, 0.06]} c="#1d2228" />
+      <B p={[x, 1.25, 0.215]} s={[0.85, 0.5, 0.01]} c={screen.c} e={screen.e} />
+    </group>)}
+    <Chair p={[0, 0, -0.95]} c="#343a40" />
+    <Plant p={[1.9, 0, -0.6]} scale={0.9} />
+    <Label text="Lead Agent · Hermes" p={[0, 2.1, 0.3]} />
+  </group>;
+}
+
 function Lobby() {
   return <group>
     <mesh position={[-13.5, 0.02, 10.25]} receiveShadow><boxGeometry args={[11, 0.04, 5]} /><meshLambertMaterial color="#ece5d6" /></mesh>
@@ -214,14 +234,14 @@ function Building({ agents, phase, selectedId }: { agents: OfficeAgent[]; phase:
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, -0.05, cz]} receiveShadow><planeGeometry args={[140, 140]} /><meshLambertMaterial color={phase.grass} /></mesh>
     <mesh position={[cx, -0.02, cz]} receiveShadow><boxGeometry args={[w, 0.06, d]} /><meshLambertMaterial color={phase.night ? '#cfc8b8' : '#ece6d8'} /></mesh>
     <mesh position={[1.5, 0.015, 0]} receiveShadow><boxGeometry args={[1.6, 0.02, d - 0.4]} /><meshLambertMaterial color="#f7f4ec" /></mesh>
-    <B p={[cx, 1.4, minZ]} s={[w, 2.8, 0.25]} c="#f4f2ec" />
-    <B p={[minX, 1.4, cz]} s={[0.25, 2.8, d]} c="#f4f2ec" />
-    {[-15, -9, -3, 3, 9].map((x) => <B key={x} p={[x, 1.7, minZ + 0.14]} s={[3.2, 1.2, 0.04]} c={phase.night ? '#3a4c66' : '#a9d4ea'} shadow={false} />)}
+    <B p={[cx, 2.15, minZ]} s={[w, 4.3, 0.25]} c="#f4f2ec" />
+    <B p={[minX, 2.15, cz]} s={[0.25, 4.3, d]} c="#f4f2ec" />
     <B p={[cx, 0.2, maxZ]} s={[w, 0.4, 0.2]} c="#f4f2ec" />
     <B p={[maxX, 0.2, cz]} s={[0.2, 0.4, d]} c="#f4f2ec" />
     {PODS.map((pod) => <Pod key={pod.id} x={pod.x} z={pod.z} color={pod.color} name={pod.name} screenOn={working.has(pod.id)} night={phase.night} showLabel={pod.id !== selectedId} />)}
     <MeetingRoom active={agents.some((agent) => agent.room === 'meeting')} />
     <Lounge /><Pantry /><Lobby />
+    <LeadDesk active={agents.some((agent) => agent.id === LEAD_ID && agent.room === 'workspace')} />
     {ZONES.filter((zone) => zone.id !== 'workspace').map((zone) => <Label key={zone.id} text={zone.label} p={[zone.x, 2.4, zone.z - zone.d / 2 + 0.3]} />)}
     {[[-24, 0, -8], [-25, 0, 6], [19, 0, -10], [20, 0, 4], [-8, 0, 18], [6, 0, 19], [18, 0, 16]].map((p, i) => <Tree key={i} p={p as V3} s={0.9 + (i % 3) * 0.2} />)}
     {[[-6, 0, 14.5], [3, 0, 14.5], [15.5, 0, -2], [15.5, 0, 8]].map((p, i) => <LampPost key={i} p={p as V3} night={phase.night} />)}
@@ -329,6 +349,54 @@ function Agent({ agent, index, spot, selected, hovered, onSelect, onHover, reduc
   </group>;
 }
 
+/** Title band, one large headline value, and one short detail line; sized to stay legible from the overview camera. */
+function boardTexture(content: BoardContent) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1024;
+  canvas.height = Math.round(1024 * BOARD_SIZE.h / BOARD_SIZE.w);
+  const ctx = canvas.getContext('2d')!;
+  const fit = (text: string, max: number) => {
+    let value = text;
+    while (ctx.measureText(value).width > max && value.length > 4) value = `${value.slice(0, -2)}…`;
+    return value;
+  };
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = content.accent;
+  ctx.fillRect(0, 0, canvas.width, 104);
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '700 60px "Segoe UI", Arial, sans-serif';
+  ctx.fillText(fit(content.title, canvas.width - 120), 36, 54);
+  if (content.alert) { ctx.beginPath(); ctx.arc(canvas.width - 52, 52, 20, 0, Math.PI * 2); ctx.fillStyle = '#ffd43b'; ctx.fill(); }
+  const [headline = '', ...details] = content.lines;
+  ctx.fillStyle = '#1f2933';
+  ctx.font = '700 84px "Segoe UI", Arial, sans-serif';
+  ctx.fillText(fit(headline, canvas.width - 72), 36, 196);
+  ctx.fillStyle = '#4a5560';
+  ctx.font = '500 46px "Segoe UI", Arial, sans-serif';
+  ctx.fillText(fit(details.join(' · '), canvas.width - 72), 36, 296);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
+  return texture;
+}
+
+function Board({ slot, content, hovered, onHover, onOpen }: { slot: BoardSlot; content: BoardContent; hovered: boolean; onHover: (id: BoardId | null) => void; onOpen: (id: BoardId) => void }) {
+  const key = `${content.title}|${content.accent}|${content.alert ? 1 : 0}|${content.lines.join('|')}`;
+  // key covers every field the texture draws, so content objects can be rebuilt each render.
+  const texture = useMemo(() => boardTexture(content), [key]);
+  useEffect(() => () => texture.dispose(), [texture]);
+  const { w, h } = BOARD_SIZE;
+  return <group position={[slot.x, slot.y, slot.z]} rotation={[0, slot.rotY, 0]} scale={hovered ? 1.04 : 1}
+    onClick={(event) => { event.stopPropagation(); onOpen(slot.id); }}
+    onPointerOver={(event) => { event.stopPropagation(); onHover(slot.id); }}
+    onPointerOut={() => onHover(null)}>
+    <B p={[0, 0, -0.06]} s={[w + 0.16, h + 0.16, 0.06]} c={hovered ? content.accent : '#2b2f36'} />
+    <mesh position={[0, 0, 0.01]}><planeGeometry args={[w, h]} /><meshBasicMaterial map={texture} toneMapped={false} /></mesh>
+  </group>;
+}
+
 function zoneTarget(id: string | undefined) {
   const zone = ZONES.find((item) => item.id === id);
   return zone ? { x: zone.x, z: zone.z, dist: Math.max(zone.w, zone.d) * 1.35 + 6 } : null;
@@ -371,7 +439,15 @@ function CameraRig({ command, view, tour, spots, reducedMotion }: { command: Cam
     }
     if (command.kind === 'zone') target.dist *= fit;
     const direction = view === 'top' ? new THREE.Vector3(0, 1, 0.001) : new THREE.Vector3(0.55, 0.95, 1).normalize();
-    const goal = { target: new THREE.Vector3(target.x, 0, target.z), position: new THREE.Vector3(target.x, 0, target.z).addScaledVector(direction, target.dist) };
+    let goal = { target: new THREE.Vector3(target.x, 0, target.z), position: new THREE.Vector3(target.x, 0, target.z).addScaledVector(direction, target.dist) };
+    const board = command.kind === 'board' && view === '3d' ? BOARDS.find((slot) => slot.id === command.id) : undefined;
+    if (board) {
+      // Face the board square-on from slightly above so its text is readable.
+      // Boards open alongside a card on the right, so aim right of the board to keep it in the free left area.
+      const [nx, nz] = board.normal;
+      const focus = new THREE.Vector3(board.x + nz * 4.5, board.y, board.z - nx * 4.5);
+      goal = { target: focus, position: focus.clone().add(new THREE.Vector3(nx * 9 * fit, 2.5, nz * 9 * fit)) };
+    }
     if (reducedMotion) { controls.target.copy(goal.target); camera.position.copy(goal.position); fly.current = null; }
     else fly.current = goal;
     // spots intentionally omitted: re-run only on explicit commands, not on every state poll.
@@ -405,13 +481,15 @@ function Lights({ phase }: { phase: Phase }) {
   </>;
 }
 
-export default function VisualOffice({ agents, ready, selectedId, onSelect, command, view, tour, phase, reducedMotion }: VisualOfficeProps) {
+export default function VisualOffice({ agents, ready, selectedId, onSelect, command, view, tour, phase, reducedMotion, boards, onOpenBoard }: VisualOfficeProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [hoveredBoard, setHoveredBoard] = useState<BoardId | null>(null);
   const spots = useMemo(() => spotsFor(agents), [agents]);
-  useEffect(() => { document.body.style.cursor = hoveredId ? 'pointer' : ''; return () => { document.body.style.cursor = ''; }; }, [hoveredId]);
+  useEffect(() => { document.body.style.cursor = hoveredId || hoveredBoard ? 'pointer' : ''; return () => { document.body.style.cursor = ''; }; }, [hoveredId, hoveredBoard]);
   return <Canvas shadows dpr={[1, 2]} camera={{ position: [20, 34, 38], fov: 38, near: 0.5, far: 400 }} onPointerMissed={() => onSelect(null)}>
     <Lights phase={phase} />
     <Building agents={agents} phase={phase} selectedId={selectedId} />
+    {BOARDS.map((slot) => { const content = boards.find((board) => board.id === slot.id); return content ? <Board key={slot.id} slot={slot} content={content} hovered={hoveredBoard === slot.id} onHover={setHoveredBoard} onOpen={onOpenBoard} /> : null; })}
     {ready && agents.map((agent, index) => {
       const spot = spots.get(agent.id);
       return spot ? <Agent key={agent.id} agent={agent} index={index} spot={spot} selected={agent.id === selectedId} hovered={agent.id === hoveredId}

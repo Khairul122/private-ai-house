@@ -4,6 +4,7 @@ const API_ROOT = 'https://api.github.com';
 const API_VERSION = '2026-03-10';
 const MAX_REPOSITORY_FILES = 100;
 const MAX_FILE_BYTES = 100_000;
+const MAX_OWN_REPOSITORIES = 50;
 
 export type GitHubFile = { path: string; content: string };
 export type GitHubReadResult = { repository: string; branch: string; ref: string; files: GitHubFile[]; fetched: number; skipped: number };
@@ -82,6 +83,20 @@ export class GitHubReadAdapter {
     if (response.status === 429) throw new GitHubReadError('rate_limited', 'GitHub membatasi permintaan. Sinkronisasi dihentikan tanpa retry otomatis.');
     if (!response.ok) throw new GitHubReadError('provider_error', `GitHub mengembalikan status ${response.status}.`);
     return response;
+  }
+
+  /** Repositories owned by the token's user; forks and archived repos are skipped as they are not the owner's current work. */
+  async listOwnRepositories(limit = MAX_OWN_REPOSITORIES): Promise<string[]> {
+    const names: string[] = [];
+    for (let page = 1; names.length < limit; page += 1) {
+      const rows = await this.getJson(`${API_ROOT}/user/repos?affiliation=owner&sort=pushed&per_page=100&page=${page}`);
+      if (!Array.isArray(rows)) throw new GitHubReadError('invalid_repository_response', 'GitHub tidak mengembalikan daftar repositori yang valid.');
+      for (const row of rows as Array<{ full_name?: unknown; fork?: unknown; archived?: unknown }>) {
+        if (typeof row.full_name === 'string' && row.fork !== true && row.archived !== true) names.push(row.full_name);
+      }
+      if (rows.length < 100) break;
+    }
+    return names.slice(0, limit);
   }
 
   private async getJson(url: string): Promise<unknown> {

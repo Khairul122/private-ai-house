@@ -233,20 +233,20 @@ export class WorkspaceRepository {
   }
 
   recordSubmittedBid(input: { projectId: string; bidId: string; amount: number | null; currency: string | null; submittedAt: string }): BidOutcome {
-    this.sqlite.prepare(`INSERT OR IGNORE INTO bid_outcomes (project_id, bid_id, amount, currency, submitted_at)
+    this.sqlite.prepare(`INSERT OR IGNORE INTO bid_results (project_id, bid_id, amount, currency, submitted_at)
       VALUES (?, ?, ?, ?, ?)`).run(input.projectId, input.bidId, input.amount, input.currency, input.submittedAt);
     return this.listBidOutcomes(input.projectId)[0]!;
   }
 
   listBidOutcomes(projectId?: string): BidOutcome[] {
     const query = projectId
-      ? 'SELECT project_id AS projectId, bid_id AS bidId, amount, currency, submitted_at AS submittedAt, award_status AS awardStatus, outcome, checked_at AS checkedAt FROM bid_outcomes WHERE project_id = ? ORDER BY submitted_at DESC'
-      : 'SELECT project_id AS projectId, bid_id AS bidId, amount, currency, submitted_at AS submittedAt, award_status AS awardStatus, outcome, checked_at AS checkedAt FROM bid_outcomes ORDER BY submitted_at DESC';
+      ? 'SELECT project_id AS projectId, bid_id AS bidId, amount, currency, submitted_at AS submittedAt, award_status AS awardStatus, outcome, checked_at AS checkedAt FROM bid_results WHERE project_id = ? ORDER BY submitted_at DESC'
+      : 'SELECT project_id AS projectId, bid_id AS bidId, amount, currency, submitted_at AS submittedAt, award_status AS awardStatus, outcome, checked_at AS checkedAt FROM bid_results ORDER BY submitted_at DESC';
     return (projectId ? this.sqlite.prepare(query).all(projectId) : this.sqlite.prepare(query).all()) as BidOutcome[];
   }
 
   updateBidOutcome(projectId: string, input: { awardStatus: string | null; outcome: string; checkedAt: string }): BidOutcome {
-    this.sqlite.prepare(`UPDATE bid_outcomes SET award_status = ?, outcome = ?, checked_at = ? WHERE project_id = ?`)
+    this.sqlite.prepare(`UPDATE bid_results SET award_status = ?, outcome = ?, checked_at = ? WHERE project_id = ?`)
       .run(input.awardStatus, input.outcome, input.checkedAt, projectId);
     return this.listBidOutcomes(projectId)[0]!;
   }
@@ -321,6 +321,10 @@ export class WorkspaceRepository {
     return this.sqlite.prepare(`SELECT reason, COUNT(*) AS total,
       SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS recent
       FROM audit_events WHERE type = 'autopilot.bid_skipped' GROUP BY reason ORDER BY total DESC`).all(sinceIso) as SkipReasonSummary[];
+  }
+
+  countAuditByStatus(status: AuditEvent['status']): number {
+    return (this.sqlite.prepare('SELECT COUNT(*) AS total FROM audit_events WHERE status = ?').get(status) as { total: number }).total;
   }
 
   hasAudit(type: string, resourceId: string): boolean {

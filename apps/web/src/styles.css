@@ -458,7 +458,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .vo3d-card p { display: flex; align-items: center; gap: 6px; margin: 4px 0 0; color: var(--vo-muted); font-size: 13px; }
 .vo3d-live { width: 10px; height: 10px; flex: none; border-radius: 50%; background: #2f9e44; box-shadow: 0 0 0 3px rgba(47, 158, 68, .2); }
 .vo3d-live.is-off { background: #868e96; box-shadow: none; }
-.vo3d-roster { top: 146px; left: 16px; display: grid; width: 250px; max-height: calc(100% - 240px); gap: 6px; overflow: auto; padding: 2px; border: 0; background: none; box-shadow: none; backdrop-filter: none; }
+.vo3d-roster { top: 214px; left: 16px; display: grid; width: 250px; max-height: calc(100% - 310px); gap: 6px; overflow: auto; padding: 2px; border: 0; background: none; box-shadow: none; backdrop-filter: none; }
 .vo3d-agent { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 50px; padding: 6px 12px 6px 6px; border: 1px solid var(--vo-line); border-radius: 999px; background: var(--vo-card); box-shadow: 0 3px 12px rgba(15, 23, 42, .1); text-align: left; transition: transform .15s ease; }
 .vo3d-agent:hover { transform: translateX(3px); }
 .vo3d-agent[aria-pressed='true'] { border-color: var(--vo-focus); box-shadow: 0 0 0 2px var(--vo-focus); }
@@ -469,7 +469,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .vo3d-agent small { display: flex; align-items: center; gap: 5px; color: var(--vo-muted); font-size: 11px; }
 .vo3d-agent > span:last-child { min-width: 0; }
 .vo3d-state-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; }
-.vo3d-roster-toggle { top: 146px; left: 16px; display: none; align-items: center; gap: 7px; min-height: 40px; padding: 0 14px; border-radius: 999px; font-weight: 600; }
+.vo3d-roster-toggle { top: 214px; left: 16px; display: none; align-items: center; gap: 7px; min-height: 40px; padding: 0 14px; border-radius: 999px; font-weight: 600; }
 .vo3d-tools { top: 16px; right: 16px; display: flex; gap: 8px; padding: 0; border: 0; background: none; box-shadow: none; backdrop-filter: none; }
 .vo3d-search { display: flex; align-items: center; gap: 8px; width: 270px; min-height: 44px; padding: 0 12px; border: 1px solid var(--vo-line); border-radius: 12px; background: var(--vo-card); box-shadow: 0 6px 24px rgba(15, 23, 42, .12); color: var(--vo-muted); }
 .vo3d-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: none; color: var(--vo-ink); }
@@ -514,8 +514,8 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
   .vo3d-card h1 { font-size: 16px; }
   .vo3d-tools { top: 12px; right: 12px; }
   .vo3d-search { display: none; }
-  .vo3d-roster-toggle { display: flex; top: 112px; left: 12px; }
-  .vo3d-roster { top: 160px; left: 12px; width: min(250px, calc(100% - 24px)); max-height: calc(100% - 300px); }
+  .vo3d-roster-toggle { display: flex; top: 172px; left: 12px; }
+  .vo3d-roster { top: 220px; left: 12px; width: min(250px, calc(100% - 24px)); max-height: calc(100% - 300px); }
   .vo3d-roster.is-collapsed { display: none; }
   .vo3d-dock { bottom: 70px; left: 12px; max-width: calc(100% - 24px); transform: none; }
   .vo3d-seg { right: auto; bottom: 12px; left: 12px; }
@@ -523,3 +523,57 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 }
 @media (max-height: 640px) { .vo3d-map { display: none; } }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Mission Control as a full-screen office: pages open as cards over the 3D floor. */
+.vo3d-app { position: fixed; inset: 0; z-index: 1; height: auto; border-radius: 0; }
+.vo3d-card .vo3d-warn { color: #b02a1a; font-weight: 600; }
+.vo3d-cta { display: inline-flex; margin-top: 8px; padding: 6px 12px; border-radius: 999px; background: var(--vo-accent); color: #fff; font-size: 12px; font-weight: 700; text-decoration: none; }
+.vo3d-cta:hover { opacity: .9; }
+.vo3d-kill { min-height: 44px; padding: 0 14px; border: 1px solid var(--vo-line); border-radius: 12px; background: var(--vo-card); box-shadow: 0 6px 24px rgba(15, 23, 42, .12); font-weight: 700; white-space: nowrap; }
+.vo3d-kill.is-danger { border-color: #c92a2a; background: #fff5f5; color: #c92a2a; }
+.vo3d-menu { position: relative; }
+.vo3d-menu > summary { list-style: none; cursor: pointer; }
+.vo3d-menu > summary::-webkit-details-marker { display: none; }
+.vo3d-menu[open] > summary { border-color: var(--vo-accent); background: var(--vo-accent); color: #fff; }
+.vo3d-menu nav { position: absolute; top: 52px; right: 0; display: grid; width: 230px; max-height: 70vh; overflow: auto; padding: 6px; border: 1px solid var(--vo-line); border-radius: 12px; background: #fff; box-shadow: 0 12px 32px rgba(15, 23, 42, .18); }
+.vo3d-menu nav a { padding: 9px 10px; border-radius: 8px; color: var(--vo-ink); font-size: 14px; font-weight: 600; text-decoration: none; }
+.vo3d-menu nav a:hover, .vo3d-menu nav a:focus-visible { background: rgba(31, 41, 51, .07); }
+.vo3d-toast { top: 76px; left: 50%; padding: 10px 14px; transform: translateX(-50%); color: #b02a1a; font-weight: 600; }
+.vo3d-sheet-backdrop { position: absolute; inset: 0; z-index: 5; display: flex; justify-content: flex-end; background: rgba(15, 23, 42, .18); }
+.vo3d-sheet { display: flex; width: min(980px, calc(100% - 32px)); margin: 16px; flex-direction: column; overflow: hidden; border-radius: 18px; background: var(--page); color: var(--ink); box-shadow: 0 24px 60px rgba(15, 23, 42, .3); animation: vo3d-sheet-in .22s ease-out; }
+.vo3d-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px 12px 24px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.vo3d-sheet-head h2 { margin: 0; font-family: var(--display); font-size: 22px; font-weight: 600; outline: none; }
+.vo3d-sheet-body.page-content { width: auto; flex: 1; overflow: auto; margin: 0; padding: 24px 28px 40px; }
+@keyframes vo3d-sheet-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+@media (max-width: 760px) {
+  .vo3d-sheet { width: 100%; margin: 0; border-radius: 0; }
+  .vo3d-sheet-body.page-content { padding: 18px 16px 32px; }
+  .vo3d-kill { padding: 0 10px; font-size: 12px; }
+}
+.vo3d-roster.is-collapsed { display: none; }
+
+/* Cards reuse the old pages; the card header already names the page, so keep page content compact. */
+.vo3d-sheet-body .page-intro { margin: 0 0 16px; }
+.vo3d-sheet-body .page-intro .eyebrow, .vo3d-sheet-body .page-intro h1 { display: none; }
+.vo3d-sheet-body .intro-copy { font-size: 13px; }
+.vo3d-sheet-body .section-heading h2, .vo3d-sheet-body .form-card h2, .vo3d-sheet-body .opportunity-row h2 { font-family: var(--body); font-size: 16px; font-weight: 700; letter-spacing: 0; }
+.vo3d-sheet-body .metric { min-height: 0; padding: 12px 14px; }
+.vo3d-sheet-body .metric strong, .vo3d-sheet-body .score-mark strong { font-size: 22px; }
+.vo3d-sheet-body .opportunity-row, .vo3d-sheet-body .form-card { padding: 14px; }
+.vo3d-sheet-body .form-card { margin-bottom: 12px; }
+
+/* Cards share the 3D overlay theme: cool neutrals, sans-serif type, rounded white surfaces. */
+.vo3d-sheet {
+  --page: #f3f5f7; --surface: #ffffff; --surface-muted: #eef1f4; --ink: #1f2933; --muted: #5f6b76; --line: #e1e5ea;
+  --pine: #1f2933; --pine-light: #e8ecf0; --copper: #1c7ed6; --copper-soft: #e3f0fc; --focus: #e8a317; --display: var(--body);
+  font-family: var(--body);
+}
+.vo3d-sheet-head { background: #fff; }
+.vo3d-sheet-head h2 { font-size: 19px; font-weight: 700; }
+.vo3d-sheet :is(.form-card, .metric, .opportunity-row, .kanban-column, .kanban-card, .calendar-card, .agent-card, .policy-card, .autopilot-card, .confirmation-card, .queue-item, .activity-preview, .notice, .search-results article) {
+  border-color: var(--line); border-radius: 12px;
+}
+.vo3d-sheet :is(.form-card, .metric, .opportunity-row, .kanban-card, .calendar-card, .agent-card, .policy-card) { box-shadow: 0 2px 10px rgba(15, 23, 42, .06); }
+.vo3d-sheet .metric-primary { border-color: var(--ink); background: var(--ink); }
+.vo3d-sheet :is(.button, .search-field input, .form-field input, .form-field select, .form-field textarea, .skill-tag, .state-label) { border-radius: 8px; }
+.vo3d-sheet .eyebrow { color: var(--copper); letter-spacing: .06em; }

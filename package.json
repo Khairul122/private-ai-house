@@ -12,7 +12,9 @@
     "test:unit": "pnpm --filter @fvh/domain test && pnpm --filter @fvh/knowledge test && pnpm --filter @fvh/web test",
     "test:adapter": "pnpm --filter @fvh/adapter-github test && pnpm --filter @fvh/adapter-freelancer test && pnpm --filter @fvh/adapter-hermes test && pnpm --filter @fvh/persistence test && pnpm --filter @fvh/server test",
     "test:smoke": "pnpm --filter @fvh/server test:smoke",
-    "test": "pnpm test:unit && pnpm test:adapter && pnpm test:smoke"
+    "test": "pnpm test:unit && pnpm test:adapter && pnpm test:smoke",
+    "private:start": "node scripts/private.mjs start",
+    "private:stop": "node scripts/private.mjs stop"
   },
   "devDependencies": {
     "@eslint/js": "latest",

@@ -472,3 +472,25 @@ describe('business operations API', () => {
     expect((await app.inject({ method: 'GET', url: '/api/work' })).json().dueSoon).toBe(0);
   });
 });
+
+describe('GitHub knowledge sync', () => {
+  it('indexes every owned repository and replaces the previous index on re-sync', async () => {
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      if (url.includes('/user/repos')) return json([{ full_name: 'me/portfolio', fork: false, archived: false }, { full_name: 'me/forked', fork: true, archived: false }]);
+      if (url.endsWith('/repos/me/portfolio')) return json({ default_branch: 'main' });
+      if (url.includes('/git/trees/')) return json({ sha: 'tree-1', truncated: false, tree: [{ path: 'README.md', type: 'blob', size: 40 }] });
+      return new Response('# Portfolio\n\nLaravel and Flutter delivery notes.', { status: 200 });
+    });
+    const githubApp = createApp({ repository, githubToken: 'token-value-1234567890', fetcher: fetcher as typeof fetch });
+
+    const first = (await githubApp.inject({ method: 'POST', url: '/api/knowledge/github/sync-all' })).json();
+    await githubApp.inject({ method: 'POST', url: '/api/knowledge/github/sync-all' });
+
+    expect(first).toMatchObject({ synced: 1, repositories: [{ repository: 'me/portfolio', error: null }] });
+    expect(repository.listKnowledgeSources().filter((source) => source.label === 'me/portfolio')).toHaveLength(1);
+    expect((await createApp({ repository }).inject({ method: 'POST', url: '/api/knowledge/github/sync-all' })).statusCode).toBe(400);
+    await githubApp.close();
+  });
+});

@@ -54,6 +54,19 @@ describe('FreelancerAutopilot', () => {
     expect(autopilot.getStatus()).toMatchObject({ state: 'running', lastSubmitted: 0 });
   });
 
+  it('keeps the owner-saved profile instead of reseeding it from Freelancer on restart', async () => {
+    repository = new WorkspaceRepository();
+    repository.saveProfile({ ...repository.getProfile(), primaryField: 'Backend Engineer', specializations: ['Laravel', 'Python'], facts: [{ label: 'Catatan', value: 'Isi pemilik', source: 'manual' }] });
+    autopilot = new FreelancerAutopilot({
+      repository, now: () => now, intervalMs: 60_000, readProfile: async () => profile,
+      readProjects: async () => ({ projects: [], skipped: 0 }), submitBid: vi.fn(async () => ({ statusCode: 200 })),
+    });
+
+    await autopilot.start();
+
+    expect(repository.getProfile()).toMatchObject({ primaryField: 'Backend Engineer', specializations: ['Laravel', 'Python'], facts: [{ value: 'Isi pemilik' }] });
+  });
+
   it('stays blocked when the public profile does not support any listed skill', async () => {
     repository = new WorkspaceRepository();
     const submitBid = vi.fn();

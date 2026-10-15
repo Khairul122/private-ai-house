@@ -101,6 +101,7 @@ const app = createApp({
   },
   freelancerSandboxTokenConfigured: Boolean(freelancerEnvironment.sandboxToken),
   autopilot,
+  businessSync,
   runFreelancerProductionWrite: async (input) => new FreelancerProductionWriteAdapter({ token: await getFreelancerToken() }).run(input),
   verifyFreelancerSandboxWrite: async (input) => {
     const token = freelancerEnvironment.sandboxToken;

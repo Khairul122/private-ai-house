@@ -16,8 +16,11 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
   const body: unknown = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const message = typeof body === 'object' && body !== null && 'error' in body && typeof body.error === 'string'
-      ? body.error
+    const record = typeof body === 'object' && body !== null ? body as { error?: unknown; issues?: unknown } : {};
+    const issues = Array.isArray(record.issues) ? record.issues.filter((issue): issue is string => typeof issue === 'string') : [];
+    // Validation issues name the offending field; without them "tidak valid" gives the user nothing to fix.
+    const message = typeof record.error === 'string'
+      ? `${record.error}${issues.length ? ` ${issues.join('; ')}` : ''}`
       : 'Permintaan gagal. Coba lagi.';
     throw new ApiError(message, response.status);
   }
@@ -83,7 +86,7 @@ export type Capabilities = {
   freelancerCredentials: { accessTokenConfigured: boolean; productionWriteConfigured: boolean; sandboxWriteTestConfigured: boolean; verificationStatus: string; readProfile: boolean; readProjects: boolean; readPortfolio: boolean; readMessages: boolean };
   github: { read: string; verificationStatus: string; scope: string; tokenConfigured: boolean };
   linkedin: { read: string; reason: string; redirectUri: string | null; clientConfigured: boolean; authorized: boolean; verificationStatus: string; accessTokenExpiresAt: string | null };
-  hermes: { draft: string; active: boolean; reason: string };
+  hermes: { draft: string; active: boolean; reason: string; draftsInProgress?: number };
 };
 
 export type FreelancerSandboxWriteInput =

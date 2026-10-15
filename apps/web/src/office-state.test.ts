@@ -48,9 +48,17 @@ describe('office state', () => {
     expect(agent(deriveOfficeAgents(autopilot(), [], { dueSoon: 0 }), 'operations-analyst')).toMatchObject({ state: 'idle' });
   });
 
+  it('derives the Hermes lead from real drafting status', () => {
+    const lead = (hermes?: { active: boolean; reason: string; draftsInProgress?: number }) => agent(deriveOfficeAgents(autopilot(), [], { hermes }), 'lead-agent');
+    expect(lead()).toMatchObject({ state: 'unknown', room: 'lobby' });
+    expect(lead({ active: false, reason: 'Persetujuan belum diberikan.' })).toMatchObject({ state: 'offline', room: null, reason: 'Persetujuan belum diberikan.' });
+    expect(lead({ active: true, reason: '', draftsInProgress: 0 })).toMatchObject({ state: 'idle', room: 'lounge' });
+    expect(lead({ active: true, reason: '', draftsInProgress: 1 })).toMatchObject({ state: 'working', room: 'workspace', task: 'Menyusun 1 draf proposal.' });
+  });
+
   it('summarizes derived states', () => {
     const agents = deriveOfficeAgents(autopilot({ cycleInProgress: true }), []);
-    expect(summarize(agents)).toEqual({ working: 3, idle: 4, offline: 1, unknown: 1 });
-    expect(summarize(deriveOfficeAgents(undefined, []))).toEqual({ working: 0, idle: 0, offline: 1, unknown: 8 });
+    expect(summarize(agents)).toEqual({ working: 3, idle: 4, offline: 1, unknown: 2 });
+    expect(summarize(deriveOfficeAgents(undefined, []))).toEqual({ working: 0, idle: 0, offline: 1, unknown: 9 });
   });
 });

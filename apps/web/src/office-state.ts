@@ -33,6 +33,7 @@ export const ROSTER: RosterEntry[] = [
   { id: 'knowledge-curator', name: 'Knowledge Curator', role: 'Kurator Pengetahuan & Kode', color: '#8ab17d' },
   { id: 'compliance-auditor', name: 'Compliance Auditor', role: 'Auditor Kebijakan & Keamanan', color: '#d62828' },
   { id: 'qa-engineer', name: 'QA Engineer', role: 'Verifikator Kontrak & Smoke', color: '#277da1' },
+  { id: 'lead-agent', name: 'Lead Agent', role: 'Koordinator Tim AI (Hermes)', color: '#343a40' },
 ];
 
 const WORK_REASON = 'Siklus autopilot sedang berjalan.';
@@ -73,6 +74,7 @@ function activityFor(id: string, activity: AuditEvent[]): AuditEvent[] {
     if (id === 'compliance-auditor') return event.type === 'autopilot.bid_skipped' || event.type.startsWith('policy.');
     if (id === 'profile-editor') return event.type === 'profile.updated' || event.type === 'marketplace.production.edit_profile';
     if (id === 'knowledge-curator') return event.type.startsWith('knowledge.');
+    if (id === 'lead-agent') return event.type === 'bid.draft_created' || event.type === 'bid.draft_failed';
     if (id === 'operations-analyst') return event.type === 'autopilot.policy_bootstrapped' || event.type.startsWith('work.');
     return false;
   };
@@ -82,6 +84,7 @@ function activityFor(id: string, activity: AuditEvent[]): AuditEvent[] {
 /** Extra real signals beyond the autopilot. `undefined` means the source could not be loaded. */
 export type OfficeContext = {
   sync?: BusinessSyncStatus | null | undefined;
+  hermes?: { active: boolean; reason: string; draftsInProgress?: number | undefined } | undefined;
   inboxWaiting?: number | undefined;
   dueSoon?: number | undefined;
 };
@@ -96,12 +99,20 @@ function clientRelationsState(sync: BusinessSyncStatus | null | undefined, inbox
   return { state: 'idle', reason: 'Kotak masuk tersinkron.', task: inboxWaiting ? `${inboxWaiting} pesan menunggu balasan` : null };
 }
 
+function leadState(hermes: OfficeContext['hermes']): Derived {
+  if (!hermes) return { state: 'unknown', reason: 'Status Hermes tidak tersedia.' };
+  if (!hermes.active) return { state: 'offline', reason: hermes.reason };
+  if (hermes.draftsInProgress) return { state: 'working', reason: 'Menyusun draf proposal dengan Hermes.', task: `Menyusun ${hermes.draftsInProgress} draf proposal.` };
+  return { state: 'idle', reason: 'Hermes siap; bekerja saat draf proposal diminta.', task: null };
+}
+
 export function deriveOfficeAgents(autopilot: Autopilot | undefined, activity: AuditEvent[] | undefined, context: OfficeContext = {}): OfficeAgent[] {
   const events = activity ?? [];
-  const { sync, inboxWaiting, dueSoon } = context;
+  const { sync, hermes, inboxWaiting, dueSoon } = context;
   return ROSTER.map((entry) => {
     let derived: Derived;
-    if (entry.id === 'market-scout') derived = autopilotState(autopilot, false);
+    if (entry.id === 'lead-agent') derived = leadState(hermes);
+    else if (entry.id === 'market-scout') derived = autopilotState(autopilot, false);
     else if (entry.id === 'bid-strategist' && sync?.step === 'outcomes') derived = { state: 'reviewing', reason: 'Memeriksa hasil bid di Freelancer.', task: 'Memeriksa status bid yang menunggu.' };
     else if (entry.id === 'bid-strategist' || entry.id === 'compliance-auditor') derived = autopilotState(autopilot, true);
     else if (entry.id === 'client-relations') derived = clientRelationsState(sync, inboxWaiting);

@@ -55,7 +55,7 @@ export const knowledgeSources = sqliteTable('knowledge_sources', {
   updatedAt: text('updated_at').notNull(),
 });
 
-export const bidOutcomes = sqliteTable('bid_outcomes', {
+export const bidOutcomes = sqliteTable('bid_results', {
   projectId: text('project_id').primaryKey(),
   bidId: text('bid_id').notNull(),
   amount: real('amount'),
