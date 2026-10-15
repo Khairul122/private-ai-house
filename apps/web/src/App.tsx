@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, NavLink, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router';
-import { api, jsonRequest, type AuditEvent, type BidDraft, type Capabilities, type Opportunity, type Policy, type Profile } from './api.js';
+import { api, jsonRequest, type AuditEvent, type BidDraft, type Capabilities, type FreelancerSandboxWriteInput, type Opportunity, type Policy, type Profile } from './api.js';
 
 const ThreeOffice = lazy(() => import('./ThreeOffice.js'));
 
@@ -545,6 +545,7 @@ function CapabilitiesPage() {
       ? 'LinkedIn terhubung. Profil ringan berhasil diverifikasi.'
       : oauthResult === 'error' ? 'LinkedIn belum terhubung. Periksa konfigurasi aplikasi dan coba lagi.' : '';
   });
+  const [noticeError, setNoticeError] = useState(false);
   useEffect(() => {
     const url = new URL(window.location.href);
     if (url.searchParams.has('linkedin')) {
@@ -555,8 +556,13 @@ function CapabilitiesPage() {
   const query = useQuery({ queryKey: ['capabilities'], queryFn: () => api<Capabilities>('/capabilities') });
   const verifyFreelancer = useMutation({
     mutationFn: () => api<{ message: string }>('/freelancer/verify', jsonRequest('POST')),
-    onSuccess: async (result) => { setNotice(result.message); await queryClient.invalidateQueries({ queryKey: ['capabilities'] }); },
-    onError: (error: Error) => setNotice(error.message),
+    onSuccess: async (result) => { setNoticeError(false); setNotice(result.message); await queryClient.invalidateQueries({ queryKey: ['capabilities'] }); },
+    onError: (error: Error) => { setNoticeError(true); setNotice(error.message); },
+  });
+  const sandboxWriteTest = useMutation({
+    mutationFn: (input: FreelancerSandboxWriteInput) => api<{ message: string }>('/freelancer/sandbox-write-test', jsonRequest('POST', input)),
+    onSuccess: async (result) => { setNoticeError(false); setNotice(result.message); await queryClient.invalidateQueries({ queryKey: ['capabilities'] }); },
+    onError: (error: Error) => { setNoticeError(true); setNotice(error.message); void queryClient.invalidateQueries({ queryKey: ['capabilities'] }); },
   });
   const connectLinkedIn = useMutation({
     mutationFn: () => api<{ authorizationUrl: string }>('/linkedin/connect', jsonRequest('POST')),
@@ -578,14 +584,53 @@ function CapabilitiesPage() {
   if (query.isPending) return <LoadingPanel />;
   if (query.isError) return <ErrorNotice message="Status integrasi belum dapat dimuat." onRetry={() => query.refetch()} />;
   return <>
-    <PageIntro eyebrow="Koneksi dan capability" title="Status provider sesuai bukti yang tersedia." description="Koneksi diperiksa dengan operasi baca-saja. Aksi tulis tetap mati sampai endpoint dan policy-nya diverifikasi." />
-    {notice && <div className="notice notice-success" role="status">{notice}</div>}
+    <PageIntro eyebrow="Koneksi dan capability" title="Status provider sesuai bukti yang tersedia." description="Penulisan ke akun produksi tetap nonaktif. Pemeriksaan operasi tulis tersedia khusus untuk akun sandbox Freelancer." />
+    {notice && <div className={`notice ${noticeError ? 'notice-error' : 'notice-success'}`} role={noticeError ? 'alert' : 'status'}>{notice}</div>}
     <div className="capability-grid">
       <section className="form-card">
         <div className="section-heading"><div><p className="eyebrow">Freelancer.com</p><h2>Capability marketplace</h2></div><StateLabel state={query.data.freelancerCredentials.verificationStatus} /></div>
-        {query.data.marketplace.map((item) => <div className="capability-row" key={item.operation}><div><strong>{item.operation.replaceAll('_', ' ')}</strong><p>{item.evidence}</p></div><StateLabel state={item.status} /></div>)}
+        {query.data.marketplace.map((item) => <div className="capability-row" key={item.operation}><div><strong>{item.operation.replaceAll('_', ' ')}</strong><p>{item.evidence}</p></div><div className="capability-status">{item.sandboxVerification ? <span title={`Diperiksa ${formatDate(item.sandboxVerification.checkedAt)}`} className={`sandbox-http-status ${item.sandboxVerification.statusCode === 200 ? 'sandbox-http-ok' : ''}`}>{item.sandboxVerification.statusCode === null ? 'Hasil tidak diketahui · Sandbox' : `HTTP ${item.sandboxVerification.statusCode} · Sandbox`}</span> : <StateLabel state={item.status} />}</div></div>)}
         <p className="provider-limit">Token API {query.data.freelancerCredentials.accessTokenConfigured ? 'dikonfigurasi pada server lokal dan tidak dikirim ke browser' : 'belum diatur'}. Pemeriksaan membaca profil, satu hasil pencarian proyek, maksimal satu data portofolio, dan satu pesan dari thread akun. Isi portofolio maupun pesan tidak disimpan.</p>
         <button type="button" className="button button-secondary" disabled={!query.data.freelancerCredentials.accessTokenConfigured || verifyFreelancer.isPending} onClick={() => verifyFreelancer.mutate()}>{verifyFreelancer.isPending ? 'Memeriksa koneksi…' : 'Periksa semua akses baca'}</button>
+        <div className="sandbox-write-tests">
+          <h3>Uji operasi tulis di sandbox</h3>
+          <p className="form-help">Form ini membuat perubahan pada sandbox saja dan memakai token terpisah. Token sandbox {query.data.freelancerCredentials.sandboxWriteTestConfigured ? 'tersedia di konfigurasi server' : 'belum diatur di .env; restart server setelah mengisinya'}. HTTP 200 dari sandbox menguji endpoint dan token sandbox; status produksi tetap terpisah.</p>
+          <form className="stack-form sandbox-test-form" onSubmit={(event) => {
+            event.preventDefault();
+            const values = new FormData(event.currentTarget);
+            sandboxWriteTest.mutate({ operation: 'submit_bid', projectId: Number(values.get('projectId')), amount: Number(values.get('amount')), period: Number(values.get('period')), milestonePercentage: 100, description: String(values.get('description') ?? '') });
+          }}>
+            <strong>Submit bid</strong>
+            <label className="form-field"><span>ID proyek sandbox milik Anda</span><input name="projectId" type="number" min="1" step="1" required /></label>
+            <div className="form-grid"><label className="form-field"><span>Nilai bid</span><input name="amount" type="number" min="0.01" step="0.01" defaultValue="1" required /></label><label className="form-field"><span>Durasi (hari)</span><input name="period" type="number" min="1" step="1" defaultValue="1" required /></label></div>
+            <label className="form-field"><span>Deskripsi bid uji</span><textarea name="description" maxLength={4000} defaultValue="FVH sandbox integration check." required /></label>
+            <button className="button button-secondary" type="submit" disabled={!query.data.freelancerCredentials.sandboxWriteTestConfigured || sandboxWriteTest.isPending}>Kirim bid uji ke sandbox</button>
+          </form>
+          <form className="stack-form sandbox-test-form" onSubmit={(event) => {
+            event.preventDefault();
+            const values = new FormData(event.currentTarget);
+            const jobIds = String(values.get('jobIds') ?? '').split(',').map((value) => Number(value.trim()));
+            if (jobIds.some((id) => !Number.isSafeInteger(id) || id < 1) || new Set(jobIds).size !== jobIds.length) {
+              setNoticeError(true); setNotice('Masukkan ID job sandbox yang valid dan tidak duplikat.'); return;
+            }
+            sandboxWriteTest.mutate({ operation: 'edit_profile', jobIds });
+          }}>
+            <strong>Edit profile</strong>
+            <label className="form-field"><span>Daftar ID job yang tetap ingin dipasang</span><input name="jobIds" inputMode="numeric" placeholder="contoh: 17, 23" pattern="[0-9, ]+" required /></label>
+            <p className="form-help">Endpoint ini mengganti daftar job pada profil sandbox. Masukkan daftar yang sama dengan profil sandbox bila tujuannya menguji endpoint tanpa mengubah data.</p>
+            <button className="button button-secondary" type="submit" disabled={!query.data.freelancerCredentials.sandboxWriteTestConfigured || sandboxWriteTest.isPending}>Uji perubahan profil sandbox</button>
+          </form>
+          <form className="stack-form sandbox-test-form" onSubmit={(event) => {
+            event.preventDefault();
+            const values = new FormData(event.currentTarget);
+            sandboxWriteTest.mutate({ operation: 'send_message', threadId: Number(values.get('threadId')), message: String(values.get('message') ?? '') });
+          }}>
+            <strong>Send message</strong>
+            <label className="form-field"><span>ID thread sandbox milik Anda</span><input name="threadId" type="number" min="1" step="1" required /></label>
+            <label className="form-field"><span>Isi pesan uji</span><textarea name="message" maxLength={4000} placeholder="Pesan ini akan dikirim ke thread sandbox." required /></label>
+            <button className="button button-secondary" type="submit" disabled={!query.data.freelancerCredentials.sandboxWriteTestConfigured || sandboxWriteTest.isPending}>Kirim pesan uji ke sandbox</button>
+          </form>
+        </div>
       </section>
       <section className="form-card">
         <div className="section-heading"><div><p className="eyebrow">Sumber lain</p><h2>Knowledge dan drafting</h2></div></div>

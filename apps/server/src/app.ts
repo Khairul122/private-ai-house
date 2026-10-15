@@ -2,7 +2,8 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import type {} from '@fastify/static';
 import { z } from 'zod';
-import { FreelancerReadError, getFreelancerCapabilities } from '@fvh/adapter-freelancer';
+import { FreelancerReadError, FreelancerSandboxWriteError, getFreelancerCapabilities } from '@fvh/adapter-freelancer';
+import type { FreelancerSandboxWriteInput, FreelancerSandboxWriteOperation } from '@fvh/adapter-freelancer';
 import { GitHubReadAdapter, GitHubReadError } from '@fvh/adapter-github';
 import { assessProject, createId, decideBid, hashPayload, UnavailableDraftingAdapter } from '@fvh/application';
 import type { AiDraftingPort } from '@fvh/application';
@@ -18,14 +19,25 @@ const paramsSchema = z.object({ id: z.string().min(1).max(150) });
 const draftUpdateSchema = z.object({ proposal: z.string().trim().min(40).max(4_000), proposedPrice: z.number().finite().positive() });
 const githubSyncSchema = z.object({ repository: z.string().trim().min(3).max(200) });
 const freelancerSyncSchema = z.object({ query: z.string().trim().min(2).max(120), limit: z.number().int().min(1).max(50).default(25) });
+const safeFreelancerIdSchema = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
+const freelancerSandboxWriteSchema = z.discriminatedUnion('operation', [
+  z.object({ operation: z.literal('submit_bid'), projectId: safeFreelancerIdSchema, amount: z.number().finite().positive(), period: z.number().int().positive(), milestonePercentage: z.number().int().min(1).max(100), description: z.string().trim().min(1).max(4_000) }),
+  z.object({ operation: z.literal('edit_profile'), jobIds: z.array(safeFreelancerIdSchema).min(1).max(20).refine((ids) => new Set(ids).size === ids.length, 'ID job tidak boleh duplikat.') }),
+  z.object({ operation: z.literal('send_message'), threadId: safeFreelancerIdSchema, message: z.string().trim().min(1).max(4_000) }),
+]);
 const allowedDevOrigins = new Set(['http://127.0.0.1:5173', 'http://localhost:5173', 'http://127.0.0.1:5174', 'http://localhost:5174']);
+
+type FreelancerSandboxWriteResult = { statusCode: number };
+type FreelancerSandboxWriteCheck = { statusCode: number | null; checkedAt: string };
 
 export type AppOptions = {
   repository?: WorkspaceRepository;
   githubToken?: string;
   credentialStatus?: CredentialStatus;
   getCredentialStatus?: () => CredentialStatus;
+  freelancerSandboxTokenConfigured?: boolean;
   verifyFreelancer?: () => Promise<FreelancerVerification>;
+  verifyFreelancerSandboxWrite?: (input: FreelancerSandboxWriteInput) => Promise<FreelancerSandboxWriteResult>;
   readFreelancerProjects?: (query: string, limit: number) => Promise<{ projects: ProjectOpportunity[]; skipped: number }>;
   linkedinOAuth?: Pick<LinkedInOAuthService, 'redirectUri' | 'start' | 'handleCallback' | 'close'>;
   disconnectLinkedIn?: () => Promise<void>;
@@ -83,6 +95,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   const draftingMode = options.drafting ? options.draftingMode ?? 'fixture' : 'disabled';
   const app = Fastify({ logger: false, bodyLimit: 2_500_000, trustProxy: false });
   let freelancerVerification: FreelancerVerification | null = null;
+  const freelancerSandboxWriteChecks = new Map<FreelancerSandboxWriteOperation, FreelancerSandboxWriteCheck>();
 
   app.addHook('onRequest', async (request, reply) => {
     const origin = request.headers.origin;
@@ -103,9 +116,15 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     const credentialStatus = options.getCredentialStatus?.() ?? options.credentialStatus;
     const linkedin = linkedinVerification(credentialStatus, now());
     return {
-    marketplace: getFreelancerCapabilities(freelancerVerification),
+    marketplace: getFreelancerCapabilities(freelancerVerification).map((capability) => ({
+      ...capability,
+      ...(freelancerSandboxWriteChecks.has(capability.operation as FreelancerSandboxWriteOperation)
+        ? { sandboxVerification: freelancerSandboxWriteChecks.get(capability.operation as FreelancerSandboxWriteOperation) }
+        : {}),
+    })),
     freelancerCredentials: {
       accessTokenConfigured: credentialStatus?.freelancerAccessTokenConfigured ?? false,
+      sandboxWriteTestConfigured: options.freelancerSandboxTokenConfigured ?? false,
       verificationStatus: freelancerVerification?.connected ? 'connected' : freelancerVerification?.reason === 'invalid_token' ? 'invalid' : freelancerVerification ? 'unavailable' : 'unverified',
       readProfile: freelancerVerification?.readProfile ?? false,
       readProjects: freelancerVerification?.readProjects ?? false,
@@ -151,6 +170,48 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       ...freelancerVerification,
       message: `${freelancerVerification.connected ? 'Koneksi Freelancer berhasil diperiksa' : 'Koneksi Freelancer belum terverifikasi'}. ${resultSummary}.`,
     };
+  });
+
+  app.post('/api/freelancer/sandbox-write-test', async (request, reply) => {
+    if (!options.freelancerSandboxTokenConfigured) {
+      return reply.code(409).send({ error: 'Token sandbox Freelancer belum dikonfigurasi pada FVH_FREELANCER_SANDBOX_ACCESS_TOKEN.' });
+    }
+    if (!options.verifyFreelancerSandboxWrite) {
+      return reply.code(503).send({ error: 'Adapter uji tulis sandbox belum tersedia di server ini.' });
+    }
+    const parsed = parseBody(freelancerSandboxWriteSchema, request.body);
+    if ('issues' in parsed) return reply.code(400).send({ error: 'Data uji sandbox tidak valid.', issues: parsed.issues });
+
+    const input = parsed.value as FreelancerSandboxWriteInput;
+    try {
+      const result = await options.verifyFreelancerSandboxWrite(input);
+      const checkedAt = now().toISOString();
+      freelancerSandboxWriteChecks.set(input.operation, { statusCode: result.statusCode, checkedAt });
+      const success = result.statusCode === 200;
+      repository.appendAudit({
+        type: `marketplace.sandbox.${input.operation}_test`, resourceId: 'freelancer-sandbox',
+        status: success ? 'recorded' : 'failed',
+        reason: `Uji tulis sandbox ${input.operation} menghasilkan HTTP ${result.statusCode}. Isi payload tidak disimpan.`,
+        policyVersion: repository.getPolicy().version, payloadHash: hashPayload(input),
+      });
+      if (!success) return reply.code(502).send({ error: `Freelancer sandbox merespons HTTP ${result.statusCode}; status bukan 200.`, providerStatusCode: result.statusCode });
+      return { operation: input.operation, statusCode: result.statusCode, environment: 'sandbox', checkedAt, message: `Uji ${input.operation} menerima HTTP 200 dari Freelancer sandbox.` };
+    } catch (error) {
+      const checkedAt = now().toISOString();
+      const providerStatusCode = error instanceof FreelancerSandboxWriteError ? error.statusCode ?? null : null;
+      freelancerSandboxWriteChecks.set(input.operation, { statusCode: providerStatusCode, checkedAt });
+      repository.appendAudit({
+        type: `marketplace.sandbox.${input.operation}_test`, resourceId: 'freelancer-sandbox', status: 'failed',
+        reason: providerStatusCode === null
+          ? `Uji tulis sandbox ${input.operation} tidak menerima hasil; jangan retry sebelum memeriksa sandbox.`
+          : `Uji tulis sandbox ${input.operation} menghasilkan HTTP ${providerStatusCode}.`,
+        policyVersion: repository.getPolicy().version, payloadHash: hashPayload(input),
+      });
+      const message = providerStatusCode === null
+        ? 'Uji sandbox tidak memperoleh respons yang dapat dipastikan. Periksa thread/proyek sandbox sebelum mengulang.'
+        : `Freelancer sandbox merespons HTTP ${providerStatusCode}; status bukan 200.`;
+      return reply.code(502).send({ error: message, providerStatusCode });
+    }
   });
 
   app.post('/api/freelancer/projects/sync', async (request, reply) => {

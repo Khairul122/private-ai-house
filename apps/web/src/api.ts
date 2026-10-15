@@ -78,12 +78,17 @@ export type Opportunity = {
 };
 
 export type Capabilities = {
-  marketplace: Array<{ operation: string; status: string; evidence: string }>;
-  freelancerCredentials: { accessTokenConfigured: boolean; verificationStatus: string; readProfile: boolean; readProjects: boolean; readPortfolio: boolean; readMessages: boolean };
+  marketplace: Array<{ operation: string; status: string; evidence: string; sandboxVerification?: { statusCode: number | null; checkedAt: string } }>;
+  freelancerCredentials: { accessTokenConfigured: boolean; sandboxWriteTestConfigured: boolean; verificationStatus: string; readProfile: boolean; readProjects: boolean; readPortfolio: boolean; readMessages: boolean };
   github: { read: string; verificationStatus: string; scope: string; tokenConfigured: boolean };
   linkedin: { read: string; reason: string; redirectUri: string | null; clientConfigured: boolean; authorized: boolean; verificationStatus: string; accessTokenExpiresAt: string | null };
   hermes: { draft: string; active: boolean; reason: string };
 };
+
+export type FreelancerSandboxWriteInput =
+  | { operation: 'submit_bid'; projectId: number; amount: number; period: number; milestonePercentage: number; description: string }
+  | { operation: 'edit_profile'; jobIds: number[] }
+  | { operation: 'send_message'; threadId: number; message: string };
 
 export type BidDraft = {
   id: string;

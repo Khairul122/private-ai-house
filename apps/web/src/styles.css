@@ -279,6 +279,15 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .capability-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 13px; padding: 12px 0; border-top: 1px solid var(--line); }
 .capability-row strong { font-size: 12px; text-transform: capitalize; }
 .capability-row p { max-width: 560px; margin: 4px 0 0; color: var(--muted); font-size: 10px; }
+.capability-status { display: grid; justify-items: end; gap: 5px; }
+.sandbox-http-status { padding: 4px 7px; border: 1px solid var(--line); color: var(--muted); font-size: 9px; white-space: nowrap; }
+.sandbox-http-ok { border-color: var(--success); background: var(--success-soft); color: var(--success); }
+.sandbox-write-tests { display: grid; gap: 12px; margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--line); }
+.sandbox-write-tests h3 { margin: 0; font-family: var(--display); font-size: 16px; }
+.sandbox-write-tests > .form-help { margin: 0; }
+.sandbox-test-form { padding: 12px; border: 1px solid var(--line); background: var(--page); }
+.sandbox-test-form > strong { font-size: 12px; text-transform: capitalize; }
+.sandbox-test-form .form-help { margin: 0; }
 .toggle-group { display: inline-flex; padding: 3px; border: 1px solid var(--line); background: var(--surface); }
 .toggle-group button { min-width: 50px; min-height: 32px; padding: 4px 9px; border: 0; background: transparent; color: var(--muted); font-size: 11px; }
 .toggle-group button.selected { background: var(--pine); color: #fff; }

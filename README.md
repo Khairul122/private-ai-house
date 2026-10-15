@@ -2,7 +2,7 @@
 
 Local-first operations workspace for a solo freelancer. The current MVP includes an API-backed 2D dashboard, opportunity scoring, evidence-based proposal drafts, deterministic policy checks, simulated bid records, an append-only activity feed, local SQLite storage, a private text knowledge index, read-only selected-repository GitHub sync, and an optional 3D room.
 
-The application starts with an empty opportunities list. Freelancer.com reads are available through an explicit, read-only verification and sync action; account access remains unverified until a request succeeds. No route sends marketplace writes. LinkedIn content can be added as a user-provided export or manual fact; optional OIDC access is limited to the approved lightweight profile scope.
+The application starts with an empty opportunities list. Freelancer.com reads are available through an explicit, read-only verification and sync action. Production marketplace writes remain disabled. The capability page provides explicit write checks for a dedicated Freelancer sandbox token (`FVH_FREELANCER_SANDBOX_ACCESS_TOKEN`); each test creates a real sandbox bid, replaces the sandbox profile job list, or sends a sandbox message. A sandbox HTTP 200 is recorded separately and does not imply production authorization. LinkedIn content can be added as a user-provided export or manual fact; optional OIDC access is limited to the approved lightweight profile scope.
 
 ## Run locally
 

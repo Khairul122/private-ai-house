@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FixtureDraftingAdapter } from '@fvh/application';
-import { FreelancerReadError } from '@fvh/adapter-freelancer';
+import { FreelancerReadError, FreelancerSandboxWriteError } from '@fvh/adapter-freelancer';
 import { WorkspaceRepository } from '@fvh/persistence';
 import { createApp } from './app.js';
 import { insertTestOpportunity, testOpportunity } from './test-fixtures.js';
@@ -117,6 +117,49 @@ describe('local API', () => {
     expect(rows.find((item) => item.operation === 'read_projects')?.status).toBe('supported');
     expect(rows.filter((item) => ['submit_bid', 'edit_profile', 'send_message'].includes(item.operation)).every((item) => item.status !== 'supported')).toBe(true);
     await credentialApp.close();
+  });
+
+  it('records HTTP 200 sandbox checks for each write without marking production writes as supported', async () => {
+    const verifySandboxWrite = vi.fn(async () => ({ statusCode: 200 }));
+    const sandboxApp = createApp({ freelancerSandboxTokenConfigured: true, verifyFreelancerSandboxWrite: verifySandboxWrite });
+    const cases = [
+      { operation: 'submit_bid', projectId: 71, amount: 2, period: 1, milestonePercentage: 100, description: 'Sandbox bid test.' },
+      { operation: 'edit_profile', jobIds: [17, 23] },
+      { operation: 'send_message', threadId: 81, message: 'Sandbox message test.' },
+    ] as const;
+
+    for (const input of cases) {
+      const response = await sandboxApp.inject({ method: 'POST', url: '/api/freelancer/sandbox-write-test', payload: input });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ operation: input.operation, statusCode: 200, environment: 'sandbox' });
+    }
+    const capabilities = await sandboxApp.inject({ method: 'GET', url: '/api/capabilities' });
+    const writeRows = capabilities.json().marketplace.filter((item: { operation: string }) => ['submit_bid', 'edit_profile', 'send_message'].includes(item.operation));
+
+    expect(verifySandboxWrite).toHaveBeenCalledTimes(3);
+    expect(writeRows.every((item: { status: string }) => item.status === 'unknown')).toBe(true);
+    expect(writeRows.every((item: { sandboxVerification?: { statusCode: number } }) => item.sandboxVerification?.statusCode === 200)).toBe(true);
+    expect(capabilities.json().freelancerCredentials.sandboxWriteTestConfigured).toBe(true);
+    await sandboxApp.close();
+  });
+
+  it('requires the dedicated sandbox token and exposes provider failures without promoting the capability', async () => {
+    const verifySandboxWrite = vi.fn(async () => { throw new FreelancerSandboxWriteError(403, 'denied'); });
+    const noTokenApp = createApp({ verifyFreelancerSandboxWrite: verifySandboxWrite });
+    const deniedConfig = await noTokenApp.inject({ method: 'POST', url: '/api/freelancer/sandbox-write-test', payload: { operation: 'send_message', threadId: 81, message: 'Check.' } });
+    expect(deniedConfig.statusCode).toBe(409);
+    expect(verifySandboxWrite).not.toHaveBeenCalled();
+    await noTokenApp.close();
+
+    const sandboxApp = createApp({ freelancerSandboxTokenConfigured: true, verifyFreelancerSandboxWrite: verifySandboxWrite });
+    const failedCheck = await sandboxApp.inject({ method: 'POST', url: '/api/freelancer/sandbox-write-test', payload: { operation: 'send_message', threadId: 81, message: 'Check.' } });
+    const capabilities = await sandboxApp.inject({ method: 'GET', url: '/api/capabilities' });
+    const messageCapability = capabilities.json().marketplace.find((item: { operation: string }) => item.operation === 'send_message');
+
+    expect(failedCheck.statusCode).toBe(502);
+    expect(failedCheck.json()).toMatchObject({ providerStatusCode: 403 });
+    expect(messageCapability).toMatchObject({ status: 'unknown', sandboxVerification: { statusCode: 403 } });
+    await sandboxApp.close();
   });
 
   it('syncs only provider results and updates read capability after a successful API response', async () => {

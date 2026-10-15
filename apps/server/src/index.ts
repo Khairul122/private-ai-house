@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import fastifyStatic from '@fastify/static';
-import { FreelancerReadAdapter, FreelancerReadError } from '@fvh/adapter-freelancer';
+import { FreelancerReadAdapter, FreelancerReadError, FreelancerSandboxWriteAdapter } from '@fvh/adapter-freelancer';
 import { HermesCliDraftingAdapter } from '@fvh/adapter-hermes';
 import { createDatabase, WorkspaceRepository } from '@fvh/persistence';
 import { deleteLinkedInAccessToken, getFreelancerAccessToken, getLinkedInClientCredentials, readCredentialStatus, storeLinkedInAccessToken } from './credential-store.js';
@@ -80,6 +80,12 @@ const app = createApp({
       freelancerAccessTokenConfigured: freelancerEnvironment.declared ? Boolean(freelancerEnvironment.token) : stored.freelancerAccessTokenConfigured,
       linkedinClientConfigured: environment.declared ? Boolean(environment.credentials) : stored.linkedinClientConfigured,
     };
+  },
+  freelancerSandboxTokenConfigured: Boolean(freelancerEnvironment.sandboxToken),
+  verifyFreelancerSandboxWrite: async (input) => {
+    const token = freelancerEnvironment.sandboxToken;
+    if (!token) throw new Error('Freelancer sandbox token is not configured.');
+    return new FreelancerSandboxWriteAdapter({ token }).run(input);
   },
   verifyFreelancer: async () => {
     let adapter: FreelancerReadAdapter;

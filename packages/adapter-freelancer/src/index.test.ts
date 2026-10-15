@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { FreelancerReadAdapter } from './index.js';
+import { FreelancerReadAdapter, FreelancerSandboxWriteAdapter } from './index.js';
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -82,5 +82,65 @@ describe('FreelancerReadAdapter', () => {
     const adapter = new FreelancerReadAdapter({ token: 'test-token-value-1234', fetcher });
     await expect(adapter.searchActiveProjects('x')).rejects.toMatchObject({ code: 'invalid_query' });
     expect(fetcher).not.toHaveBeenCalled();
+  });
+});
+
+describe('FreelancerSandboxWriteAdapter', () => {
+  it('places a bid only on the Freelancer sandbox and uses the authenticated sandbox user ID', async () => {
+    const requests: Array<[string | URL | Request, RequestInit | undefined]> = [];
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push([input, init]);
+      return requests.length === 1
+        ? jsonResponse({ result: { id: 42 } })
+        : jsonResponse({ result: { id: 9001 } });
+    });
+    const adapter = new FreelancerSandboxWriteAdapter({ token: 'sandbox-token-value-1234', fetcher });
+
+    await expect(adapter.run({ operation: 'submit_bid', projectId: 77, amount: 25, period: 3, milestonePercentage: 100, description: 'Sandbox integration check.' })).resolves.toEqual({ statusCode: 200 });
+    const [profileUrl, profileInit] = requests[0] ?? [];
+    const [bidUrl, bidInit] = requests[1] ?? [];
+
+    expect(String(profileUrl)).toBe('https://www.freelancer-sandbox.com/api/users/0.1/self/');
+    expect(profileInit).toMatchObject({ method: 'GET' });
+    expect(String(bidUrl)).toBe('https://www.freelancer-sandbox.com/api/projects/0.1/bids/');
+    expect(bidInit).toMatchObject({ method: 'POST', headers: { 'Freelancer-OAuth-V1': 'sandbox-token-value-1234', 'Content-Type': 'application/json' } });
+    expect(JSON.parse(String(bidInit?.body))).toMatchObject({ project_id: 77, bidder_id: 42, amount: 25, period: 3, milestone_percentage: 100 });
+  });
+
+  it('uses the documented profile jobs endpoint and does not use the production host', async () => {
+    const requests: Array<[string | URL | Request, RequestInit | undefined]> = [];
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push([input, init]);
+      return jsonResponse({ status: 'success' });
+    });
+    const adapter = new FreelancerSandboxWriteAdapter({ token: 'sandbox-token-value-1234', fetcher });
+
+    await expect(adapter.run({ operation: 'edit_profile', jobIds: [17, 23] })).resolves.toEqual({ statusCode: 200 });
+    const [url, init] = requests[0] ?? [];
+
+    expect(String(url)).toBe('https://www.freelancer-sandbox.com/api/users/0.1/self/jobs/');
+    expect(init).toMatchObject({ method: 'PUT' });
+    expect(JSON.parse(String(init?.body))).toEqual({ 'jobs[]': [17, 23] });
+  });
+
+  it('sends the message as form data to the documented sandbox thread route', async () => {
+    const requests: Array<[string | URL | Request, RequestInit | undefined]> = [];
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push([input, init]);
+      return jsonResponse({ result: { id: 11 } });
+    });
+    const adapter = new FreelancerSandboxWriteAdapter({ token: 'sandbox-token-value-1234', fetcher });
+
+    await expect(adapter.run({ operation: 'send_message', threadId: 55, message: 'FVH sandbox verification.' })).resolves.toEqual({ statusCode: 200 });
+    const [url, init] = requests[0] ?? [];
+
+    expect(String(url)).toBe('https://www.freelancer-sandbox.com/api/messages/0.1/threads/55/messages/');
+    expect(init).toMatchObject({ method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+    expect(String(init?.body)).toBe('message=FVH+sandbox+verification.');
+  });
+
+  it('surfaces the provider HTTP status and never falls back to production', async () => {
+    const adapter = new FreelancerSandboxWriteAdapter({ token: 'sandbox-token-value-1234', fetcher: async () => jsonResponse({}, 403) });
+    await expect(adapter.run({ operation: 'edit_profile', jobIds: [17] })).rejects.toMatchObject({ statusCode: 403 });
   });
 });

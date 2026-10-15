@@ -31,7 +31,22 @@ type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Re
 type JsonRecord = Record<string, unknown>;
 
 const API_ROOT = 'https://www.freelancer.com/api';
+const SANDBOX_API_ROOT = 'https://www.freelancer-sandbox.com/api';
 const dayMilliseconds = 24 * 60 * 60 * 1000;
+
+export type FreelancerSandboxWriteInput =
+  | { operation: 'submit_bid'; projectId: number; amount: number; period: number; milestonePercentage: number; description: string }
+  | { operation: 'edit_profile'; jobIds: number[] }
+  | { operation: 'send_message'; threadId: number; message: string };
+
+export type FreelancerSandboxWriteOperation = FreelancerSandboxWriteInput['operation'];
+
+export class FreelancerSandboxWriteError extends Error {
+  constructor(public readonly statusCode: number | undefined, message: string) {
+    super(message);
+    this.name = 'FreelancerSandboxWriteError';
+  }
+}
 
 export class FreelancerReadError extends Error {
   constructor(public readonly code: string, message: string, public readonly statusCode?: number) {
@@ -148,9 +163,9 @@ export const freelancerCapabilities: FreelancerCapability[] = [
   { operation: 'read_profile', status: 'unknown', evidence: 'Endpoint baca-saja telah diimplementasikan; akses token dan respons akun ini belum diuji.' },
   { operation: 'read_portfolio', status: 'unknown', evidence: 'Akses portofolio belum diperiksa pada akun dan scope aplikasi ini.' },
   { operation: 'read_messages', status: 'unknown', evidence: 'Akses pesan belum diperiksa pada akun dan scope aplikasi ini.' },
-  { operation: 'submit_bid', status: 'unknown', evidence: 'Endpoint tulis, idempotensi, scope, dan sandbox belum diverifikasi; pengiriman eksternal nonaktif.' },
-  { operation: 'edit_profile', status: 'unknown', evidence: 'Endpoint tulis dan otorisasi sandbox belum diverifikasi; perubahan eksternal nonaktif.' },
-  { operation: 'send_message', status: 'unknown', evidence: 'Endpoint tulis dan otorisasi sandbox belum diverifikasi; pesan eksternal nonaktif.' },
+  { operation: 'submit_bid', status: 'unknown', evidence: 'Uji bid hanya tersedia pada sandbox dengan proyek milik akun sandbox. Izin dan operasi pada akun produksi belum diverifikasi.' },
+  { operation: 'edit_profile', status: 'unknown', evidence: 'Uji edit profil terbatas pada penggantian daftar job di sandbox; field profil lain dan akun produksi belum diverifikasi.' },
+  { operation: 'send_message', status: 'unknown', evidence: 'Uji pesan hanya tersedia pada thread sandbox milik akun sandbox. Izin dan operasi pada akun produksi belum diverifikasi.' },
 ];
 
 function failedCheckEvidence(label: string, error?: string): string {
@@ -306,6 +321,87 @@ export class FreelancerReadAdapter {
     if (response.status === 403) throw new FreelancerReadError('scope_denied', 'Token Freelancer tidak memiliki izin baca untuk endpoint ini.', 403);
     if (response.status === 429) throw new FreelancerReadError('rate_limited', 'Freelancer membatasi permintaan. Coba lagi setelah jeda.', 429);
     if (!response.ok) throw new FreelancerReadError('provider_error', `Freelancer mengembalikan status ${response.status}.`, response.status);
+    return response;
+  }
+}
+
+export class FreelancerSandboxWriteAdapter {
+  private readonly fetcher: Fetcher;
+
+  constructor(private readonly options: { token: string; fetcher?: Fetcher; timeoutMs?: number }) {
+    this.fetcher = options.fetcher ?? fetch;
+    if (!options.token || options.token.length < 16 || /[\0\r\n]/.test(options.token)) {
+      throw new FreelancerSandboxWriteError(undefined, 'Token sandbox Freelancer tidak valid.');
+    }
+  }
+
+  async run(input: FreelancerSandboxWriteInput): Promise<{ statusCode: number }> {
+    switch (input.operation) {
+      case 'submit_bid': {
+        const selfResponse = await this.request(`${SANDBOX_API_ROOT}/users/0.1/self/`, { method: 'GET' });
+        const selfPayload: unknown = await selfResponse.json().catch(() => null);
+        const selfResult = isRecord(selfPayload) && isRecord(selfPayload.result) ? selfPayload.result : undefined;
+        const bidderId = selfResult ? identifier(selfResult.id) : undefined;
+        if (!bidderId || !/^\d+$/.test(bidderId) || !Number.isSafeInteger(Number(bidderId))) {
+          throw new FreelancerSandboxWriteError(undefined, 'ID akun sandbox tidak ditemukan; bid tidak dikirim.');
+        }
+        const response = await this.request(`${SANDBOX_API_ROOT}/projects/0.1/bids/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            project_id: input.projectId,
+            bidder_id: Number(bidderId),
+            amount: input.amount,
+            period: input.period,
+            milestone_percentage: input.milestonePercentage,
+            description: input.description,
+          }),
+        });
+        await response.body?.cancel().catch(() => {});
+        return { statusCode: response.status };
+      }
+      case 'edit_profile': {
+        const response = await this.request(`${SANDBOX_API_ROOT}/users/0.1/self/jobs/`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 'jobs[]': input.jobIds }),
+        });
+        await response.body?.cancel().catch(() => {});
+        return { statusCode: response.status };
+      }
+      case 'send_message': {
+        const response = await this.request(`${SANDBOX_API_ROOT}/messages/0.1/threads/${input.threadId}/messages/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ message: input.message }),
+        });
+        await response.body?.cancel().catch(() => {});
+        return { statusCode: response.status };
+      }
+    }
+  }
+
+  private async request(url: string, init: RequestInit): Promise<Response> {
+    let response: Response;
+    try {
+      response = await this.fetcher(url, {
+        ...init,
+        redirect: 'error',
+        headers: {
+          'Freelancer-OAuth-V1': this.options.token,
+          Accept: 'application/json',
+          'User-Agent': 'freelancer-virtual-house-sandbox-check',
+          ...init.headers,
+        },
+        signal: AbortSignal.timeout(this.options.timeoutMs ?? 12_000),
+      });
+    } catch {
+      throw new FreelancerSandboxWriteError(undefined, 'Sandbox Freelancer tidak dapat dijangkau dari server lokal.');
+    }
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
+      throw new FreelancerSandboxWriteError(response.status, `Sandbox Freelancer mengembalikan HTTP ${response.status}.`);
+    }
     return response;
   }
 }
