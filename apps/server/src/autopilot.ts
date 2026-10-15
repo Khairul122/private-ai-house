@@ -1,7 +1,7 @@
 import { evaluatePolicy, scoreProject } from '@fvh/domain';
 import type { AutonomyPolicy, BidDraft, ProjectOpportunity } from '@fvh/domain';
 import type { FreelancerProfile, FreelancerWriteResult } from '@fvh/adapter-freelancer';
-import { createId, hashPayload } from '@fvh/application';
+import { createId, hashPayload, type AiDraftingPort } from '@fvh/application';
 import type { WorkspaceRepository, ServiceProfile } from '@fvh/persistence';
 
 type AutopilotDependencies = {
@@ -10,6 +10,8 @@ type AutopilotDependencies = {
   readProjects: (query: string, limit: number) => Promise<{ projects: ProjectOpportunity[]; skipped: number }>;
   syncProfileJobs?: (jobIds: number[]) => Promise<FreelancerWriteResult>;
   submitBid: (input: { operation: 'submit_bid'; projectId: number; amount: number; period: number; milestonePercentage: number; description: string }) => Promise<FreelancerWriteResult>;
+  /** Hermes drafting; when absent or failing, the built-in template writes the proposal. */
+  draftProposal?: AiDraftingPort['draftBid'];
   now?: () => Date;
   intervalMs?: number;
 };
@@ -23,6 +25,7 @@ export type AutopilotStatus = {
   lastSubmitted: number;
   specializations: string[];
   cycleInProgress: boolean;
+  draftsInProgress: number;
 };
 
 const dayMs = 24 * 60 * 60 * 1_000;
@@ -103,6 +106,11 @@ function proposalFor(project: ProjectOpportunity, specialties: string[], price: 
   ].join('\n\n').slice(0, 4_000);
 }
 
+/** Currency amounts written in the text; any amount other than the policy price makes the Hermes text unusable. */
+function mentionedAmounts(text: string): number[] {
+  return [...text.matchAll(/(?:\$|USD|US\$|IDR|Rp|EUR|€)\s?(\d[\d.,]*)/gi)].map((match) => Number(match[1]!.replace(/[.,](?=\d{3}\b)/g, '').replace(',', '.')));
+}
+
 function chooseBid(project: ProjectOpportunity, policy: AutonomyPolicy): { amount: number; period: number } | null {
   if (project.projectType !== 'fixed' || project.currency !== 'USD' || project.budgetMax <= 0) return null;
   const amount = Math.max(policy.minPrice, project.budgetMin > 0 ? project.budgetMin : policy.minPrice);
@@ -116,9 +124,10 @@ export class FreelancerAutopilot {
   private readonly intervalMs: number;
   private timer: ReturnType<typeof setInterval> | undefined;
   private busy = false;
+  private drafting = 0;
   private status: AutopilotStatus = {
     state: 'starting', lastRunAt: null, nextRunAt: null, lastMessage: 'Membaca profil Freelancer untuk menyiapkan operasi otomatis.',
-    lastImported: 0, lastSubmitted: 0, specializations: [], cycleInProgress: false,
+    lastImported: 0, lastSubmitted: 0, specializations: [], cycleInProgress: false, draftsInProgress: 0,
   };
 
   private scheduleRetry(): void {
@@ -139,7 +148,7 @@ export class FreelancerAutopilot {
   getStatus(): AutopilotStatus {
     const policy = this.dependencies.repository.getPolicy();
     const state = policy.state === 'paused' ? 'paused' : policy.state !== 'active' || policy.simulationOnly ? 'blocked' : this.status.state;
-    return { ...this.status, state, cycleInProgress: this.busy, specializations: [...this.status.specializations] };
+    return { ...this.status, state, cycleInProgress: this.busy, draftsInProgress: this.drafting, specializations: [...this.status.specializations] };
   }
 
   async start(): Promise<void> {
@@ -209,6 +218,41 @@ export class FreelancerAutopilot {
     }
   }
 
+  private async writeProposal(project: ProjectOpportunity, policy: AutonomyPolicy, bid: { amount: number; period: number }, score: number) {
+    const template = {
+      proposal: proposalFor(project, policy.specializations, bid.amount, bid.period),
+      evidence: [{ label: 'Ringkasan publik Freelancer', source: 'Profil Freelancer akun sendiri' }],
+      assumptions: ['Proposal memakai template bawaan dari ringkasan proyek dan keahlian profil Freelancer; klaim pengalaman tambahan tidak dibuat.'],
+    };
+    const { draftProposal, repository } = this.dependencies;
+    if (!draftProposal) return template;
+    const fallback = (reason: string) => {
+      repository.appendAudit({ type: 'autopilot.draft_fallback', resourceId: project.id, status: 'recorded', reason: `Proposal Hermes tidak dipakai: ${reason} Template bawaan digunakan.`, policyVersion: policy.version, payloadHash: null });
+      return template;
+    };
+    const profile = repository.getProfile();
+    this.drafting += 1;
+    try {
+      const output = await draftProposal({
+        project, profileFacts: profile.facts, score,
+        evidence: repository.searchKnowledge(`${project.title} ${project.skills.join(' ')}`, 4).map((item) => ({ label: item.path, source: item.url, content: item.content })),
+        profileRate: { min: profile.minPrice, max: profile.maxPrice },
+        fixedBid: { amount: bid.amount, currency: project.currency, durationDays: bid.period },
+      });
+      if (output.proposedPrice !== bid.amount || output.durationDays !== bid.period) return fallback(`harga/durasi usulan (${output.proposedPrice}, ${output.durationDays} hari) berbeda dari kebijakan.`);
+      if (mentionedAmounts(output.proposal).some((amount) => amount !== bid.amount)) return fallback('teks menyebut nominal harga yang berbeda dari bid.');
+      return {
+        proposal: output.proposal,
+        evidence: output.evidence.length ? output.evidence : template.evidence,
+        assumptions: ['Proposal ditulis Hermes dari fakta profil dan bukti Knowledge Hub; harga dan durasi ditetapkan kebijakan.', ...output.assumptions].slice(0, 20),
+      };
+    } catch (error) {
+      return fallback(error instanceof Error ? error.message : 'Hermes gagal.');
+    } finally {
+      this.drafting -= 1;
+    }
+  }
+
   stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
@@ -266,7 +310,10 @@ export class FreelancerAutopilot {
           continue;
         }
         if (repository.getPolicy().state !== 'active' || repository.getPolicy().simulationOnly) break;
-        const proposal = proposalFor(project, activePolicy.specializations, bid.amount, bid.period);
+        const written = await this.writeProposal(project, activePolicy, bid, project.score);
+        const proposal = written.proposal;
+        // Hermes can take a while; honour a kill switch pressed meanwhile.
+        if (repository.getPolicy().state !== 'active' || repository.getPolicy().simulationOnly) break;
         const payloadHash = hashPayload({ projectId: project.id, amount: bid.amount, period: bid.period, description: proposal });
         const claimed = repository.claimAudit({
           type: 'marketplace.production.submit_bid', resourceId: project.id, policyVersion: activePolicy.version,
@@ -275,8 +322,7 @@ export class FreelancerAutopilot {
         if (!claimed) continue;
         const draft: BidDraft = {
           id: createId('draft'), projectId: project.id, proposal, proposedPrice: bid.amount, currency: project.currency,
-          durationDays: bid.period, confidence, evidence: [{ label: 'Ringkasan publik Freelancer', source: 'Profil Freelancer akun sendiri' }],
-          assumptions: ['Proposal memakai ringkasan proyek dan keahlian yang tercantum pada profil Freelancer; klaim pengalaman tambahan tidak dibuat.'], status: 'draft_ready', createdAt: runAt.toISOString(),
+          durationDays: bid.period, confidence, evidence: written.evidence, assumptions: written.assumptions, status: 'draft_ready', createdAt: runAt.toISOString(),
         };
         repository.createDraft(draft);
         repository.setPipelineStatus(project.id, 'policy_check');

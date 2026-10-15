@@ -1,7 +1,7 @@
 // Start or stop the whole local Mission Control (API + web) in the background.
 // Usage: pnpm private:start | pnpm private:stop
 import { spawn, spawnSync } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { join } from 'node:path';
 
@@ -37,7 +37,9 @@ function pidsOnPorts() {
 }
 
 function hermesLine() {
-  const result = spawnSync('hermes', ['--version'], { encoding: 'utf8', shell: windows, timeout: 15_000 });
+  const result = windows
+    ? spawnSync('cmd.exe', ['/d', '/s', '/c', 'hermes --version'], { encoding: 'utf8', timeout: 15_000, windowsHide: true })
+    : spawnSync('hermes', ['--version'], { encoding: 'utf8', timeout: 15_000 });
   return result.status === 0 ? `Hermes CLI: ${result.stdout.trim().split(/\r?\n/)[0]}` : 'Hermes CLI tidak ditemukan; draf AI tetap nonaktif.';
 }
 
@@ -46,9 +48,9 @@ async function start() {
   if (running.every(Boolean)) return console.log('Mission Control sudah berjalan: http://127.0.0.1:5174');
   if (running.some(Boolean)) return console.error('Sebagian layanan masih berjalan. Jalankan `pnpm private:stop` dulu.'), process.exit(1);
   mkdirSync(stateDir, { recursive: true });
-  const log = openSync(logFile, 'w');
-  const child = spawn('pnpm', ['dev'], { cwd: root, detached: true, stdio: ['ignore', log, log], shell: windows, windowsHide: true });
-  closeSync(log);
+  // A detached console-less node on Windows drops output written to inherited file handles,
+  // so a small detached supervisor runs `pnpm dev` normally and streams its output to the log.
+  const child = spawn(process.execPath, [import.meta.filename, 'supervise'], { cwd: root, detached: true, stdio: 'ignore', windowsHide: true });
   writeFileSync(pidFile, String(child.pid));
   child.unref();
   for (let i = 0; i < 60; i += 1) {
@@ -73,7 +75,18 @@ async function stop() {
   console.log(stillRunning ? 'Sebagian layanan masih berjalan; tutup terminal `pnpm dev` secara manual.' : 'Mission Control dihentikan.');
 }
 
+function supervise() {
+  const log = createWriteStream(logFile);
+  // pnpm is a .cmd shim on Windows, so run it through cmd.exe explicitly (shell: true with args is deprecated).
+  const [command, args] = windows ? ['cmd.exe', ['/d', '/s', '/c', 'pnpm dev']] : ['pnpm', ['dev']];
+  const child = spawn(command, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, FORCE_COLOR: '0' } });
+  child.stdout.pipe(log);
+  child.stderr.pipe(log);
+  child.on('exit', (code) => { log.end(`\nMission Control berhenti (kode ${code ?? 'sinyal'}).\n`); });
+}
+
 const command = process.argv[2];
-if (command === 'start') await start();
+if (command === 'supervise') supervise();
+else if (command === 'start') await start();
 else if (command === 'stop') await stop();
 else { console.error('Gunakan: node scripts/private.mjs start|stop'); process.exit(1); }

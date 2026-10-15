@@ -8,6 +8,8 @@ export type DraftingInput = {
   evidence: DraftingEvidence[];
   profileRate: { min: number; max: number };
   score: number;
+  /** Set by the autopilot: price and duration are decided by policy, the model only writes the text. */
+  fixedBid?: { amount: number; currency: string; durationDays: number };
 };
 export type DraftingOutput = {
   proposal: string;
