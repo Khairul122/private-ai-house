@@ -7,6 +7,7 @@ import { createDatabase, WorkspaceRepository } from '@fvh/persistence';
 import { deleteLinkedInAccessToken, getFreelancerAccessToken, getLinkedInClientCredentials, readCredentialStatus, storeLinkedInAccessToken } from './credential-store.js';
 import { LinkedInOAuthService } from './linkedin-oauth.js';
 import { readLinkedInEnvironment } from './linkedin-env.js';
+import { readFreelancerEnvironment } from './freelancer-env.js';
 import { readDraftingEnvironment } from './ai-env.js';
 import { createApp } from './app.js';
 
@@ -29,6 +30,14 @@ const databaseFile = resolve(dataDirectory, 'freelancer-virtual-house.sqlite');
 mkdirSync(dirname(databaseFile), { recursive: true });
 const credentialStorePath = resolve(dataDirectory, 'credentials.dpapi.json');
 const credentialScriptPath = resolve(projectRoot, 'apps/server/src/credential-store.ps1');
+const freelancerEnvironment = readFreelancerEnvironment(projectRoot);
+async function getFreelancerToken(): Promise<string> {
+  if (freelancerEnvironment.declared) {
+    if (!freelancerEnvironment.token) throw new Error('Freelancer token in .env is invalid.');
+    return freelancerEnvironment.token;
+  }
+  return getFreelancerAccessToken(credentialStorePath, credentialScriptPath);
+}
 const host = process.env.FVH_HOST ?? '127.0.0.1';
 const port = Number.parseInt(process.env.FVH_PORT ?? '3001', 10);
 const linkedinOAuth = new LinkedInOAuthService({
@@ -68,34 +77,60 @@ const app = createApp({
     const environment = readLinkedInEnvironment(projectRoot);
     return {
       ...stored,
+      freelancerAccessTokenConfigured: freelancerEnvironment.declared ? Boolean(freelancerEnvironment.token) : stored.freelancerAccessTokenConfigured,
       linkedinClientConfigured: environment.declared ? Boolean(environment.credentials) : stored.linkedinClientConfigured,
     };
   },
   verifyFreelancer: async () => {
     let adapter: FreelancerReadAdapter;
     try {
-      adapter = new FreelancerReadAdapter({ token: await getFreelancerAccessToken(credentialStorePath, credentialScriptPath) });
+      adapter = new FreelancerReadAdapter({ token: await getFreelancerToken() });
     } catch {
-      return { connected: false, readProfile: false, readProjects: false, reason: 'invalid_token' };
+      return { connected: false, readProfile: false, readProjects: false, readPortfolio: false, readMessages: false, profileError: 'invalid_token', projectsError: 'invalid_token', portfolioError: 'invalid_token', messagesError: 'invalid_token', reason: 'invalid_token' };
     }
+    const check = async (operation: () => Promise<unknown>): Promise<string | undefined> => {
+      try {
+        await operation();
+        return undefined;
+      } catch (error) {
+        return error instanceof FreelancerReadError ? error.code : 'verification_unavailable';
+      }
+    };
+
+    let profileId: string | undefined;
+    let profileError: string | undefined;
     try {
-      await adapter.readOwnProfile();
+      profileId = (await adapter.readOwnProfile()).id;
     } catch (error) {
-      const code = error instanceof FreelancerReadError ? error.code : 'verification_unavailable';
-      const reason = code === 'invalid_token' ? 'invalid_token' : code === 'scope_denied' ? 'scope_denied' : code === 'rate_limited' ? 'rate_limited' : code === 'invalid_response' ? 'invalid_response' : 'verification_unavailable';
-      return { connected: false, readProfile: false, readProjects: false, reason };
+      profileError = error instanceof FreelancerReadError ? error.code : 'verification_unavailable';
     }
-    try {
-      await adapter.searchActiveProjects('typescript', 1);
-      return { connected: true, readProfile: true, readProjects: true, reason: 'verified' };
-    } catch (error) {
-      const code = error instanceof FreelancerReadError ? error.code : 'projects_unavailable';
-      const reason = code === 'scope_denied' ? 'project_scope_denied' : code === 'rate_limited' ? 'rate_limited' : code === 'invalid_response' ? 'invalid_response' : code === 'invalid_token' ? 'invalid_token' : 'projects_unavailable';
-      return { connected: true, readProfile: true, readProjects: false, reason };
-    }
+    const [projectsError, portfolioError, messagesError] = await Promise.all([
+      check(() => adapter.searchActiveProjects('typescript', 1)),
+      profileId ? check(() => adapter.checkOwnPortfolioRead(profileId!)) : Promise.resolve('profile_unavailable'),
+      profileId ? check(() => adapter.checkOwnMessageRead(profileId!)) : Promise.resolve('profile_unavailable'),
+    ]);
+    const readProfile = Boolean(profileId);
+    const readProjects = !projectsError;
+    const readPortfolio = !portfolioError;
+    const readMessages = !messagesError;
+    const reason = !readProfile
+      ? profileError === 'invalid_token' ? 'invalid_token' : profileError === 'scope_denied' ? 'scope_denied' : profileError === 'rate_limited' ? 'rate_limited' : profileError === 'invalid_response' ? 'invalid_response' : 'verification_unavailable'
+      : projectsError === 'scope_denied' ? 'project_scope_denied' : projectsError === 'rate_limited' ? 'rate_limited' : projectsError === 'invalid_response' ? 'invalid_response' : projectsError === 'invalid_token' ? 'invalid_token' : projectsError ? 'projects_unavailable' : 'verified';
+    return {
+      connected: readProfile,
+      readProfile,
+      readProjects,
+      readPortfolio,
+      readMessages,
+      ...(profileError ? { profileError } : {}),
+      ...(projectsError ? { projectsError } : {}),
+      ...(portfolioError ? { portfolioError } : {}),
+      ...(messagesError ? { messagesError } : {}),
+      reason,
+    };
   },
   readFreelancerProjects: async (query, limit) => {
-    const token = await getFreelancerAccessToken(credentialStorePath, credentialScriptPath);
+    const token = await getFreelancerToken();
     return new FreelancerReadAdapter({ token }).searchActiveProjects(query, limit);
   },
   linkedinOAuth,

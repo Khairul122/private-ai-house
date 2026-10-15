@@ -12,6 +12,12 @@ export type FreelancerVerification = {
   connected: boolean;
   readProfile: boolean;
   readProjects: boolean;
+  readPortfolio?: boolean;
+  readMessages?: boolean;
+  profileError?: string;
+  projectsError?: string;
+  portfolioError?: string;
+  messagesError?: string;
   reason: 'verified' | 'invalid_token' | 'scope_denied' | 'rate_limited' | 'project_scope_denied' | 'projects_unavailable' | 'verification_unavailable' | 'invalid_response' | 'profile_unavailable';
 };
 

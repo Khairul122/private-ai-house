@@ -9,6 +9,12 @@ export type FreelancerCapability = {
 export type FreelancerReadVerification = {
   readProfile: boolean;
   readProjects: boolean;
+  readPortfolio?: boolean;
+  readMessages?: boolean;
+  profileError?: string;
+  projectsError?: string;
+  portfolioError?: string;
+  messagesError?: string;
 };
 
 export type FreelancerProfile = {
@@ -147,13 +153,42 @@ export const freelancerCapabilities: FreelancerCapability[] = [
   { operation: 'send_message', status: 'unknown', evidence: 'Endpoint tulis dan otorisasi sandbox belum diverifikasi; pesan eksternal nonaktif.' },
 ];
 
+function failedCheckEvidence(label: string, error?: string): string {
+  if (!error) return `Pemeriksaan baca-saja ${label} belum dijalankan.`;
+  if (error === 'scope_denied') return `Freelancer menolak akses baca ${label} (HTTP 403); scope token tidak mengizinkannya.`;
+  if (error === 'no_message_thread') return 'Pencarian thread berhasil, tetapi akun belum memiliki thread untuk menguji endpoint pesan.';
+  if (error === 'profile_unavailable') return 'ID akun belum tersedia karena pembacaan profil belum berhasil.';
+  if (error === 'invalid_token') return 'Freelancer menolak token tersimpan. Perbarui token lalu periksa kembali.';
+  if (error === 'rate_limited') return 'Freelancer membatasi permintaan. Tunggu sebelum memeriksa kembali.';
+  if (error === 'network_error') return 'Server lokal tidak dapat menjangkau Freelancer.';
+  return `Pemeriksaan baca-saja ${label} gagal (${error}); status tetap belum terverifikasi.`;
+}
+
 export function getFreelancerCapabilities(verification?: FreelancerReadVerification | null) {
   return freelancerCapabilities.map((capability) => {
     if (capability.operation === 'read_profile' && verification?.readProfile) {
       return { ...capability, status: 'supported' as const, evidence: 'Pemeriksaan baca-saja berhasil pada GET /api/users/0.1/self/ dengan token akun yang tersimpan.' };
     }
+    if (capability.operation === 'read_profile' && verification?.profileError) {
+      return { ...capability, status: verification.profileError === 'scope_denied' ? 'unsupported' as const : 'unknown' as const, evidence: failedCheckEvidence('profil akun', verification.profileError) };
+    }
     if (capability.operation === 'read_projects' && verification?.readProjects) {
       return { ...capability, status: 'supported' as const, evidence: 'Pemeriksaan baca-saja berhasil pada pencarian proyek aktif Freelancer dengan token akun yang tersimpan.' };
+    }
+    if (capability.operation === 'read_projects' && verification?.projectsError) {
+      return { ...capability, status: verification.projectsError === 'scope_denied' ? 'unsupported' as const : 'unknown' as const, evidence: failedCheckEvidence('proyek aktif', verification.projectsError) };
+    }
+    if (capability.operation === 'read_portfolio' && verification?.readPortfolio) {
+      return { ...capability, status: 'supported' as const, evidence: 'Pemeriksaan baca-saja berhasil pada GET /api/users/0.1/portfolios/ untuk ID akun sendiri (limit 1). Isi portofolio tidak disimpan.' };
+    }
+    if (capability.operation === 'read_portfolio' && verification?.portfolioError) {
+      return { ...capability, status: verification.portfolioError === 'scope_denied' ? 'unsupported' as const : 'unknown' as const, evidence: failedCheckEvidence('portofolio', verification.portfolioError) };
+    }
+    if (capability.operation === 'read_messages' && verification?.readMessages) {
+      return { ...capability, status: 'supported' as const, evidence: 'Pemeriksaan baca-saja berhasil pada daftar thread akun dan GET pesan dengan limit 1. Isi pesan tidak disimpan.' };
+    }
+    if (capability.operation === 'read_messages' && verification?.messagesError) {
+      return { ...capability, status: verification.messagesError === 'scope_denied' ? 'unsupported' as const : 'unknown' as const, evidence: failedCheckEvidence('pesan', verification.messagesError) };
     }
     return { ...capability };
   });
@@ -181,6 +216,57 @@ export class FreelancerReadAdapter {
       country: isRecord(result.country) ? text(result.country.name) ?? null : null,
       profileUrl: username ? `https://www.freelancer.com/u/${encodeURIComponent(username)}` : null,
     };
+  }
+
+  async checkOwnPortfolioRead(userId: string): Promise<void> {
+    const url = new URL(`${API_ROOT}/users/0.1/portfolios/`);
+    url.search = new URLSearchParams({ 'users[]': userId, limit: '1', offset: '0' }).toString();
+    const result = resultRecord(await (await this.request(url)).json());
+    if (!isRecord(result.users) || !Object.hasOwn(result.users, userId) || !isRecord(result.portfolios)) {
+      throw new FreelancerReadError('invalid_response', 'Respons portofolio Freelancer tidak memiliki struktur daftar pengguna dan portofolio yang valid.');
+    }
+  }
+
+  async checkOwnMessageRead(userId: string): Promise<void> {
+    const threadsUrl = new URL(`${API_ROOT}/messages/0.1/threads/`);
+    threadsUrl.search = new URLSearchParams({ 'members[]': userId }).toString();
+    const threadPayload: unknown = await (await this.request(threadsUrl)).json();
+    let threadResult: JsonRecord;
+    try {
+      threadResult = resultRecord(threadPayload);
+    } catch (error) {
+      if (error instanceof FreelancerReadError && error.code === 'invalid_response') {
+        throw new FreelancerReadError('threads_invalid_response', 'Respons daftar thread Freelancer tidak sesuai format API.');
+      }
+      throw error;
+    }
+    const threads = threadResult.threads;
+    let threadId: string | undefined;
+    if (Array.isArray(threads)) {
+      for (const thread of threads) {
+        if (isRecord(thread) && identifier(thread.id)) { threadId = identifier(thread.id); break; }
+      }
+    } else if (isRecord(threads)) {
+      for (const [key, thread] of Object.entries(threads)) {
+        if (!isRecord(thread)) continue;
+        threadId = identifier(thread.id) ?? identifier(key);
+        if (threadId) break;
+      }
+    } else {
+      throw new FreelancerReadError('threads_invalid_response', 'Respons thread Freelancer tidak memiliki daftar thread yang valid.');
+    }
+    if (!threadId) throw new FreelancerReadError('no_message_thread', 'Tidak ada thread milik akun untuk menguji akses baca pesan.');
+
+    const messagesUrl = new URL(`${API_ROOT}/messages/0.1/messages/`);
+    messagesUrl.search = new URLSearchParams({ 'threads[]': threadId, limit: '1', offset: '0' }).toString();
+    const messagePayload: unknown = await (await this.request(messagesUrl)).json();
+    if (!isRecord(messagePayload) || !isRecord(messagePayload.result)) {
+      throw new FreelancerReadError('messages_invalid_response', 'Respons daftar pesan Freelancer tidak sesuai format API.');
+    }
+    const messageResult = messagePayload.result;
+    if (!Array.isArray(messageResult.messages) && !isRecord(messageResult.messages)) {
+      throw new FreelancerReadError('messages_invalid_response', 'Respons pesan Freelancer tidak memiliki daftar pesan yang valid.');
+    }
   }
 
   async searchActiveProjects(query: string, limit = 25): Promise<FreelancerProjectsResult> {

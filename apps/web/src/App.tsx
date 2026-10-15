@@ -255,7 +255,7 @@ function OpportunitiesPage() {
     </section>
     <section className="sync-panel form-card" aria-label="Sinkronisasi peluang Freelancer">
       <div className="section-heading"><div><p className="eyebrow">Sumber peluang</p><h2>Freelancer.com</h2></div><StateLabel state={capabilities.data?.freelancerCredentials.verificationStatus ?? 'unverified'} /></div>
-      <p className="form-help">Pencarian ini hanya membaca proyek aktif. Token {capabilities.data?.freelancerCredentials.accessTokenConfigured ? 'tersimpan di secure store Windows' : 'belum tersedia di secure store'}; tidak ada bid atau pesan yang dikirim.</p>
+      <p className="form-help">Pencarian ini hanya membaca proyek aktif. Token {capabilities.data?.freelancerCredentials.accessTokenConfigured ? 'tersedia di konfigurasi server lokal' : 'belum dikonfigurasi di server lokal'}; tidak ada bid atau pesan yang dikirim.</p>
       <form className="sync-form" onSubmit={(event) => { event.preventDefault(); syncFreelancer.mutate(); }}>
         <label className="form-field"><span>Kata kunci proyek</span><input value={freelancerSearch} onChange={(event) => setFreelancerSearch(event.target.value)} minLength={2} maxLength={120} placeholder="misalnya TypeScript" /></label>
         <button className="button button-secondary" type="submit" disabled={!capabilities.data?.freelancerCredentials.accessTokenConfigured || freelancerSearch.trim().length < 2 || syncFreelancer.isPending}>{syncFreelancer.isPending ? 'Menyinkronkan…' : 'Sinkronkan proyek'}</button>
@@ -584,8 +584,8 @@ function CapabilitiesPage() {
       <section className="form-card">
         <div className="section-heading"><div><p className="eyebrow">Freelancer.com</p><h2>Capability marketplace</h2></div><StateLabel state={query.data.freelancerCredentials.verificationStatus} /></div>
         {query.data.marketplace.map((item) => <div className="capability-row" key={item.operation}><div><strong>{item.operation.replaceAll('_', ' ')}</strong><p>{item.evidence}</p></div><StateLabel state={item.status} /></div>)}
-        <p className="provider-limit">Token API {query.data.freelancerCredentials.accessTokenConfigured ? 'tersimpan terenkripsi untuk akun Windows ini' : 'belum diatur'}. Pemeriksaan hanya membaca profil dan satu hasil pencarian proyek.</p>
-        <button type="button" className="button button-secondary" disabled={!query.data.freelancerCredentials.accessTokenConfigured || verifyFreelancer.isPending} onClick={() => verifyFreelancer.mutate()}>{verifyFreelancer.isPending ? 'Memeriksa koneksi…' : 'Periksa koneksi Freelancer'}</button>
+        <p className="provider-limit">Token API {query.data.freelancerCredentials.accessTokenConfigured ? 'dikonfigurasi pada server lokal dan tidak dikirim ke browser' : 'belum diatur'}. Pemeriksaan membaca profil, satu hasil pencarian proyek, maksimal satu data portofolio, dan satu pesan dari thread akun. Isi portofolio maupun pesan tidak disimpan.</p>
+        <button type="button" className="button button-secondary" disabled={!query.data.freelancerCredentials.accessTokenConfigured || verifyFreelancer.isPending} onClick={() => verifyFreelancer.mutate()}>{verifyFreelancer.isPending ? 'Memeriksa koneksi…' : 'Periksa semua akses baca'}</button>
       </section>
       <section className="form-card">
         <div className="section-heading"><div><p className="eyebrow">Sumber lain</p><h2>Knowledge dan drafting</h2></div></div>

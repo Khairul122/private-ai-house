@@ -109,6 +109,8 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       verificationStatus: freelancerVerification?.connected ? 'connected' : freelancerVerification?.reason === 'invalid_token' ? 'invalid' : freelancerVerification ? 'unavailable' : 'unverified',
       readProfile: freelancerVerification?.readProfile ?? false,
       readProjects: freelancerVerification?.readProjects ?? false,
+      readPortfolio: freelancerVerification?.readPortfolio ?? false,
+      readMessages: freelancerVerification?.readMessages ?? false,
     },
     github: {
       read: 'supported',
@@ -136,20 +138,24 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
 
   app.post('/api/freelancer/verify', async (_request, reply) => {
     const credentialStatus = options.getCredentialStatus?.() ?? options.credentialStatus;
-    if (!credentialStatus?.freelancerAccessTokenConfigured) return reply.code(409).send({ error: 'Token Freelancer belum tersimpan di secure store Windows.' });
+    if (!credentialStatus?.freelancerAccessTokenConfigured) return reply.code(409).send({ error: 'Token Freelancer belum dikonfigurasi di .env atau secure store Windows.' });
     if (!options.verifyFreelancer) return reply.code(503).send({ error: 'Pemeriksaan koneksi Freelancer belum tersedia di server ini.' });
     freelancerVerification = await options.verifyFreelancer();
+    const resultSummary = [
+      ['profil', freelancerVerification.readProfile],
+      ['proyek', freelancerVerification.readProjects],
+      ['portofolio', freelancerVerification.readPortfolio ?? false],
+      ['pesan', freelancerVerification.readMessages ?? false],
+    ].map(([label, ok]) => `${label}: ${ok ? 'ok' : 'belum terverifikasi'}`).join('; ');
     return {
       ...freelancerVerification,
-      message: freelancerVerification.connected
-        ? 'Koneksi Freelancer terverifikasi. Akses profil dan pencarian proyek baca-saja tersedia.'
-        : 'Koneksi belum terverifikasi. Periksa token, scope, atau koneksi jaringan lalu coba lagi.',
+      message: `${freelancerVerification.connected ? 'Koneksi Freelancer berhasil diperiksa' : 'Koneksi Freelancer belum terverifikasi'}. ${resultSummary}.`,
     };
   });
 
   app.post('/api/freelancer/projects/sync', async (request, reply) => {
     const credentialStatus = options.getCredentialStatus?.() ?? options.credentialStatus;
-    if (!credentialStatus?.freelancerAccessTokenConfigured) return reply.code(409).send({ error: 'Token Freelancer belum tersimpan di secure store Windows.' });
+    if (!credentialStatus?.freelancerAccessTokenConfigured) return reply.code(409).send({ error: 'Token Freelancer belum dikonfigurasi di .env atau secure store Windows.' });
     if (!options.readFreelancerProjects) return reply.code(503).send({ error: 'Sinkronisasi Freelancer belum tersedia di server ini.' });
     const parsed = parseBody(freelancerSyncSchema, request.body);
     if ('issues' in parsed) return reply.code(400).send({ error: 'Pencarian proyek tidak valid.', issues: parsed.issues });
@@ -160,6 +166,10 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
         connected: true,
         readProfile: freelancerVerification?.readProfile ?? false,
         readProjects: true,
+        readPortfolio: freelancerVerification?.readPortfolio ?? false,
+        readMessages: freelancerVerification?.readMessages ?? false,
+        ...(freelancerVerification?.portfolioError ? { portfolioError: freelancerVerification.portfolioError } : {}),
+        ...(freelancerVerification?.messagesError ? { messagesError: freelancerVerification.messagesError } : {}),
         reason: freelancerVerification?.readProfile ? 'verified' : 'profile_unavailable',
       };
       repository.appendAudit({
@@ -475,6 +485,8 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
           connection: freelancerVerification?.connected ? 'connected' : freelancerVerification?.reason === 'invalid_token' ? 'invalid' : freelancerVerification ? 'unavailable' : 'unverified',
           readProjects: freelancerVerification?.readProjects ? 'supported' : 'unknown',
           readProfile: freelancerVerification?.readProfile ? 'supported' : 'unknown',
+          readPortfolio: freelancerVerification?.readPortfolio ? 'supported' : freelancerVerification?.portfolioError === 'scope_denied' ? 'unsupported' : 'unknown',
+          readMessages: freelancerVerification?.readMessages ? 'supported' : freelancerVerification?.messagesError === 'scope_denied' ? 'unsupported' : 'unknown',
           writes: 'unknown',
         },
         github: 'read-only',

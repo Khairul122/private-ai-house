@@ -79,7 +79,7 @@ export type Opportunity = {
 
 export type Capabilities = {
   marketplace: Array<{ operation: string; status: string; evidence: string }>;
-  freelancerCredentials: { accessTokenConfigured: boolean; verificationStatus: string; readProfile: boolean; readProjects: boolean };
+  freelancerCredentials: { accessTokenConfigured: boolean; verificationStatus: string; readProfile: boolean; readProjects: boolean; readPortfolio: boolean; readMessages: boolean };
   github: { read: string; verificationStatus: string; scope: string; tokenConfigured: boolean };
   linkedin: { read: string; reason: string; redirectUri: string | null; clientConfigured: boolean; authorized: boolean; verificationStatus: string; accessTokenExpiresAt: string | null };
   hermes: { draft: string; active: boolean; reason: string };

@@ -17,6 +17,7 @@ Open `http://127.0.0.1:5174`. SQLite data is kept in the ignored `.local` direct
 
 ## Configure optional sources
 
+- Freelancer.com read-only access accepts `FVH_FREELANCER_ACCESS_TOKEN` in the ignored server `.env`; the Windows DPAPI secure store remains the fallback when the environment key is absent. The token is never returned to the browser or written to logs.
 - Public GitHub repositories can be read by owner/name. For a private repository, set `GITHUB_TOKEN` in the server environment with access only to the selected repository and `Contents: read` permission. The token is never returned to the browser or written to the database.
 - LinkedIn OIDC is optional and requires the app product and exact redirect URL to be approved. Import a text or CSV export that belongs to you, or enter profile facts manually.
 - Hermes drafting is disabled until the CLI/profile are configured and `FVH_AI_DATA_CONSENT=true` is explicitly set. The current profile is `private-ai-house`; see [the local profile and cron setup](docs/hermes-agent-setup.md). If enabled, only the selected project, supplied profile facts, and up to four relevant local evidence chunks are passed to the CLI. Marketplace credentials are excluded, and drafting never submits marketplace actions.
