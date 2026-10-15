@@ -309,7 +309,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       reason: 'Hanya profil OIDC ringan yang diminta. Produk OIDC LinkedIn harus disetujui dan URL callback yang ditampilkan harus diterima di Developer Portal; akses profil lengkap tetap tidak tersedia.',
     },
     hermes: {
-      draft: 'optional', active: draftingMode === 'hermes', draftsInProgress,
+      draft: 'optional', active: draftingMode === 'hermes', draftsInProgress: draftsInProgress + (options.autopilot?.getStatus().draftsInProgress ?? 0),
       reason: draftingMode === 'hermes'
         ? 'Data proyek terpilih, fakta profil yang diberikan, dan hingga empat potongan bukti lokal dikirim ke profil Hermes yang dikonfigurasi; kredensial marketplace tidak disertakan.'
         : options.draftingReason ?? 'Hermes belum aktif. Draf AI tidak dibuat sampai profil Hermes dikonfigurasi dan persetujuan pemrosesan data diberikan.',

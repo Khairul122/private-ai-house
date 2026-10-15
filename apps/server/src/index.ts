@@ -64,20 +64,23 @@ const businessSync = new BusinessSync({
   readSelfId: async () => (await (await createFreelancerReader()).readOwnProfile()).id,
   readThreads: async (selfId) => (await createFreelancerReader()).readLatestThreadMessages(selfId, 30),
 });
-const autopilot = new FreelancerAutopilot({
-  repository,
-  readProfile: async () => (await createFreelancerReader()).readOwnProfile(),
-  readProjects: async (query, limit) => (await createFreelancerReader()).searchActiveProjects(query, limit),
-  syncProfileJobs: async (jobIds) => new FreelancerProductionWriteAdapter({ token: await getFreelancerToken() }).run({ operation: 'edit_profile', jobIds }),
-  submitBid: async (input) => new FreelancerProductionWriteAdapter({ token: await getFreelancerToken() }).run(input),
-});
 const draftingConfig = readDraftingEnvironment(projectRoot);
 const hermesEnabled = draftingConfig.valid && draftingConfig.mode === 'hermes' && draftingConfig.consent;
 const drafting = hermesEnabled ? new HermesCliDraftingAdapter({
   executable: draftingConfig.executable,
   profile: draftingConfig.profile,
   workspaceRoot: projectRoot,
+  // ComboHermes via 9router takes 40-95 s for a full proposal context; 90 s was cutting real drafts off.
+  timeoutMs: 180_000,
 }) : undefined;
+const autopilot = new FreelancerAutopilot({
+  repository,
+  readProfile: async () => (await createFreelancerReader()).readOwnProfile(),
+  readProjects: async (query, limit) => (await createFreelancerReader()).searchActiveProjects(query, limit),
+  syncProfileJobs: async (jobIds) => new FreelancerProductionWriteAdapter({ token: await getFreelancerToken() }).run({ operation: 'edit_profile', jobIds }),
+  submitBid: async (input) => new FreelancerProductionWriteAdapter({ token: await getFreelancerToken() }).run(input),
+  ...(drafting ? { draftProposal: (input: Parameters<typeof drafting.draftBid>[0]) => drafting.draftBid(input) } : {}),
+});
 const draftingReason = !draftingConfig.valid
   ? 'Konfigurasi Hermes tidak valid. Periksa nama profile dan executable di .env.'
   : draftingConfig.mode !== 'hermes'

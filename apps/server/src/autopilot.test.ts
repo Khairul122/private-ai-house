@@ -67,6 +67,28 @@ describe('FreelancerAutopilot', () => {
     expect(repository.getProfile()).toMatchObject({ primaryField: 'Backend Engineer', specializations: ['Laravel', 'Python'], facts: [{ value: 'Isi pemilik' }] });
   });
 
+  it.each([
+    ['uses the Hermes proposal at the policy price', async () => ({ proposal: 'Halo, saya siap membangun Python REST API Anda dengan dokumentasi dan uji integrasi. Harga USD 100 untuk 14 hari.', proposedPrice: 100, durationDays: 14, confidence: 0.8, evidence: [{ label: 'README.md', source: 'https://github.com/me/api' }], assumptions: [] }), 'Halo, saya siap', false],
+    ['falls back when Hermes names a different price', async () => ({ proposal: 'I can deliver this Python REST API with clear documentation for $350 in two weeks, including tests.', proposedPrice: 100, durationDays: 14, confidence: 0.8, evidence: [], assumptions: [] }), 'Hello Client,', true],
+    ['falls back when Hermes fails', async () => { throw new Error('Hermes Agent melewati batas waktu.'); }, 'Hello Client,', true],
+  ] as const)('%s', async (_name, draftProposal, expectedStart, fellBack) => {
+    repository = new WorkspaceRepository();
+    const submitBid = vi.fn<(input: { description: string }) => Promise<{ statusCode: number; resultId: string }>>(async () => ({ statusCode: 200, resultId: '9001' }));
+    const draft = vi.fn(draftProposal);
+    autopilot = new FreelancerAutopilot({
+      repository, now: () => now, intervalMs: 60_000, readProfile: async () => profile,
+      readProjects: async () => ({ projects: [project], skipped: 0 }), submitBid, draftProposal: draft,
+    });
+
+    await autopilot.start();
+
+    expect(draft).toHaveBeenCalledWith(expect.objectContaining({ fixedBid: { amount: 100, currency: 'USD', durationDays: 14 } }));
+    expect(submitBid).toHaveBeenCalledTimes(1);
+    expect(submitBid.mock.calls[0]![0].description.startsWith(expectedStart)).toBe(true);
+    expect(repository.hasAudit('autopilot.draft_fallback', project.id)).toBe(fellBack);
+    expect(autopilot.getStatus().draftsInProgress).toBe(0);
+  });
+
   it('stays blocked when the public profile does not support any listed skill', async () => {
     repository = new WorkspaceRepository();
     const submitBid = vi.fn();

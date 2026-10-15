@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFile } from 'node:fs/promises';
 import { HermesCliDraftingAdapter, type ProcessRunner } from './index.js';
 
 const input = {
@@ -53,6 +54,21 @@ describe('HermesCliDraftingAdapter', () => {
     expect(captured?.options.shell).toBe(false);
     expect(captured?.options.env.GITHUB_TOKEN).toBeUndefined();
     expect(captured?.options.env.OPENAI_API_KEY).toBeUndefined();
+  });
+
+  it('keeps string evidence as unsourced labels and states the fixed bid in the prompt', async () => {
+    let prompt = '';
+    const runner: ProcessRunner = vi.fn(async (_command, args) => {
+      prompt = await readFile(args[args.indexOf('--query-file') + 1]!, 'utf8');
+      return { stdout: resultEvent({ ...output, evidence: ['Lima tahun pengalaman freelance.'] }), stderr: '', exitCode: 0 };
+    });
+    const adapter = new HermesCliDraftingAdapter({ executable: 'hermes.exe', profile: 'private-ai-house', workspaceRoot: 'D:/private-ai-house', runner });
+
+    const result = await adapter.draftBid({ ...input, fixedBid: { amount: 150, currency: 'USD', durationDays: 10 } });
+
+    expect(result.evidence).toEqual([{ label: 'Lima tahun pengalaman freelance.', source: 'Disebut Hermes tanpa sumber spesifik' }]);
+    expect(prompt).toContain('proposedPrice harus tepat 150');
+    expect(prompt).toContain('evidence = array objek');
   });
 
   it('fails closed for malformed output, tool activity, and process errors', async () => {

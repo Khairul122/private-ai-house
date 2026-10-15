@@ -90,6 +90,13 @@ function runProcess(command: string, args: string[], options: ProcessOptions): P
   });
 }
 
+// Models sometimes return evidence as plain strings; keep them, labelled as unsourced, instead of discarding the whole draft.
+function normalizeOutput(output: unknown): unknown {
+  if (typeof output !== 'object' || output === null || !Array.isArray((output as { evidence?: unknown }).evidence)) return output;
+  const record = output as { evidence: unknown[] };
+  return { ...record, evidence: record.evidence.map((item) => (typeof item === 'string' ? { label: item.slice(0, 200), source: 'Disebut Hermes tanpa sumber spesifik' } : item)) };
+}
+
 function extractFinalText(output: string): string {
   const deltas: string[] = [];
   let finalText: string | undefined;
@@ -162,6 +169,7 @@ export class HermesCliDraftingAdapter implements AiDraftingPort {
         'Gunakan hanya fakta profil dan bukti yang diberikan. Jangan mengarang pengalaman atau hasil. Harga harus berada dalam rentang anggaran proyek.',
         ...(input.fixedBid ? [`Harga dan durasi sudah ditetapkan kebijakan: proposedPrice harus tepat ${input.fixedBid.amount}, durationDays harus tepat ${input.fixedBid.durationDays}, mata uang ${input.fixedBid.currency}. Jangan menyebut nominal harga lain di proposal. Panjang proposal maksimal 1.200 karakter.`] : []),
         'Keluarkan hanya satu objek JSON dengan kunci proposal, proposedPrice, durationDays, confidence, evidence, assumptions. Jangan mengirim atau menerbitkan apa pun.',
+        'Format kunci: proposal = teks minimal 40 karakter; proposedPrice = angka; durationDays = bilangan bulat; confidence = angka 0 sampai 1; evidence = array objek {"label": teks, "source": label atau URL fakta/bukti yang dipakai}; assumptions = array teks. Tanpa blok kode markdown.',
         'DATA KONTEKS:',
         JSON.stringify(boundedContext),
       ].join('\n\n');
@@ -183,7 +191,7 @@ export class HermesCliDraftingAdapter implements AiDraftingPort {
       const text = extractFinalText(result.stdout);
       let output: unknown;
       try { output = JSON.parse(text); } catch { throw new HermesDraftingError('invalid_output', 'Output Hermes Agent bukan objek JSON yang dapat dibaca.'); }
-      const parsed = proposalDraftOutputSchema.safeParse(output);
+      const parsed = proposalDraftOutputSchema.safeParse(normalizeOutput(output));
       if (!parsed.success) throw new HermesDraftingError('invalid_output', 'Output Hermes Agent tidak sesuai skema proposal.');
       return parsed.data;
     } finally {
