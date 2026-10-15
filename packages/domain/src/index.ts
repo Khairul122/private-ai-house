@@ -1,3 +1,4 @@
+export * from './bid-outcome.js';
 export * from './policy.js';
 export * from './pipeline.js';
 export * from './scoring.js';

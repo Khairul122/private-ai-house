@@ -118,6 +118,31 @@ export type AuditEvent = {
   createdAt: string;
 };
 
+export type DashboardResponse = {
+  mode: string;
+  counts: { openProjects: number; drafts: number; submittedBids: number; policySkips: number; knowledgeSources: number };
+  policy: { state: Policy['state']; version: number; simulationOnly: boolean };
+  profileComplete: boolean;
+  projects: Opportunity[];
+  activity: AuditEvent[];
+  externalWrites: boolean;
+  bidUsage?: { today: number; week: number };
+};
+
+export type PipelineItem = Opportunity & { latestDraft: BidDraft | null };
+
+export type BusinessSyncStatus = {
+  step: 'outcomes' | 'messages' | null;
+  outcomes: { lastRunAt: string | null; ok: boolean | null; error: string | null; checked: number };
+};
+
+export type Insights = {
+  outcomes: { submitted: number; won: number; lost: number; pending: number; winRate: number | null };
+  recent: Array<{ projectId: string; title: string | null; submittedAt: string; outcome: string; awardStatus: string | null; checkedAt: string | null }>;
+  skips: { total: number; recent7d: number; reasons: Array<{ reason: string; total: number; recent: number }> };
+  lastCheck: { at: string | null; ok: boolean | null; error: string | null };
+};
+
 export type Autopilot = {
   state: 'starting' | 'running' | 'paused' | 'blocked' | 'error';
   lastRunAt: string | null;
@@ -126,4 +151,5 @@ export type Autopilot = {
   lastImported: number;
   lastSubmitted: number;
   specializations: string[];
+  cycleInProgress?: boolean;
 };

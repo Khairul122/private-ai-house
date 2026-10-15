@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
@@ -9,7 +9,10 @@ export function createDatabase(filename = ':memory:') {
   const sqlite = new Database(filename);
   sqlite.pragma('foreign_keys = ON');
   if (filename !== ':memory:') sqlite.pragma('journal_mode = WAL');
-  sqlite.exec(readFileSync(new URL('../migrations/0001_initial.sql', import.meta.url), 'utf8'));
+  const migrationDirectory = new URL('../migrations/', import.meta.url);
+  for (const migration of readdirSync(migrationDirectory).filter((name) => name.endsWith('.sql')).sort()) {
+    sqlite.exec(readFileSync(new URL(migration, migrationDirectory), 'utf8'));
+  }
   const db = drizzle(sqlite, { schema: tables });
   return { sqlite, db };
 }

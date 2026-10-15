@@ -14,7 +14,9 @@ import { prepareKnowledgeFile } from '@fvh/knowledge';
 import { WorkspaceRepository } from '@fvh/persistence';
 import type { CredentialStatus, FreelancerVerification } from './credential-store.js';
 import type { LinkedInOAuthService } from './linkedin-oauth.js';
+import { localDateKey, mondayKey } from './autopilot.js';
 import type { FreelancerAutopilot } from './autopilot.js';
+import type { BusinessSync } from './business-sync.js';
 
 const paramsSchema = z.object({ id: z.string().min(1).max(150) });
 const draftUpdateSchema = z.object({ proposal: z.string().trim().min(40).max(4_000), proposedPrice: z.number().finite().positive() });
@@ -48,6 +50,7 @@ export type AppOptions = {
   verifyFreelancerSandboxWrite?: (input: FreelancerSandboxWriteInput) => Promise<FreelancerSandboxWriteResult>;
   readFreelancerProjects?: (query: string, limit: number) => Promise<{ projects: ProjectOpportunity[]; skipped: number }>;
   autopilot?: FreelancerAutopilot;
+  businessSync?: BusinessSync;
   linkedinOAuth?: Pick<LinkedInOAuthService, 'redirectUri' | 'start' | 'handleCallback' | 'close'>;
   disconnectLinkedIn?: () => Promise<void>;
   fetcher?: typeof fetch;
@@ -61,19 +64,6 @@ export type AppOptions = {
 function parseBody<T>(schema: z.ZodType<T>, body: unknown): { value: T } | { issues: string[] } {
   const result = schema.safeParse(body);
   return result.success ? { value: result.data } : { issues: result.error.issues.map((issue) => `${issue.path.join('.') || 'body'}: ${issue.message}`) };
-}
-
-function localDateKey(date: Date, timezone: string): string {
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date);
-  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
-  return `${values.year}-${values.month}-${values.day}`;
-}
-
-function mondayKey(dateKey: string): string {
-  const date = new Date(`${dateKey}T00:00:00.000Z`);
-  const day = date.getUTCDay();
-  date.setUTCDate(date.getUTCDate() - ((day + 6) % 7));
-  return date.toISOString().slice(0, 10);
 }
 
 function isSameOrigin(origin: string, protocol: string, host: string | undefined): boolean {
@@ -130,6 +120,13 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   };
 
   app.addHook('onRequest', async (request, reply) => {
+    const host = request.headers.host;
+    try {
+      const hostname = host ? new URL(`http://${host}`).hostname : '';
+      if (!['127.0.0.1', 'localhost', '[::1]', '::1'].includes(hostname)) return reply.code(403).send({ error: 'Host tidak diizinkan.' });
+    } catch {
+      return reply.code(403).send({ error: 'Host tidak diizinkan.' });
+    }
     const origin = request.headers.origin;
     if (origin && !allowedDevOrigins.has(origin) && !isSameOrigin(origin, request.protocol, request.headers.host)) {
       return reply.code(403).send({ error: 'Origin tidak diizinkan.' });
@@ -150,6 +147,22 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   }));
   app.get('/api/autopilot', async () => options.autopilot?.getStatus() ?? {
     state: 'blocked', lastRunAt: null, nextRunAt: null, lastMessage: 'Autopilot belum tersedia pada server ini.', lastImported: 0, lastSubmitted: 0, specializations: [],
+  });
+  app.get('/api/business-sync', async () => options.businessSync?.getStatus() ?? null);
+  app.get('/api/insights/bids', async () => {
+    const outcomes = repository.listBidOutcomes();
+    const won = outcomes.filter(({ outcome }) => outcome === 'won').length;
+    const lost = outcomes.filter(({ outcome }) => outcome === 'lost').length;
+    const pending = outcomes.filter(({ outcome }) => outcome === 'pending').length;
+    const since = new Date(now().getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const reasons = repository.skipReasonSummary(since);
+    const lastCheck = outcomes.map(({ checkedAt }) => checkedAt).filter((value): value is string => value !== null).sort().at(-1) ?? null;
+    return {
+      outcomes: { submitted: outcomes.length, won, lost, pending, winRate: won + lost === 0 ? null : won / (won + lost) },
+      recent: outcomes.slice(0, 10).map((outcome) => ({ projectId: outcome.projectId, title: repository.getProject(outcome.projectId)?.title ?? null, submittedAt: outcome.submittedAt, outcome: outcome.outcome, awardStatus: outcome.awardStatus, checkedAt: outcome.checkedAt })),
+      skips: { total: reasons.reduce((total, reason) => total + Number(reason.total), 0), recent7d: reasons.reduce((total, reason) => total + Number(reason.recent), 0), reasons },
+      lastCheck: { at: lastCheck, ok: lastCheck ? true : null, error: null },
+    };
   });
   app.get('/api/capabilities', async () => {
     refreshProductionWriteChecks();
@@ -186,7 +199,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       read: 'supported',
       verificationStatus: repository.listKnowledgeSources().some((source) => source.provider === 'github') ? 'supported' : 'unknown',
       scope: 'selected repository Contents: read',
-      tokenConfigured: Boolean(options.getGitHubToken?.() ?? options.githubToken ?? process.env.GITHUB_TOKEN),
+      tokenConfigured: Boolean(options.getGitHubToken?.() ?? options.githubToken),
     },
     linkedin: {
       read: linkedin.authorized ? 'oidc-lite' : 'manual-only',
@@ -566,9 +579,13 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   app.get('/api/dashboard', async () => {
     const projects = repository.listProjects();
     const activity = repository.listAudit(8);
+    const audits = repository.listAudit(5_000);
     const sources = repository.listKnowledgeSources();
     const policy = repository.getPolicy();
     const profile = repository.getProfile();
+    const currentDate = localDateKey(now(), policy.timezone);
+    const currentWeek = mondayKey(currentDate);
+    const bidAudits = audits.filter((event) => event.type === 'marketplace.production.submit_bid' && event.status === 'recorded');
     return {
       mode: 'workspace lokal',
       counts: {
@@ -579,6 +596,10 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
         knowledgeSources: sources.length,
       },
       policy: { state: policy.state, version: policy.version, simulationOnly: policy.simulationOnly },
+      bidUsage: {
+        today: bidAudits.filter((event) => localDateKey(new Date(event.createdAt), policy.timezone) === currentDate).length,
+        week: bidAudits.filter((event) => mondayKey(localDateKey(new Date(event.createdAt), policy.timezone)) === currentWeek).length,
+      },
       profileComplete: Boolean(profile.primaryField && profile.specializations.length),
       projects: projects.slice(0, 4),
       activity,
@@ -617,7 +638,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   app.post('/api/knowledge/github/sync', async (request, reply) => {
     const parsed = parseBody(githubSyncSchema, request.body);
     if ('issues' in parsed) return reply.code(400).send({ error: 'Repositori tidak valid.', issues: parsed.issues });
-    const token = options.getGitHubToken?.() ?? options.githubToken ?? process.env.GITHUB_TOKEN;
+    const token = options.getGitHubToken?.() ?? options.githubToken;
     const adapter = new GitHubReadAdapter({ ...(token ? { token } : {}), ...(options.fetcher ? { fetcher: options.fetcher } : {}) });
     try {
       const result = await adapter.readRepository(parsed.value.repository);

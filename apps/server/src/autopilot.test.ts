@@ -40,6 +40,7 @@ describe('FreelancerAutopilot', () => {
       submitBid,
     });
 
+    expect(autopilot.getStatus().cycleInProgress).toBe(false);
     await autopilot.start();
     expect(autopilot.getStatus()).toMatchObject({ state: 'running', lastSubmitted: 1 });
     await autopilot.runCycle();

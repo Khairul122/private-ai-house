@@ -15,6 +15,16 @@ describe('WorkspaceRepository', () => {
     expect(repository.getProfile().facts).toEqual([]);
   });
 
+  it('stores submitted bids and updates outcomes', () => {
+    repository = new WorkspaceRepository();
+    const submittedAt = '2026-10-16T10:00:00.000Z';
+
+    expect(repository.recordSubmittedBid({ projectId: 'freelancer:71', bidId: '9001', amount: 25, currency: 'USD', submittedAt })).toMatchObject({ projectId: 'freelancer:71', bidId: '9001', outcome: 'pending', submittedAt });
+    expect(repository.recordSubmittedBid({ projectId: 'freelancer:71', bidId: '9002', amount: 30, currency: 'USD', submittedAt })).toMatchObject({ bidId: '9001' });
+    expect(repository.updateBidOutcome('freelancer:71', { awardStatus: 'won', outcome: 'won', checkedAt: submittedAt })).toMatchObject({ outcome: 'won', awardStatus: 'won' });
+    expect(repository.listBidOutcomes()).toHaveLength(1);
+  });
+
   it('claims a live operation once across concurrent workers', () => {
     repository = new WorkspaceRepository();
     const claim = {

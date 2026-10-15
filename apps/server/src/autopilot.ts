@@ -22,6 +22,7 @@ export type AutopilotStatus = {
   lastImported: number;
   lastSubmitted: number;
   specializations: string[];
+  cycleInProgress: boolean;
 };
 
 const dayMs = 24 * 60 * 60 * 1_000;
@@ -66,13 +67,13 @@ function seedPolicy(policy: AutonomyPolicy, profile: ServiceProfile, now: Date):
   };
 }
 
-function localDateKey(date: Date, timezone: string): string {
+export function localDateKey(date: Date, timezone: string): string {
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date);
   const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
   return `${values.year}-${values.month}-${values.day}`;
 }
 
-function mondayKey(value: string): string {
+export function mondayKey(value: string): string {
   const date = new Date(`${value}T00:00:00.000Z`);
   date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));
   return date.toISOString().slice(0, 10);
@@ -117,7 +118,7 @@ export class FreelancerAutopilot {
   private busy = false;
   private status: AutopilotStatus = {
     state: 'starting', lastRunAt: null, nextRunAt: null, lastMessage: 'Membaca profil Freelancer untuk menyiapkan operasi otomatis.',
-    lastImported: 0, lastSubmitted: 0, specializations: [],
+    lastImported: 0, lastSubmitted: 0, specializations: [], cycleInProgress: false,
   };
 
   private scheduleRetry(): void {
@@ -138,7 +139,7 @@ export class FreelancerAutopilot {
   getStatus(): AutopilotStatus {
     const policy = this.dependencies.repository.getPolicy();
     const state = policy.state === 'paused' ? 'paused' : policy.state !== 'active' || policy.simulationOnly ? 'blocked' : this.status.state;
-    return { ...this.status, state, specializations: [...this.status.specializations] };
+    return { ...this.status, state, cycleInProgress: this.busy, specializations: [...this.status.specializations] };
   }
 
   async start(): Promise<void> {
@@ -283,7 +284,11 @@ export class FreelancerAutopilot {
           const success = result.statusCode === 200;
           repository.appendAudit({ type: 'marketplace.production.submit_bid', resourceId: project.id, status: success ? 'recorded' : 'failed', reason: `Bid otomatis menghasilkan HTTP ${result.statusCode}.${result.resultId ? ` ID hasil: ${result.resultId}.` : ''} Isi proposal tidak disimpan pada audit.`, policyVersion: policy.version, payloadHash });
           if (success) {
-            repository.setPipelineStatus(project.id, 'submitted');
+            if (result.resultId?.trim()) {
+              repository.setPipelineStatus(project.id, 'submitted');
+              repository.recordSubmittedBid({ projectId: project.id, bidId: result.resultId, amount: bid.amount, currency: project.currency, submittedAt: runAt.toISOString() });
+              repository.appendAudit({ type: 'business.bid_submitted', resourceId: project.id, status: 'recorded', reason: `Bid Freelancer terkonfirmasi dan dicatat pada operasi bisnis lokal. ID hasil: ${result.resultId}.`, policyVersion: policy.version, payloadHash: null, createdAt: runAt.toISOString() });
+            }
             submitted += 1;
             dailyUsed += 1;
             weeklyUsed += 1;

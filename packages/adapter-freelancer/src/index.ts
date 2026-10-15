@@ -1,4 +1,4 @@
-import type { CapabilityStatus, ProjectOpportunity } from '@fvh/domain';
+import { bidOutcome, type CapabilityStatus, type ProjectOpportunity } from '@fvh/domain';
 
 export type FreelancerCapability = {
   operation: 'read_projects' | 'read_profile' | 'read_portfolio' | 'read_messages' | 'submit_bid' | 'edit_profile' | 'send_message';
@@ -31,6 +31,7 @@ export type FreelancerProfile = {
 };
 
 export type FreelancerProjectsResult = { projects: ProjectOpportunity[]; skipped: number };
+export type FreelancerBidStatus = { bidId: string; projectId: string; awardStatus: string | null; retracted: boolean };
 export type FreelancerLatestMessage = { threadId: number; messageId: number; senderId: string; message: string; createdAt: string };
 
 type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -289,6 +290,29 @@ export class FreelancerReadAdapter {
       jobs,
       jobIds,
     };
+  }
+
+  async readOwnBids(bidIds: string[]): Promise<FreelancerBidStatus[]> {
+    if (bidIds.length > 100 || bidIds.some((id) => !/^\d{1,30}$/.test(id))) {
+      throw new FreelancerReadError('invalid_query', 'ID bid harus berupa angka dengan panjang 1–30 karakter, maksimal 100 ID.');
+    }
+    const url = new URL(`${API_ROOT}/projects/0.1/bids/`);
+    const params = new URLSearchParams();
+    for (const id of bidIds) params.append('bids[]', id);
+    url.search = params.toString();
+    const result = resultRecord(await (await this.request(url)).json());
+    const rawBids = result.bids;
+    if (!Array.isArray(rawBids) && !isRecord(rawBids)) {
+      throw new FreelancerReadError('invalid_response', 'Respons bid Freelancer tidak memiliki daftar yang valid.');
+    }
+    return objectValues(rawBids).flatMap((bid): FreelancerBidStatus[] => {
+      const id = text(bid.id);
+      const projectId = text(bid.project_id);
+      const awardStatus = text(bid.award_status) ?? null;
+      const retracted = bid.retracted === true;
+      if (!id || !projectId) return [];
+      return [{ id, bidId: id, projectId, awardStatus, retracted, outcome: bidOutcome(awardStatus, retracted) }];
+    });
   }
 
   async checkOwnPortfolioRead(userId: string): Promise<void> {

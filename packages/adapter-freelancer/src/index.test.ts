@@ -24,6 +24,29 @@ describe('FreelancerReadAdapter', () => {
     expect(init).toMatchObject({ method: 'GET', headers: { 'Freelancer-OAuth-V1': 'test-token-value-1234' } });
   });
 
+  it('reads own bid statuses with repeated bid IDs and exact outcome fields', async () => {
+    const requests: Array<string | URL | Request> = [];
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      requests.push(input);
+      return jsonResponse({ result: { bids: {
+        '11': { id: '11', project_id: '77', award_status: 'awarded', retracted: false },
+        '12': { id: '12', project_id: '78', award_status: 'rejected', retracted: false },
+        '13': { id: '13', project_id: '79', award_status: null, retracted: true },
+      } } });
+    });
+    const adapter = new FreelancerReadAdapter({ token: 'test-token-value-1234', fetcher });
+
+    await expect(adapter.readOwnBids(['11', '12', '13'])).resolves.toEqual([
+      { id: '11', bidId: '11', projectId: '77', awardStatus: 'awarded', retracted: false, outcome: 'won' },
+      { id: '12', bidId: '12', projectId: '78', awardStatus: 'rejected', retracted: false, outcome: 'lost' },
+      { id: '13', bidId: '13', projectId: '79', awardStatus: null, retracted: true, outcome: 'lost' },
+    ]);
+    expect(new URL(String(requests[0])).searchParams.getAll('bids[]')).toEqual(['11', '12', '13']);
+    await expect(adapter.readOwnBids(['0'.repeat(31)])).rejects.toMatchObject({ code: 'invalid_query' });
+    await expect(adapter.readOwnBids(Array.from({ length: 101 }, (_, index) => String(index + 1)))).rejects.toMatchObject({ code: 'invalid_query' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it('searches active projects and imports only rows that contain project identifiers and titles', async () => {
     const requests: Array<[string | URL | Request, RequestInit | undefined]> = [];
     const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {

@@ -1,4 +1,4 @@
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 export const workspaces = sqliteTable('workspaces', {
   id: text('id').primaryKey(),
@@ -55,6 +55,17 @@ export const knowledgeSources = sqliteTable('knowledge_sources', {
   updatedAt: text('updated_at').notNull(),
 });
 
+export const bidOutcomes = sqliteTable('bid_outcomes', {
+  projectId: text('project_id').primaryKey(),
+  bidId: text('bid_id').notNull(),
+  amount: real('amount'),
+  currency: text('currency'),
+  submittedAt: text('submitted_at').notNull(),
+  awardStatus: text('award_status'),
+  outcome: text('outcome').notNull().default('pending'),
+  checkedAt: text('checked_at'),
+});
+
 export const knowledgeChunks = sqliteTable('knowledge_chunks', {
   id: text('id').primaryKey(),
   sourceId: text('source_id').notNull().references(() => knowledgeSources.id, { onDelete: 'cascade' }),
@@ -66,4 +77,4 @@ export const knowledgeChunks = sqliteTable('knowledge_chunks', {
   createdAt: text('created_at').notNull(),
 }, (table) => [index('idx_chunks_source').on(table.sourceId)]);
 
-export const schema = { workspaces, serviceProfiles, autonomyPolicies, projects, bidDrafts, auditEvents, knowledgeSources, knowledgeChunks };
+export const schema = { workspaces, serviceProfiles, autonomyPolicies, projects, bidDrafts, bidOutcomes, auditEvents, knowledgeSources, knowledgeChunks };

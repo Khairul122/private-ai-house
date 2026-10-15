@@ -3,7 +3,7 @@ import { eq, desc } from 'drizzle-orm';
 import type { AuditEvent, AutonomyPolicy, BidDraft, PipelineStatus, ProjectOpportunity } from '@fvh/domain';
 import { safeFtsQuery, type KnowledgeChunk, type KnowledgeProvider } from '@fvh/knowledge';
 import { createDatabase, type WorkspaceDatabase } from './database.js';
-import { auditEvents, autonomyPolicies, bidDrafts, knowledgeSources, projects, serviceProfiles, workspaces } from './schema.js';
+import { auditEvents, autonomyPolicies, bidDrafts, bidOutcomes, knowledgeSources, projects, serviceProfiles, workspaces } from './schema.js';
 
 export type ServiceProfile = {
   primaryField: string;
@@ -14,6 +14,25 @@ export type ServiceProfile = {
   minPrice: number;
   maxPrice: number;
   facts: Array<{ label: string; value: string; source: string }>;
+};
+
+export type BidOutcome = {
+  projectId: string;
+  bidId: string;
+  amount: number | null;
+  currency: string | null;
+  submittedAt: string;
+  awardStatus: string | null;
+  outcome: string;
+  checkedAt: string | null;
+};
+
+export type SkipReasonSummary = { reason: string; total: number; recent: number };
+
+export type BidOutcomeSummary = {
+  total: number;
+  byOutcome: Record<string, number>;
+  byReason: Record<string, number>;
 };
 
 export type StoredKnowledgeSource = {
@@ -80,6 +99,7 @@ export class WorkspaceRepository {
     this.db.insert(workspaces).values({ id: WORKSPACE_ID, name: 'Freelancer Virtual House', createdAt: now }).onConflictDoNothing().run();
     this.db.insert(serviceProfiles).values({ workspaceId: WORKSPACE_ID, profileJson: JSON.stringify(initialProfile()), updatedAt: now }).onConflictDoNothing().run();
     this.db.insert(autonomyPolicies).values({ workspaceId: WORKSPACE_ID, policyJson: JSON.stringify(initialPolicy()), updatedAt: now }).onConflictDoNothing().run();
+    this.backfillBidOutcomes();
     this.removeFixtureProjects();
   }
 
@@ -202,6 +222,51 @@ export class WorkspaceRepository {
 
   listAudit(limit = 50): AuditEvent[] {
     return this.db.select().from(auditEvents).orderBy(desc(auditEvents.createdAt)).limit(limit).all() as AuditEvent[];
+  }
+
+  recordSubmittedBid(input: { projectId: string; bidId: string; amount: number | null; currency: string | null; submittedAt: string }): BidOutcome {
+    this.sqlite.prepare(`INSERT OR IGNORE INTO bid_outcomes (project_id, bid_id, amount, currency, submitted_at)
+      VALUES (?, ?, ?, ?, ?)`).run(input.projectId, input.bidId, input.amount, input.currency, input.submittedAt);
+    return this.listBidOutcomes(input.projectId)[0]!;
+  }
+
+  listBidOutcomes(projectId?: string): BidOutcome[] {
+    const query = projectId
+      ? 'SELECT project_id AS projectId, bid_id AS bidId, amount, currency, submitted_at AS submittedAt, award_status AS awardStatus, outcome, checked_at AS checkedAt FROM bid_outcomes WHERE project_id = ? ORDER BY submitted_at DESC'
+      : 'SELECT project_id AS projectId, bid_id AS bidId, amount, currency, submitted_at AS submittedAt, award_status AS awardStatus, outcome, checked_at AS checkedAt FROM bid_outcomes ORDER BY submitted_at DESC';
+    return (projectId ? this.sqlite.prepare(query).all(projectId) : this.sqlite.prepare(query).all()) as BidOutcome[];
+  }
+
+  updateBidOutcome(projectId: string, input: { awardStatus: string | null; outcome: string; checkedAt: string }): BidOutcome {
+    this.sqlite.prepare(`UPDATE bid_outcomes SET award_status = ?, outcome = ?, checked_at = ? WHERE project_id = ?`)
+      .run(input.awardStatus, input.outcome, input.checkedAt, projectId);
+    return this.listBidOutcomes(projectId)[0]!;
+  }
+
+  backfillBidOutcomes(): number {
+    const rows = this.sqlite.prepare(`SELECT resource_id AS projectId, reason, created_at AS createdAt FROM audit_events
+      WHERE type = 'submit_bid' AND status = 'recorded' AND reason GLOB '*ID hasil: *' ORDER BY created_at ASC`).all() as Array<{ projectId: string; reason: string; createdAt: string }>;
+    const insert = /ID hasil: (\d+)/;
+    for (const row of rows) {
+      const bidId = row.reason.match(insert)?.[1];
+      if (bidId) this.recordSubmittedBid({ projectId: row.projectId, bidId, amount: null, currency: null, submittedAt: row.createdAt });
+    }
+    return rows.length;
+  }
+
+  skipReasonSummary(sinceIso: string): SkipReasonSummary[] {
+    return this.sqlite.prepare(`SELECT reason, COUNT(*) AS total,
+      SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS recent
+      FROM audit_events WHERE type = 'autopilot.bid_skipped' GROUP BY reason ORDER BY total DESC`).all(sinceIso) as SkipReasonSummary[];
+  }
+
+  bidOutcomeSummary(): BidOutcomeSummary {
+    const summary: BidOutcomeSummary = { total: 0, byOutcome: {}, byReason: {} };
+    for (const row of this.listBidOutcomes()) {
+      summary.total += 1;
+      summary.byOutcome[row.outcome] = (summary.byOutcome[row.outcome] ?? 0) + 1;
+    }
+    return summary;
   }
 
   hasAudit(type: string, resourceId: string): boolean {

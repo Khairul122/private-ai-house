@@ -12,6 +12,7 @@ import { readFreelancerEnvironment } from './freelancer-env.js';
 import { readDraftingEnvironment } from './ai-env.js';
 import { createApp } from './app.js';
 import { FreelancerAutopilot } from './autopilot.js';
+import { BusinessSync } from './business-sync.js';
 
 function findProjectRoot(start: string): string {
   let directory = resolve(start);
@@ -57,6 +58,7 @@ const linkedinOAuth = new LinkedInOAuthService({
 
 const repository = new WorkspaceRepository(createDatabase(databaseFile));
 const createFreelancerReader = async () => new FreelancerReadAdapter({ token: await getFreelancerToken() });
+const businessSync = new BusinessSync({ repository, readOwnBids: async (bidIds) => (await createFreelancerReader()).readOwnBids(bidIds) });
 const autopilot = new FreelancerAutopilot({
   repository,
   readProfile: async () => (await createFreelancerReader()).readOwnProfile(),
@@ -168,4 +170,5 @@ app.log.info({ host, port, databaseFile }, 'Freelancer Virtual House API is read
 void (async () => {
   await app.inject({ method: 'POST', url: '/api/freelancer/verify' });
   await autopilot.start();
+  businessSync.start();
 })();

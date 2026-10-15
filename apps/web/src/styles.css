@@ -441,3 +441,85 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* Kantor Visual: full-bleed 3D stage with floating cards, modelled on map-style office views. */
+.vo3d { --vo-card: rgba(255, 255, 255, .94); --vo-ink: #1f2933; --vo-muted: #5f6b76; --vo-line: rgba(31, 41, 51, .1); --vo-accent: #1f2933; --vo-focus: #e8a317;
+  position: relative; height: clamp(560px, calc(100vh - 175px), 1100px); overflow: hidden; border-radius: 16px; background: #d9edf7; color: var(--vo-ink); isolation: isolate; }
+.vo3d:fullscreen { height: 100vh; border-radius: 0; }
+.vo3d-canvas { position: absolute; inset: 0; }
+.vo3d-canvas canvas { touch-action: none; }
+.vo3d-fallback { display: grid; height: 100%; place-items: center; padding: 24px; color: var(--vo-muted); text-align: center; }
+.vo3d button, .vo3d input { font: inherit; color: inherit; }
+.vo3d button { cursor: pointer; }
+.vo3d :focus-visible { outline: 2px solid var(--vo-focus); outline-offset: 2px; }
+.vo3d-float { position: absolute; z-index: 2; border: 1px solid var(--vo-line); border-radius: 14px; background: var(--vo-card); box-shadow: 0 6px 24px rgba(15, 23, 42, .12); backdrop-filter: blur(6px); }
+.vo3d-card { top: 16px; left: 16px; width: min(300px, calc(100% - 32px)); padding: 13px 16px; }
+.vo3d-card h1 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -.01em; }
+.vo3d-card p { display: flex; align-items: center; gap: 6px; margin: 4px 0 0; color: var(--vo-muted); font-size: 13px; }
+.vo3d-live { width: 10px; height: 10px; flex: none; border-radius: 50%; background: #2f9e44; box-shadow: 0 0 0 3px rgba(47, 158, 68, .2); }
+.vo3d-live.is-off { background: #868e96; box-shadow: none; }
+.vo3d-roster { top: 146px; left: 16px; display: grid; width: 250px; max-height: calc(100% - 240px); gap: 6px; overflow: auto; padding: 2px; border: 0; background: none; box-shadow: none; backdrop-filter: none; }
+.vo3d-agent { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 50px; padding: 6px 12px 6px 6px; border: 1px solid var(--vo-line); border-radius: 999px; background: var(--vo-card); box-shadow: 0 3px 12px rgba(15, 23, 42, .1); text-align: left; transition: transform .15s ease; }
+.vo3d-agent:hover { transform: translateX(3px); }
+.vo3d-agent[aria-pressed='true'] { border-color: var(--vo-focus); box-shadow: 0 0 0 2px var(--vo-focus); }
+.vo3d-agent.is-offline { opacity: .55; }
+.vo3d-avatar { display: grid; width: 38px; height: 38px; flex: none; place-items: center; border-radius: 50%; color: #fff; font-size: 12px; font-weight: 700; text-shadow: 0 1px 1px rgba(0, 0, 0, .35); }
+.vo3d-agent strong, .vo3d-agent small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vo3d-agent strong { font-size: 13px; }
+.vo3d-agent small { display: flex; align-items: center; gap: 5px; color: var(--vo-muted); font-size: 11px; }
+.vo3d-agent > span:last-child { min-width: 0; }
+.vo3d-state-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; }
+.vo3d-roster-toggle { top: 146px; left: 16px; display: none; align-items: center; gap: 7px; min-height: 40px; padding: 0 14px; border-radius: 999px; font-weight: 600; }
+.vo3d-tools { top: 16px; right: 16px; display: flex; gap: 8px; padding: 0; border: 0; background: none; box-shadow: none; backdrop-filter: none; }
+.vo3d-search { display: flex; align-items: center; gap: 8px; width: 270px; min-height: 44px; padding: 0 12px; border: 1px solid var(--vo-line); border-radius: 12px; background: var(--vo-card); box-shadow: 0 6px 24px rgba(15, 23, 42, .12); color: var(--vo-muted); }
+.vo3d-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: none; color: var(--vo-ink); }
+.vo3d-search kbd { padding: 1px 6px; border: 1px solid var(--vo-line); border-radius: 5px; font-size: 11px; white-space: nowrap; }
+.vo3d-icon { display: grid; width: 44px; height: 44px; flex: none; place-items: center; border: 1px solid var(--vo-line); border-radius: 12px; background: var(--vo-card); box-shadow: 0 6px 24px rgba(15, 23, 42, .12); }
+.vo3d-icon[aria-pressed='true'], .vo3d-seg button[aria-pressed='true'] { border-color: var(--vo-accent); background: var(--vo-accent); color: #fff; }
+.vo3d-dock { bottom: 16px; left: 50%; display: flex; max-width: calc(100% - 520px); gap: 2px; overflow-x: auto; padding: 6px; transform: translateX(-50%); scrollbar-width: none; }
+.vo3d-dock button { display: flex; align-items: center; gap: 7px; min-height: 40px; padding: 0 12px; border: 0; border-radius: 10px; background: none; color: var(--vo-muted); font-size: 14px; font-weight: 600; white-space: nowrap; }
+.vo3d-dock button:hover, .vo3d-dock button[aria-pressed='true'] { background: rgba(31, 41, 51, .08); color: var(--vo-ink); }
+.vo3d-dock em { min-width: 20px; padding: 0 5px; border-radius: 999px; background: rgba(31, 41, 51, .08); font-size: 11px; font-style: normal; text-align: center; }
+.vo3d-dock-sep { width: 1px; margin: 8px 4px; flex: none; background: var(--vo-line); }
+.vo3d-seg { right: 16px; bottom: 16px; display: flex; gap: 4px; padding: 6px; }
+.vo3d-seg button { display: flex; align-items: center; gap: 6px; min-height: 40px; min-width: 40px; justify-content: center; padding: 0 10px; border: 1px solid transparent; border-radius: 10px; background: none; color: var(--vo-muted); font-size: 13px; font-weight: 600; }
+.vo3d-seg button:hover { color: var(--vo-ink); background: rgba(31, 41, 51, .06); }
+.vo3d-map { top: 76px; right: 16px; width: 230px; margin: 0; padding: 10px; }
+.vo3d-map svg { display: block; width: 100%; height: auto; }
+.vo3d-map rect, .vo3d-map text { cursor: pointer; }
+.vo3d-map p { margin: 4px 0 0; color: var(--vo-muted); font-size: 10px; }
+.vo3d-panel { top: 76px; right: 16px; display: flex; width: 320px; max-height: calc(100% - 170px); flex-direction: column; overflow: hidden; }
+.vo3d-tabs { display: flex; align-items: center; gap: 2px; padding: 6px; border-bottom: 1px solid var(--vo-line); }
+.vo3d-tabs button { min-height: 34px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: var(--vo-muted); font-size: 13px; font-weight: 600; }
+.vo3d-tabs button[aria-selected='true'] { background: rgba(31, 41, 51, .08); color: var(--vo-ink); }
+.vo3d-tabs .vo3d-close { display: grid; width: 34px; margin-left: auto; padding: 0; place-items: center; }
+.vo3d-panel-body { overflow: auto; padding: 14px 16px 16px; font-size: 13px; }
+.vo3d-panel-body h2 { margin: 0 0 8px; font-size: 13px; }
+.vo3d-panel-body h2 + p, .vo3d-hint { margin: 0 0 14px; color: var(--vo-muted); }
+.vo3d-profile { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.vo3d-profile h3 { margin: 0; font-size: 16px; }
+.vo3d-profile p { margin: 1px 0 4px; color: var(--vo-muted); font-size: 12px; }
+.vo3d-badge { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; background: rgba(31, 41, 51, .07); font-size: 11px; font-weight: 700; }
+.vo3d-panel-body dl { display: grid; gap: 2px; margin: 0; }
+.vo3d-panel-body dt { margin-top: 8px; color: var(--vo-muted); font-size: 11px; font-weight: 600; }
+.vo3d-panel-body dd { margin: 0; overflow-wrap: anywhere; }
+.vo3d-feed { display: grid; gap: 10px; margin: 0 0 16px; padding: 0; list-style: none; }
+.vo3d-feed li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1px 8px; }
+.vo3d-feed small { color: var(--vo-muted); font-size: 11px; }
+.vo3d-feed .state-label { grid-row: span 2; align-self: center; }
+@media (max-width: 1100px) { .vo3d-map { display: none; } .vo3d-search { width: 200px; } }
+@media (max-width: 760px) {
+  .vo3d { height: calc(100vh - 150px); min-height: 520px; border-radius: 12px; }
+  .vo3d-card { top: 12px; left: 12px; padding: 10px 12px; width: calc(100% - 80px); }
+  .vo3d-card h1 { font-size: 16px; }
+  .vo3d-tools { top: 12px; right: 12px; }
+  .vo3d-search { display: none; }
+  .vo3d-roster-toggle { display: flex; top: 112px; left: 12px; }
+  .vo3d-roster { top: 160px; left: 12px; width: min(250px, calc(100% - 24px)); max-height: calc(100% - 300px); }
+  .vo3d-roster.is-collapsed { display: none; }
+  .vo3d-dock { bottom: 70px; left: 12px; max-width: calc(100% - 24px); transform: none; }
+  .vo3d-seg { right: auto; bottom: 12px; left: 12px; }
+  .vo3d-panel { top: auto; right: 0; bottom: 0; left: 0; width: auto; max-height: 55%; border-radius: 16px 16px 0 0; z-index: 3; }
+}
+@media (max-height: 640px) { .vo3d-map { display: none; } }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

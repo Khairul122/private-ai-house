@@ -1,9 +1,12 @@
-import { lazy, Suspense, useEffect, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, NavLink, Outlet, Route, Routes, useLocation } from 'react-router';
-import { api, jsonRequest, type AuditEvent, type Autopilot, type BidDraft, type Capabilities, type Opportunity, type Policy, type Profile } from './api.js';
+import { api, jsonRequest, type AuditEvent, type Autopilot, type BidDraft, type BusinessSyncStatus, type Capabilities, type Insights, type Opportunity, type Policy, type Profile, type PipelineItem } from './api.js';
+import { deriveOfficeAgents, ROOM_LABELS, STATE_COLORS, STATE_LABELS, summarize, type AgentState } from './office-state.js';
+import { dayPhase, FLOOR, PODS, spotsFor, ZONES, type Spot } from './office-layout.js';
+import type { CameraCommand } from './VisualOffice.js';
 
-const ThreeOffice = lazy(() => import('./ThreeOffice.js'));
+const VisualOffice = lazy(() => import('./VisualOffice.js'));
 
 const navigation = [
   { to: '/', label: 'Ringkasan', end: true },
@@ -16,7 +19,7 @@ const navigation = [
   { to: '/policy', label: 'Kebijakan' },
   { to: '/knowledge', label: 'Knowledge Hub' },
   { to: '/activity', label: 'Aktivitas' },
-  { to: '/office', label: 'Ruang 3D' },
+  { to: '/office', label: 'Kantor Visual' },
 ];
 
 const fields = ['Fullstack Engineer', 'Backend Engineer', 'Android Engineer', 'iOS Engineer', 'Frontend Engineer', 'DevOps Engineer', 'QA Engineer', 'UI/UX Designer', 'Data Engineer', 'Technical Writer'];
@@ -60,7 +63,7 @@ function Layout() {
   const location = useLocation();
   const queryClient = useQueryClient();
   const [dark, setDark] = useState(() => localStorage.getItem('fvh-theme') === 'dark');
-  const dashboard = useQuery({ queryKey: ['dashboard'], queryFn: () => api<{ policy: { state: Policy['state'] }; counts: Record<string, number> }>('/dashboard') });
+  const dashboard = useQuery({ queryKey: ['dashboard'], queryFn: () => api<{ policy: { state: Policy['state'] }; counts: Record<string, number>; externalWrites: boolean }>('/dashboard') });
   const health = useQuery({ queryKey: ['health'], queryFn: () => api<{ ok: boolean; mode: string; liveWrites: boolean }>('/health') });
   const pause = useMutation({
     mutationFn: (action: 'pause' | 'resume') => api<Policy>(`/policy/${action}`, jsonRequest('POST')),
@@ -114,7 +117,7 @@ function Layout() {
 
         {health.isError && <ErrorNotice message="API lokal belum terhubung. Nyalakan server lalu muat ulang halaman." onRetry={() => { health.refetch(); dashboard.refetch(); }} />}
         {pause.isError && <ErrorNotice message={pause.error.message} />}
-        <div className="mode-strip"><span className="mode-indicator" />{health.data?.mode === 'local' ? 'Workspace lokal' : 'Menyiapkan workspace'}<span className="mode-divider" />Aksi eksternal nonaktif</div>
+        <div className="mode-strip"><span className="mode-indicator" />{health.data?.mode === 'local' ? 'Workspace lokal' : 'Menyiapkan workspace'}<span className="mode-divider" />{dashboard.isPending || dashboard.isError ? 'Status aksi eksternal tidak diketahui' : dashboard.data.externalWrites ? 'Aksi eksternal aktif: bid live ke Freelancer' : 'Aksi eksternal nonaktif'}</div>
         <div className="page-content"><Outlet /></div>
       </main>
     </div>
@@ -153,7 +156,10 @@ function activityTitle(type: string) {
     'policy.resumed': 'Kebijakan dilanjutkan', 'policy.reactivation_required': 'Aktivasi ulang diperlukan', 'profile.updated': 'Profil lokal diperbarui',
     'bid.draft_created': 'Draf proposal dibuat', 'bid.draft_updated': 'Draf proposal diubah', 'bid.simulated': 'Simulasi bid dicatat',
     'bid.simulation_skipped': 'Simulasi dilewati', 'knowledge.imported': 'Sumber pengetahuan diimpor', 'knowledge.github_sync': 'Repositori GitHub disinkronkan',
-    'knowledge.deleted': 'Sumber dihapus',
+    'knowledge.deleted': 'Sumber dihapus', 'bid.draft_failed': 'Draf proposal gagal',
+    'autopilot.cycle': 'Siklus autopilot selesai', 'autopilot.bid_skipped': 'Bid dilewati kebijakan', 'autopilot.policy_bootstrapped': 'Kebijakan autopilot dibentuk',
+    'marketplace.projects_synced': 'Proyek marketplace disinkronkan', 'marketplace.sync_failed': 'Sinkronisasi marketplace gagal',
+    'marketplace.production.submit_bid': 'Bid dikirim ke Freelancer', 'marketplace.production.edit_profile': 'Profil Freelancer disinkronkan',
   };
   return titles[type] ?? 'Aktivitas ruang kerja';
 }
@@ -167,19 +173,30 @@ function OverviewPage() {
   }>('/dashboard') });
   const projects = useQuery({ queryKey: ['projects', 'overview'], queryFn: () => api<Opportunity[]>('/projects') });
   const pipeline = useQuery({ queryKey: ['pipeline'], queryFn: () => api<Array<Opportunity & { latestDraft: BidDraft | null }>>('/pipeline') });
+  const insights = useQuery({ queryKey: ['insights', 'bids'], queryFn: () => api<Insights>('/insights/bids'), refetchInterval: 60_000 });
 
   if (query.isPending || projects.isPending) return <LoadingPanel />;
   if (query.isError || projects.isError) return <ErrorNotice message="Ringkasan belum dapat dimuat." onRetry={() => { queryClient.invalidateQueries({ queryKey: ['dashboard'] }); queryClient.invalidateQueries({ queryKey: ['projects'] }); }} />;
   const data = query.data;
 
   return <>
-    <PageIntro eyebrow="15 Oktober 2026 / ruang operasi" title="Kerja yang baik dimulai dari konteks yang jelas." description="Autopilot memantau peluang Freelancer, menyusun penawaran, dan menjalankan batas operasi tersimpan." action={<Link to="/opportunities" className="button button-primary">Buka antrean peluang</Link>} />
+    <PageIntro eyebrow={`${new Intl.DateTimeFormat('id-ID', { dateStyle: 'long' }).format(new Date())} / ruang operasi`} title="Kerja yang baik dimulai dari konteks yang jelas." description="Autopilot memantau peluang Freelancer, menyusun penawaran, dan menjalankan batas operasi tersimpan." action={<Link to="/opportunities" className="button button-primary">Buka antrean peluang</Link>} />
     <section className="metrics-row" aria-label="Ringkasan ruang kerja">
       <Metric label="Peluang terbuka" value={data.counts.openProjects} note="Dipindai otomatis" tone="primary" />
       <Metric label="Bid terkirim" value={data.counts.submittedBids} note="Dikonfirmasi Freelancer" />
       <Metric label="Sumber knowledge" value={data.counts.knowledgeSources} note="Fakta lokal yang bisa ditelusuri" />
       <Metric label="Keputusan dilewati" value={data.counts.policySkips} note="Alasan tersimpan di aktivitas" />
     </section>
+    {insights.isPending && <LoadingPanel label="Memuat hasil bid..." />}
+    {insights.isError && <ErrorNotice message="Hasil bid belum dapat dimuat." onRetry={() => insights.refetch()} />}
+    {insights.data && <section className="form-card" aria-labelledby="bid-results-title">
+      <div className="section-heading"><div><p className="eyebrow">Operasi bisnis</p><h2 id="bid-results-title">Hasil bid</h2></div></div>
+      <div className="autopilot-metrics"><span>Terkirim: {insights.data.outcomes.submitted}</span><span>Menang: {insights.data.outcomes.won}</span><span>Kalah: {insights.data.outcomes.lost}</span><span>Menunggu: {insights.data.outcomes.pending}</span><span>Tingkat kemenangan: {Math.round(insights.data.outcomes.winRate * 100)}%</span></div>
+      <p className="form-help">Pemeriksaan terakhir: {insights.data.lastCheck ? formatDate(insights.data.lastCheck) : 'Belum pernah diperiksa'}</p>
+      <h3>Alasan skip (maks. 5)</h3>
+      {insights.data.skips.reasons.slice(0, 5).map(({ reason, total }) => <p key={reason} className="form-help">{reason}: {total}</p>)}
+      {!insights.data.skips.reasons.length && <p className="form-help">Tidak ada alasan skip tercatat.</p>}
+    </section>}
     {pipeline.data && (
       <div className="pipeline-overview-bar" aria-label="Ringkasan status pipeline">
         <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', alignSelf: 'center', marginRight: 4 }}>DISTRIBUSI PIPELINE:</span>
@@ -286,16 +303,14 @@ function AgentsPage() {
     counts: { openProjects: number; drafts: number; policySkips: number; knowledgeSources: number };
     activity: AuditEvent[];
   }>('/dashboard') });
+  const autopilot = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 30_000 });
   const profile = useQuery({ queryKey: ['profile'], queryFn: () => api<Profile>('/profile') });
   const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: () => api<Capabilities>('/capabilities') });
 
   if (dashboard.isPending || profile.isPending || capabilities.isPending) return <LoadingPanel label="Menyiapkan data karyawan virtual..." />;
   if (dashboard.isError || profile.isError || capabilities.isError) return <ErrorNotice message="Gagal memuat status karyawan virtual." />;
 
-  const policyState = dashboard.data.policy.state;
-  const isPaused = policyState === 'paused';
-  const isDraft = policyState === 'draft';
-
+  const derived = deriveOfficeAgents(autopilot.isError ? undefined : autopilot.data, dashboard.data.activity);
   const agents = [
     {
       id: 'chief-of-staff',
@@ -305,7 +320,6 @@ function AgentsPage() {
       task: 'Merangkum status antrean peluang, memonitor kepatuhan ritme automasi, dan mengarahkan fokus peran virtual.',
       boundary: 'Akses baca data lokal workspace; hanya membuat usulan tugas internal tanpa aksi eksternal.',
       metric: `${dashboard.data.counts.openProjects} peluang aktif dalam pantauan`,
-      status: isPaused ? 'paused' : isDraft ? 'draft' : 'active',
     },
     {
       id: 'market-scout',
@@ -315,7 +329,6 @@ function AgentsPage() {
       task: 'Menyaring peluang proyek dari provider Freelancer resmi dan menghitung skor kecocokan berdasarkan profil keahlian.',
       boundary: 'Hanya membaca proyek tersinkron resmi; tidak melakukan scraping mandiri atau bypass rate limit.',
       metric: `${dashboard.data.counts.openProjects} peluang telah dipindai & dinilai`,
-      status: isPaused ? 'paused' : isDraft ? 'draft' : 'active',
     },
     {
       id: 'bid-strategist',
@@ -325,7 +338,6 @@ function AgentsPage() {
       task: 'Menyusun draf proposal dengan Hermes AI berbasis fakta portofolio terverifikasi, merekomendasikan harga dan durasi.',
       boundary: 'Menghasilkan draf terstruktur; setiap eksekusi wajib lolos persetujuan deterministik policy engine.',
       metric: `${dashboard.data.counts.drafts} draf proposal lokal disiapkan`,
-      status: isPaused ? 'paused' : capabilities.data.hermes.active ? 'active' : 'draft',
     },
     {
       id: 'profile-editor',
@@ -334,8 +346,7 @@ function AgentsPage() {
       role: 'Kurator Profil & Bukti',
       task: 'Memelihara fakta profil, ringkasan spesialisasi, dan mengusulkan pembaruan berbasis bukti nyata repositori/portofolio.',
       boundary: 'Hanya menghasilkan diff berversi; tanpa modifikasi langsung pada akun platform eksternal.',
-      metric: `${profile.data.facts.length} fakta terverifikasi tersimpan`,
-      status: isPaused ? 'paused' : isDraft ? 'draft' : 'active',
+      metric: `${profile.data.facts.length} fakta profil tersimpan`,
     },
     {
       id: 'client-relations',
@@ -344,8 +355,7 @@ function AgentsPage() {
       role: 'Manajer Komunikasi Klien',
       task: 'Membaca thread pesan dari adapter resmi, mengidentifikasi pertanyaan kunci, dan menyiapkan draf balasan rutin.',
       boundary: 'Draf rutin informatif saja; dilarang menyepakati kontrak legal, milestone, atau komitmen finansial.',
-      metric: '0 thread aktif (menunggu aturan respons otomatis)',
-      status: isPaused ? 'paused' : 'draft',
+      metric: 'Fitur pesan belum aktif',
     },
     {
       id: 'operations-analyst',
@@ -354,8 +364,7 @@ function AgentsPage() {
       role: 'Analis Pipeline & Jadwal',
       task: 'Mengawasi pergerakan siklus proyek di papan tugas, memantau tenggat waktu, dan memastikan integritas status.',
       boundary: 'Aksi internal yang dapat dibatalkan; tidak memanggil API tulis platform eksternal.',
-      metric: `Policy versi ${dashboard.data.policy.version} aktif`,
-      status: isPaused ? 'paused' : isDraft ? 'draft' : 'active',
+      metric: `Kebijakan versi ${dashboard.data.policy.version}: ${dashboard.data.policy.state === 'active' ? 'aktif' : dashboard.data.policy.state === 'paused' ? 'dijeda' : 'belum aktif'}`,
     },
     {
       id: 'knowledge-curator',
@@ -365,7 +374,6 @@ function AgentsPage() {
       task: 'Menyinkronkan repositori GitHub dan catatan lokal ke SQLite FTS5 untuk dijadikan bukti klaim proposal.',
       boundary: 'Read-only lokal; memindai & mengecualikan token/kredensial sebelum pengindeksan.',
       metric: `${dashboard.data.counts.knowledgeSources} sumber pengetahuan diindeks`,
-      status: isPaused ? 'paused' : 'active',
     },
     {
       id: 'compliance-auditor',
@@ -375,7 +383,6 @@ function AgentsPage() {
       task: 'Memverifikasi setiap draf terhadap batas harga, kata kunci dilarang, dan ketersediaan bukti sumber.',
       boundary: 'Read-only deterministik; otomatis memblokir draf tanpa bukti sumber yang sah.',
       metric: `${dashboard.data.counts.policySkips} keputusan skip tercatat di audit`,
-      status: isPaused ? 'paused' : 'active',
     },
     {
       id: 'qa-engineer',
@@ -384,8 +391,7 @@ function AgentsPage() {
       role: 'Verifikator Kontrak & Smoke',
       task: 'Menjalankan skenario smoke test, validasi skema DTO, serta memverifikasi alur simulasi fail-closed.',
       boundary: 'Beroperasi di lingkungan lokal & sandbox; tanpa kredensial live produksi.',
-      metric: `${dashboard.data.activity.length} jejak audit tervalidasi`,
-      status: 'active',
+      metric: 'Tidak ada komponen runtime di aplikasi',
     },
   ];
 
@@ -405,7 +411,7 @@ function AgentsPage() {
                 <h3>{agent.name}</h3>
                 <small style={{ color: 'var(--muted)', display: 'block', marginTop: 2 }}>{agent.role}</small>
               </div>
-              <StateLabel state={agent.status} />
+              {(() => { const derivedAgent = derived.find((item) => item.id === agent.id); const state = derivedAgent?.state ?? 'unknown'; return <><span className="vo3d-state-dot" style={{ background: STATE_COLORS[state] }} /><span className="state-label">{STATE_LABELS[state]}</span><small style={{ color: 'var(--muted)', display: 'block', marginTop: 2 }}>{derivedAgent?.reason ?? 'Data server tidak tersedia.'}</small></>; })()}
             </div>
             <p className="agent-task">{agent.task}</p>
             <div className="agent-boundary">
@@ -530,7 +536,7 @@ function TaskBoardPage() {
 function CalendarPage() {
   const policyQuery = useQuery({ queryKey: ['policy'], queryFn: () => api<Policy>('/policy') });
   const projectsQuery = useQuery({ queryKey: ['projects', 'calendar'], queryFn: () => api<Opportunity[]>('/projects') });
-  const dashboardQuery = useQuery({ queryKey: ['dashboard'], queryFn: () => api<{ counts: { openProjects: number; drafts: number; policySkips: number } }>('/dashboard') });
+  const dashboardQuery = useQuery({ queryKey: ['dashboard'], queryFn: () => api<{ counts: { openProjects: number; drafts: number; policySkips: number }; bidUsage: { today: number; week: number } }>('/dashboard') });
 
   if (policyQuery.isPending || projectsQuery.isPending || dashboardQuery.isPending) return <LoadingPanel label="Menyiapkan kalender dan jadwal operasi..." />;
   if (policyQuery.isError || projectsQuery.isError || dashboardQuery.isError) return <ErrorNotice message="Gagal memuat data kalender." />;
@@ -540,7 +546,8 @@ function CalendarPage() {
   const dashboard = dashboardQuery.data;
 
   const now = new Date();
-  const currentHour = now.getHours();
+  let currentHour: number;
+  try { currentHour = Number(new Intl.DateTimeFormat('en-US', { timeZone: policy.timezone, hour: '2-digit', hourCycle: 'h23' }).format(now)); } catch { currentHour = now.getHours(); }
   const isWithinHours = currentHour >= policy.activeHours.start && currentHour < policy.activeHours.end;
   const deadlineProjects = projects.filter((p) => p.deadlineDays !== null).sort((a, b) => (a.deadlineDays ?? 0) - (b.deadlineDays ?? 0));
   const expiryDate = new Date(policy.expiresAt);
@@ -571,23 +578,24 @@ function CalendarPage() {
         <div className="meter-row">
           <div className="meter-label">
             <span>Batas Penawaran Harian</span>
-            <strong>{dashboard.counts.drafts} / {policy.dailyBidLimit}</strong>
+            <strong>{dashboard.bidUsage.today} / {policy.dailyBidLimit}</strong>
           </div>
           <div className="meter-track">
-            <div className="meter-fill" style={{ width: `${Math.min(100, Math.round((dashboard.counts.drafts / (policy.dailyBidLimit || 1)) * 100))}%` }} />
+            <div className="meter-fill" style={{ width: `${Math.min(100, Math.round((dashboard.bidUsage.today / (policy.dailyBidLimit || 1)) * 100))}%` }} />
           </div>
         </div>
 
         <div className="meter-row">
           <div className="meter-label">
             <span>Batas Penawaran Mingguan</span>
-            <strong>{dashboard.counts.drafts} / {policy.weeklyBidLimit}</strong>
+            <strong>{dashboard.bidUsage.week} / {policy.weeklyBidLimit}</strong>
           </div>
           <div className="meter-track">
-            <div className="meter-fill" style={{ width: `${Math.min(100, Math.round((dashboard.counts.drafts / (policy.weeklyBidLimit || 1)) * 100))}%` }} />
+            <div className="meter-fill" style={{ width: `${Math.min(100, Math.round((dashboard.bidUsage.week / (policy.weeklyBidLimit || 1)) * 100))}%` }} />
           </div>
         </div>
       </section>
+      <p className="form-help">Dihitung dari bid live yang tercatat berhasil di log audit.</p>
 
       <section className="calendar-card">
         <h3>Masa Berlaku Kebijakan</h3>
@@ -610,7 +618,7 @@ function CalendarPage() {
       </section>
 
       <section className="calendar-card" style={{ gridColumn: '1 / -1' }}>
-        <h3>Tenggat Waktu Proyek ({deadlineProjects.length})</h3>
+        <h3>Penutupan Penawaran Proyek ({deadlineProjects.length})</h3>
         {deadlineProjects.length === 0 ? (
           <p style={{ color: 'var(--muted)', fontSize: 12 }}>Belum ada proyek dengan tenggat tercatat.</p>
         ) : (
@@ -629,7 +637,7 @@ function CalendarPage() {
                   <strong style={{ color: (p.deadlineDays ?? 0) <= 3 ? 'var(--danger)' : 'var(--pine)' }}>
                     {p.deadlineDays} hari
                   </strong>
-                  <div style={{ color: 'var(--muted)', fontSize: 10 }}>Estimasi sisa waktu</div>
+                  <div style={{ color: 'var(--muted)', fontSize: 10 }}>Sisa hari saat sinkronisasi terakhir</div>
                 </div>
               </li>
             ))}
@@ -750,7 +758,8 @@ function KnowledgePage() {
   const [repo, setRepo] = useState('');
   const [queryText, setQueryText] = useState('');
   const [results, setResults] = useState<Array<{ label: string; path: string; url: string; content: string }>>([]);
-  const [notice, setNotice] = useState('');
+  const [searched, setSearched] = useState(false);
+  const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const importFiles = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -760,40 +769,40 @@ function KnowledgePage() {
     if (selected.length) setLabel((current) => current || selected.length === 1 ? (current || selected[0]?.name.replace(/\.[^.]+$/, '') || '') : `${selected.length} berkas pilihan`);
   };
   const runImport = async (event: FormEvent) => {
-    event.preventDefault(); setBusy(true); setNotice('');
+    event.preventDefault(); setBusy(true); setNotice(null);
     try {
       const result = await api<{ chunks: number; rejected: Array<{ path: string; reason: string }> }>('/knowledge/import', jsonRequest('POST', { provider, label, referenceUrl, sourceRef, files }));
-      setNotice(`${result.chunks} potongan aman ditambahkan. ${result.rejected.length} berkas dikecualikan.`); setFiles([]); setLabel('');
+      setNotice({ text: `${result.chunks} potongan aman ditambahkan. ${result.rejected.length} berkas dikecualikan.`, error: false }); setFiles([]); setLabel('');
       queryClient.invalidateQueries({ queryKey: ['knowledge'] }); queryClient.invalidateQueries({ queryKey: ['dashboard'] }); queryClient.invalidateQueries({ queryKey: ['activity'] });
-    } catch (error) { setNotice(error instanceof Error ? error.message : 'Impor gagal.'); }
+    } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Impor gagal.', error: true }); }
     finally { setBusy(false); }
   };
   const syncGitHub = async (event: FormEvent) => {
-    event.preventDefault(); setBusy(true); setNotice('Membaca repositori terpilih...');
+    event.preventDefault(); setBusy(true); setNotice({ text: 'Membaca repositori terpilih...', error: false });
     try {
       const result = await api<{ chunks: number; filesSeen: number; rejected: number; complete: boolean }>('/knowledge/github/sync', jsonRequest('POST', { repository: repo }));
-      setNotice(`${result.filesSeen} berkas dibaca, ${result.chunks} potongan aman diindeks, ${result.rejected} dilewati.${result.complete ? '' : ' Cakupan parsial, periksa batas file.'}`);
+      setNotice({ text: `${result.filesSeen} berkas dibaca, ${result.chunks} potongan aman diindeks, ${result.rejected} dilewati.${result.complete ? '' : ' Cakupan parsial, periksa batas file.'}`, error: false });
       queryClient.invalidateQueries({ queryKey: ['knowledge'] }); queryClient.invalidateQueries({ queryKey: ['dashboard'] }); queryClient.invalidateQueries({ queryKey: ['capabilities'] });
-    } catch (error) { setNotice(error instanceof Error ? error.message : 'Sinkronisasi gagal.'); }
+    } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Sinkronisasi gagal.', error: true }); }
     finally { setBusy(false); }
   };
   const search = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true);
-    try { setResults(await api('/knowledge/search', jsonRequest('POST', { query: queryText, limit: 6 }))); }
-    catch (error) { setNotice(error instanceof Error ? error.message : 'Pencarian gagal.'); }
+    try { const nextResults = await api<Array<{ label: string; path: string; url: string; content: string }>>('/knowledge/search', jsonRequest('POST', { query: queryText, limit: 6 })); setResults(nextResults); setSearched(true); }
+    catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Pencarian gagal.', error: true }); }
     finally { setBusy(false); }
   };
   const removeSource = async (id: string) => {
     if (!window.confirm('Hapus sumber dan semua potongan indeks terkait?')) return;
-    try { await api(`/knowledge/sources/${encodeURIComponent(id)}`, { method: 'DELETE' }); setNotice('Sumber dan indeks terkait dihapus.'); queryClient.invalidateQueries({ queryKey: ['knowledge'] }); }
-    catch (error) { setNotice(error instanceof Error ? error.message : 'Sumber tidak dapat dihapus.'); }
+    try { await api(`/knowledge/sources/${encodeURIComponent(id)}`, { method: 'DELETE' }); setNotice({ text: 'Sumber dan indeks terkait dihapus.', error: false }); queryClient.invalidateQueries({ queryKey: ['knowledge'] }); }
+    catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Sumber tidak dapat dihapus.', error: true }); }
   };
 
   if (knowledge.isPending) return <LoadingPanel label="Membuka knowledge hub lokal..." />;
   if (knowledge.isError) return <ErrorNotice message="Status knowledge hub belum dapat dimuat." onRetry={() => knowledge.refetch()} />;
   return <>
     <PageIntro eyebrow="Knowledge Hub" title="Bawa bukti kerja, bukan seluruh repositori ke setiap draf." description="Pilih sumber yang Anda izinkan. Teks diperiksa sebelum masuk indeks lokal dan setiap hasil menyimpan path serta provenance." />
-    {notice && <div className="notice notice-success" role="status">{notice}</div>}
+    {notice && (notice.error ? <ErrorNotice message={notice.text} /> : <div className="notice notice-success" role="status">{notice.text}</div>)}
     <section className="knowledge-summary"><div><p className="eyebrow">Cakupan saat ini</p><strong>{knowledge.data.coverage.sources} sumber / {knowledge.data.coverage.chunks} potongan</strong><span>SQLite FTS5 / freshness tercatat per sumber</span></div><div className="provider-boundaries"><span>GitHub: baca saja</span><span>LinkedIn: impor milik pengguna</span></div></section>
     <div className="knowledge-grid">
       <section className="form-card"><div className="section-heading"><div><p className="eyebrow">Pilih cakupan</p><h2>Impor berkas teks</h2></div></div>
@@ -816,7 +825,7 @@ function KnowledgePage() {
       {knowledge.data.sources.length === 0 ? <div className="empty-state"><h3>Knowledge hub masih kosong</h3><p>Impor catatan teks atau pilih repositori agar draf dapat menyebutkan bukti yang bisa ditelusuri.</p></div> : <div className="source-list">{knowledge.data.sources.map((source) => <article key={source.id} className="source-row"><div><span className="source-provider">{source.provider}</span><h3>{source.label}</h3><p>{source.chunkCount} potongan / diperbarui {formatDate(source.updatedAt)}</p>{source.referenceUrl && source.referenceUrl.startsWith('https://') && <a href={source.referenceUrl} target="_blank" rel="noreferrer">Buka sumber</a>}</div><button className="button button-text" type="button" onClick={() => removeSource(source.id)}>Hapus sumber</button></article>)}</div>}
     </section>
     <section className="form-card search-section"><div className="section-heading"><div><p className="eyebrow">Retrieval lokal</p><h2>Temukan bukti yang relevan</h2></div></div><form className="search-inline" onSubmit={search}><label className="form-field"><span>Kata atau frasa</span><input value={queryText} onChange={(event) => setQueryText(event.target.value)} minLength={2} placeholder="Misalnya: cursor pagination" /></label><button type="submit" className="button button-primary" disabled={busy || queryText.trim().length < 2}>Cari di knowledge hub</button></form>
-      {results.length > 0 ? <div className="search-results">{results.map((result, index) => <article key={`${result.path}-${index}`}><div><strong>{result.label} / {result.path}</strong>{result.url.startsWith('https://') ? <a href={result.url} target="_blank" rel="noreferrer">Lihat provenance</a> : <span className="local-reference">Sumber lokal</span>}</div><p>{result.content}</p></article>)}</div> : <p className="form-help">Hasil pencarian menampilkan potongan teks dan sumbernya, bukan seluruh dokumen.</p>}
+      {results.length > 0 ? <div className="search-results">{results.map((result, index) => <article key={`${result.path}-${index}`}><div><strong>{result.label} / {result.path}</strong>{result.url.startsWith('https://') ? <a href={result.url} target="_blank" rel="noreferrer">Lihat provenance</a> : <span className="local-reference">Sumber lokal</span>}</div><p>{result.content}</p></article>)}</div> : <p className="form-help">{searched ? 'Tidak ada hasil untuk pencarian ini.' : 'Hasil pencarian menampilkan potongan teks dan sumbernya, bukan seluruh dokumen.'}</p>}
     </section>
   </>;
 }
@@ -934,33 +943,206 @@ function CapabilitiesPage() {
   </>;
 }
 
-function OfficePage() {
-  const [view, setView] = useState<'2d' | '3d'>('2d');
-  const [webgl, setWebgl] = useState<boolean | null>(null);
-  const query = useQuery({ queryKey: ['dashboard'], queryFn: () => api<{
-    counts: { openProjects: number; drafts: number }; policy: { state: string }; profileComplete: boolean; activity: AuditEvent[];
-  }>('/dashboard') });
+type OfficeIconName = 'search' | 'expand' | 'cube' | 'top' | 'play' | 'target' | 'users' | 'activity' | 'signal' | 'close' | 'pin' | 'sun';
+
+function OfficeIcon({ name }: { name: OfficeIconName }) {
+  const paths: Record<OfficeIconName, ReactNode> = {
+    search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></>,
+    expand: <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />,
+    cube: <><path d="M12 2 3 7v10l9 5 9-5V7z" /><path d="m3 7 9 5 9-5M12 12v10" /></>,
+    top: <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 12h18M12 3v18" /></>,
+    play: <path d="m7 4 13 8-13 8z" />,
+    target: <><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="2" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3" /></>,
+    users: <><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-4-6" /></>,
+    activity: <path d="M3 12h4l3-8 4 16 3-8h4" />,
+    signal: <><path d="M5 12a10 10 0 0 1 14 0M8.5 15.5a5 5 0 0 1 7 0" /><circle cx="12" cy="19" r="1" /></>,
+    close: <path d="M6 6l12 12M18 6 6 18" />,
+    pin: <><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z" /><circle cx="12" cy="10" r="2.5" /></>,
+    sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></>,
+  };
+  return <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
+}
+
+const initials = (name: string) => name.split(' ').map((word) => word[0]).join('').slice(0, 2).toUpperCase();
+const zoneOf = (spot: Spot | undefined) => spot && ZONES.find((zone) => Math.abs(spot.x - zone.x) <= zone.w / 2 && Math.abs(spot.z - zone.z) <= zone.d / 2)?.id;
+const wideScreen = () => window.matchMedia('(min-width: 900px)').matches;
+
+function useClock(intervalMs: number) {
+  const [now, setNow] = useState(() => new Date());
   useEffect(() => {
-    try { setWebgl(Boolean(document.createElement('canvas').getContext('webgl2') || document.createElement('canvas').getContext('webgl'))); }
-    catch { setWebgl(false); }
+    const id = setInterval(() => setNow(new Date()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
+}
+
+type StateChange = { key: string; at: string; name: string; from: AgentState; to: AgentState };
+
+function OfficePage() {
+  const stage = useRef<HTMLDivElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [panel, setPanel] = useState<'agent' | 'activity' | 'channels' | null>(null);
+  const [rosterOpen, setRosterOpen] = useState(wideScreen);
+  const [command, setCommand] = useState<CameraCommand>({ kind: 'overview', n: 0 });
+  const [view, setView] = useState<'3d' | 'top'>('3d');
+  const [tour, setTour] = useState(false);
+  const [search, setSearch] = useState('');
+  const [fullscreen, setFullscreen] = useState(false);
+  const [changes, setChanges] = useState<StateChange[]>([]);
+  const previous = useRef<Map<string, AgentState> | null>(null);
+  const [webgl] = useState(() => {
+    try { const canvas = document.createElement('canvas'); return Boolean(canvas.getContext('webgl2') || canvas.getContext('webgl')); } catch { return false; }
+  });
+  const [reducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const now = useClock(30_000);
+  const phase = dayPhase(now.getHours());
+
+  const autopilot = useQuery({ queryKey: ['autopilot', 'office'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 1000 }); // cycles last ~4s; slower polling misses them
+  const sync = useQuery({ queryKey: ['business-sync', 'office'], queryFn: () => api<BusinessSyncStatus | 'unavailable'>('/business-sync'), refetchInterval: 1000 });
+  const activity = useQuery({ queryKey: ['activity', 'office'], queryFn: () => api<AuditEvent[]>('/activity?limit=50'), refetchInterval: 10000 });
+  // react-query keeps the last good data on error; stale state must not look live.
+  const autopilotData = autopilot.isError ? undefined : autopilot.data;
+  const activityData = activity.isError ? undefined : activity.data;
+  const syncData = sync.isError || sync.data === 'unavailable' || typeof sync.data === 'string' ? undefined : sync.data;
+  const agents = useMemo(() => deriveOfficeAgents(autopilotData, activityData, syncData), [autopilotData, activityData, syncData]);
+  const spots = useMemo(() => spotsFor(agents), [agents]);
+  const counts = summarize(agents);
+  const selected = agents.find((agent) => agent.id === selectedId);
+  const query = search.trim().toLocaleLowerCase();
+  const visibleAgents = query ? agents.filter((agent) => `${agent.name} ${agent.role}`.toLocaleLowerCase().includes(query)) : agents;
+  const stateKey = agents.map((agent) => agent.state).join();
+
+  // Session log of state transitions observed by this page (real polling results, not simulated).
+  useEffect(() => {
+    if (autopilot.isPending) return;
+    const prior = previous.current;
+    if (prior) {
+      const at = new Date().toISOString();
+      const diff = agents.filter((agent) => prior.get(agent.id) !== undefined && prior.get(agent.id) !== agent.state)
+        .map((agent) => ({ key: `${agent.id}-${at}`, at, name: agent.name, from: prior.get(agent.id)!, to: agent.state }));
+      if (diff.length) setChanges((list) => [...diff, ...list].slice(0, 20));
+    }
+    previous.current = new Map(agents.map((agent) => [agent.id, agent.state]));
+  }, [stateKey, autopilot.isPending]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); searchInput.current?.focus(); }
+    };
+    const onFullscreen = () => setFullscreen(document.fullscreenElement === stage.current);
+    window.addEventListener('keydown', onKey);
+    document.addEventListener('fullscreenchange', onFullscreen);
+    return () => { window.removeEventListener('keydown', onKey); document.removeEventListener('fullscreenchange', onFullscreen); };
   }, []);
-  if (query.isPending) return <LoadingPanel label="Memeriksa status tiap ruang..." />;
-  if (query.isError) return <ErrorNotice message="Status ruang belum dapat dimuat." onRetry={() => query.refetch()} />;
-  const departments = [
-    { name: 'Lobby', to: '/', role: 'Chief of staff', note: `${query.data.counts.openProjects} peluang aktif / ringkasan ruang kerja` },
-    { name: 'Sales & Bids', to: '/opportunities', role: 'Market scout / bid strategist', note: `${query.data.counts.openProjects} peluang / ${query.data.counts.drafts} draf lokal` },
-    { name: 'Profile Studio', to: '/profile', role: 'Profile editor', note: query.data.profileComplete ? 'Bidang dan spesialisasi sudah diisi' : 'Profil layanan belum diatur' },
-    { name: 'Client Relations', to: '/pipeline', role: 'Client relations', note: 'Pipeline lokal / pesan menunggu aturan event percakapan' },
-    { name: 'Operations', to: '/activity', role: 'Operations analyst / compliance auditor', note: `Policy ${query.data.policy.state} / ${query.data.activity.length} aktivitas terbaru` },
-  ];
-  return <>
-    <PageIntro eyebrow="Ruang virtual" title="Lima departemen, satu alur kerja." description="Pilih ruang untuk membuka pekerjaan 2D. Tampilan tiga dimensi bersifat tambahan dan tidak menjalankan aksi eksternal." action={<div className="toggle-group" role="group" aria-label="Tampilan ruang"><button type="button" aria-pressed={view === '2d'} className={view === '2d' ? 'selected' : ''} onClick={() => setView('2d')}>2D</button><button type="button" aria-pressed={view === '3d'} className={view === '3d' ? 'selected' : ''} onClick={() => setView('3d')}>3D</button></div>} />
-    {view === '3d' && webgl === false ? <div className="notice notice-success" role="status">WebGL tidak tersedia. Daftar ruang 2D di bawah tetap menyediakan semua tautan kerja.</div> : null}
-    {view === '3d' && webgl ? <Suspense fallback={<LoadingPanel label="Memuat ruang 3D..." />}><ThreeOffice departments={departments} /></Suspense> : null}
-    <section className="department-list" aria-label="Daftar departemen">
-      {departments.map((department, index) => <Link key={department.name} to={department.to} className="department-row"><span className="department-number">0{index + 1}</span><div><strong>{department.name}</strong><p>{department.note}</p><small>{department.role}</small></div><span className="department-open">Buka ruang</span></Link>)}
+
+  const fly = (next: Omit<CameraCommand, 'n'>) => setCommand((current) => ({ ...next, n: current.n + 1 }));
+  const selectAgent = (id: string | null) => {
+    setSelectedId(id);
+    if (!id) return;
+    setPanel('agent');
+    if (spots.has(id)) fly({ kind: 'agent', id });
+  };
+  const summary = autopilot.isPending ? 'Memuat status kru...'
+    : [`${counts.working} bekerja`, `${counts.idle} idle`, `${counts.offline} offline`, ...(counts.unknown ? [`${counts.unknown} tidak diketahui`] : [])].join(' · ');
+  const time = new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit' }).format(now);
+  const width = FLOOR.maxX - FLOOR.minX;
+  const depth = FLOOR.maxZ - FLOOR.minZ;
+
+  return <div className="vo3d" ref={stage} style={{ background: phase.sky }}>
+    <div className="vo3d-canvas" role="img" aria-label={`Denah kantor 3D. ${summary}. Gunakan daftar agen untuk navigasi dengan keyboard.`}>
+      {webgl ? <Suspense fallback={<div className="vo3d-fallback">Memuat kantor visual...</div>}>
+        <VisualOffice agents={agents} ready={!autopilot.isPending} selectedId={selectedId} onSelect={selectAgent} command={command} view={view} tour={tour} phase={phase} reducedMotion={reducedMotion} />
+      </Suspense> : <div className="vo3d-fallback">WebGL tidak tersedia di browser ini. Daftar agen dan panel tetap dapat digunakan.</div>}
+    </div>
+
+    <section className="vo3d-float vo3d-card" aria-live="polite">
+      <h1><span className={`vo3d-live${autopilotData ? '' : ' is-off'}`} aria-hidden="true" />Kantor Visual</h1>
+      <p><OfficeIcon name="sun" />{phase.label} · {time}</p>
+      <p>{summary}</p>
     </section>
-  </>;
+
+    <button type="button" className="vo3d-float vo3d-roster-toggle" aria-expanded={rosterOpen} onClick={() => setRosterOpen((open) => !open)}><OfficeIcon name="users" />Tim ({agents.length})</button>
+    <nav className={`vo3d-float vo3d-roster${rosterOpen ? '' : ' is-collapsed'}`} aria-label="Daftar agen">
+      {visibleAgents.map((agent) => <button key={agent.id} type="button" className={`vo3d-agent${agent.state === 'offline' ? ' is-offline' : ''}`} aria-pressed={selectedId === agent.id} onClick={() => selectAgent(agent.id)}>
+        <span className="vo3d-avatar" style={{ background: agent.color }}>{initials(agent.name)}</span>
+        <span><strong>{agent.name}</strong><small><span className="vo3d-state-dot" style={{ background: STATE_COLORS[agent.state] }} />{STATE_LABELS[agent.state]} · {agent.room ? ROOM_LABELS[agent.room] : 'Tidak di lantai'}</small></span>
+      </button>)}
+      {!visibleAgents.length && <p className="vo3d-agent">Tidak ada agen yang cocok.</p>}
+    </nav>
+
+    <div className="vo3d-float vo3d-tools">
+      <label className="vo3d-search"><OfficeIcon name="search" /><span className="sr-only">Cari agen</span>
+        <input ref={searchInput} type="search" placeholder="Cari agen" value={search} onChange={(event) => setSearch(event.target.value)}
+          onKeyDown={(event) => { if (event.key === 'Enter' && visibleAgents[0]) selectAgent(visibleAgents[0].id); if (event.key === 'Escape') setSearch(''); }} />
+        <kbd>Ctrl K</kbd>
+      </label>
+      <button type="button" className="vo3d-icon" aria-pressed={fullscreen} aria-label={fullscreen ? 'Keluar dari layar penuh' : 'Layar penuh'} onClick={() => { if (document.fullscreenElement) void document.exitFullscreen(); else void stage.current?.requestFullscreen?.(); }}><OfficeIcon name="expand" /></button>
+    </div>
+
+    {panel && <aside className="vo3d-float vo3d-panel" aria-label="Panel detail">
+      <div className="vo3d-tabs" role="tablist">
+        {([['agent', 'Agen'], ['activity', 'Aktivitas'], ['channels', 'Kanal']] as const).map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={panel === id} onClick={() => setPanel(id)}>{label}</button>)}
+        <button type="button" className="vo3d-close" aria-label="Tutup panel" onClick={() => setPanel(null)}><OfficeIcon name="close" /></button>
+      </div>
+      <div className="vo3d-panel-body" role="tabpanel">
+        {panel === 'agent' && (selected ? <>
+          <div className="vo3d-profile"><span className="vo3d-avatar" style={{ background: selected.color }}>{initials(selected.name)}</span>
+            <div><h3>{selected.name}</h3><p>{selected.role}</p><span className="vo3d-badge"><span className="vo3d-state-dot" style={{ background: STATE_COLORS[selected.state] }} />{STATE_LABELS[selected.state]}</span></div></div>
+          <dl>
+            <dt>Ruangan</dt><dd>{selected.room ? ROOM_LABELS[selected.room] : 'Tidak di lantai kantor'}</dd>
+            <dt>Alasan status</dt><dd>{selected.reason}</dd>
+            <dt>Tugas saat ini</dt><dd>{selected.task ?? 'Tidak ada tugas berjalan'}</dd>
+            <dt>Aktivitas terbaru</dt>
+            <dd>{selected.recentActivity.length ? selected.recentActivity.map((event) => <div key={event.id}>{activityTitle(event.type)} · {formatDate(event.createdAt)}</div>) : 'Belum ada aktivitas tercatat'}</dd>
+          </dl>
+        </> : <p className="vo3d-hint">Pilih agen di lantai kantor atau di daftar untuk melihat detail.</p>)}
+        {panel === 'activity' && <>
+          <h2>Perubahan status</h2>
+          {changes.length ? <ol className="vo3d-feed">{changes.map((change) => <li key={change.key}><strong>{change.name}: {STATE_LABELS[change.from]} → {STATE_LABELS[change.to]}</strong><small>{formatDate(change.at)}</small></li>)}</ol>
+            : <p>Belum ada perubahan sejak halaman dibuka.</p>}
+          <h2>Log audit</h2>
+          {activity.isError ? <p>Log aktivitas tidak dapat dimuat.</p> : !activity.data?.length ? <p>Belum ada aktivitas tercatat.</p>
+            : <ol className="vo3d-feed">{activity.data.slice(0, 8).map((event) => <li key={event.id}><strong>{activityTitle(event.type)}</strong><StateLabel state={event.status} /><small>{formatDate(event.createdAt)}</small></li>)}</ol>}
+        </>}
+        {panel === 'channels' && <>
+          <h2>Kanal terhubung</h2>
+          <p>Tidak tersedia. Hermes belum melaporkan kanal atau sesi ke Mission Control.</p>
+          <h2>Sumber status</h2>
+          <p>{autopilotData ? <>Autopilot <StateLabel state={autopilotData.state} /> · siklus berikutnya {autopilotData.nextRunAt ? formatDate(autopilotData.nextRunAt) : 'belum tersedia'}</> : 'Status autopilot tidak dapat dimuat.'}</p>
+        </>}
+      </div>
+    </aside>}
+
+    {!panel && <figure className="vo3d-float vo3d-map" aria-hidden="true">
+      <svg viewBox={`${FLOOR.minX} ${FLOOR.minZ} ${width} ${depth}`}>
+        <rect x={FLOOR.minX} y={FLOOR.minZ} width={width} height={depth} rx="1" fill="#f3efe6" />
+        {ZONES.map((zone) => <g key={zone.id} onClick={() => fly({ kind: 'zone', id: zone.id })}>
+          <rect x={zone.x - zone.w / 2} y={zone.z - zone.d / 2} width={zone.w} height={zone.d} rx="0.6" fill={zone.id === 'workspace' ? 'none' : '#e3ece0'} stroke="#c8cfc4" strokeWidth="0.15" strokeDasharray={zone.id === 'workspace' ? '0.6 0.4' : undefined} />
+          {zone.id !== 'workspace' && <text x={zone.x} y={zone.z + 0.6} textAnchor="middle" fontSize="1.6" fill="#3b4650">{zone.label}</text>}
+        </g>)}
+        {PODS.map((pod) => <rect key={pod.id} x={pod.x - 2.3} y={pod.z - 2.3} width="4.6" height="4.6" rx="0.5" fill={pod.color} opacity="0.3" onClick={() => selectAgent(pod.id)} />)}
+        {agents.map((agent) => { const spot = spots.get(agent.id); return spot ? <circle key={agent.id} cx={spot.x} cy={spot.z} r="0.75" fill={STATE_COLORS[agent.state]} stroke="#fff" strokeWidth="0.3" /> : null; })}
+      </svg>
+      <p>Lt 1 · titik = posisi tujuan tiap agen</p>
+    </figure>}
+
+    <nav className="vo3d-float vo3d-dock" aria-label="Navigasi ruangan">
+      {ZONES.map((zone) => <button key={zone.id} type="button" onClick={() => fly({ kind: 'zone', id: zone.id })}>
+        <OfficeIcon name="pin" />{zone.label}<em>{[...spots.values()].filter((spot) => zoneOf(spot) === zone.id).length}</em>
+      </button>)}
+      <span className="vo3d-dock-sep" aria-hidden="true" />
+      <button type="button" aria-pressed={panel === 'activity'} onClick={() => setPanel(panel === 'activity' ? null : 'activity')}><OfficeIcon name="activity" />Aktivitas</button>
+      <button type="button" aria-pressed={panel === 'channels'} onClick={() => setPanel(panel === 'channels' ? null : 'channels')}><OfficeIcon name="signal" />Kanal</button>
+    </nav>
+
+    <div className="vo3d-float vo3d-seg" role="toolbar" aria-label="Kontrol tampilan">
+      <button type="button" aria-pressed={view === '3d'} aria-label="Tampilan 3D" title="Tampilan 3D" onClick={() => { setView('3d'); fly({ kind: 'overview' }); }}><OfficeIcon name="cube" /></button>
+      <button type="button" aria-pressed={view === 'top'} aria-label="Tampilan denah atas" title="Denah atas" onClick={() => { setView('top'); setTour(false); fly({ kind: 'overview' }); }}><OfficeIcon name="top" /></button>
+      <button type="button" aria-pressed={tour} disabled={reducedMotion} title={reducedMotion ? 'Dinonaktifkan karena preferensi kurangi gerakan' : 'Putar kamera otomatis'} onClick={() => { setView('3d'); setTour((on) => !on); }}><OfficeIcon name="play" />Tur</button>
+      <button type="button" aria-label="Pusatkan kamera" title="Pusatkan" onClick={() => fly({ kind: 'overview' })}><OfficeIcon name="target" /></button>
+    </div>
+  </div>;
 }
 
 function NotFoundPage() {

@@ -35,6 +35,14 @@ async function configureAndActivatePolicy() {
 }
 
 describe('local API', () => {
+  it('rejects untrusted hosts while accepting localhost', async () => {
+    const evil = await app.inject({ method: 'GET', url: '/api/health', headers: { host: 'evil.example:3001' } });
+    const normal = await app.inject({ method: 'GET', url: '/api/health' });
+    expect(evil.statusCode).toBe(403);
+    expect(evil.json()).toEqual({ error: 'Host tidak diizinkan.' });
+    expect(normal.statusCode).toBe(200);
+  });
+
   it('serves health, capabilities, and only test-injected opportunities', async () => {
     const health = await app.inject({ method: 'GET', url: '/api/health' });
     const capabilities = await app.inject({ method: 'GET', url: '/api/capabilities' });
@@ -59,6 +67,8 @@ describe('local API', () => {
     await emptyApp.ready();
     const health = await emptyApp.inject({ method: 'GET', url: '/api/health' });
     const projects = await emptyApp.inject({ method: 'GET', url: '/api/projects' });
+    const businessSync = await emptyApp.inject({ method: 'GET', url: '/api/business-sync' });
+    const bidInsights = await emptyApp.inject({ method: 'GET', url: '/api/insights/bids' });
     await emptyApp.close();
 
     const disabledApp = createApp({ repository, draftingReason: 'Hermes belum diaktifkan.' });
@@ -66,6 +76,13 @@ describe('local API', () => {
 
     expect(health.json().ai).toBe('disabled');
     expect(projects.json()).toEqual([]);
+    expect(businessSync.json()).toBeNull();
+    expect(bidInsights.json()).toEqual({
+      outcomes: { submitted: 0, won: 0, lost: 0, pending: 0, winRate: 0 },
+      recent: [],
+      skips: { total: 0, recent7d: 0, reasons: [] },
+      lastCheck: null,
+    });
     expect(draft.statusCode).toBe(503);
     expect(draft.json().error).toContain('Hermes belum diaktifkan');
     await disabledApp.close();
