@@ -57,33 +57,6 @@ const initialProfile = (): ServiceProfile => ({
   facts: [],
 });
 
-const sampleProjects: ProjectOpportunity[] = [
-  {
-    id: 'demo-project-01', title: 'Backend API untuk sistem inventori',
-    description: 'Membangun REST API untuk sinkronisasi inventori multi-gudang. Brief contoh untuk latihan scoring, tanpa akun klien nyata.',
-    clientName: 'Demo Client A', budgetMin: 250, budgetMax: 600, currency: 'USD', skills: ['Backend Engineer', 'TypeScript', 'API Development'],
-    deadlineDays: 14, briefQuality: 0.9, riskScore: 0.12, status: 'open', source: 'fixture', createdAt: '2026-10-14T01:00:00.000Z',
-  },
-  {
-    id: 'demo-project-02', title: 'Audit performa PostgreSQL',
-    description: 'Tinjau query lambat, indeks, dan rencana migrasi. Akses production tidak disertakan dalam data demo.',
-    clientName: 'Demo Client B', budgetMin: 180, budgetMax: 420, currency: 'USD', skills: ['Backend Engineer', 'PostgreSQL', 'Database'],
-    deadlineDays: 7, briefQuality: 0.82, riskScore: 0.18, status: 'open', source: 'fixture', createdAt: '2026-10-13T06:30:00.000Z',
-  },
-  {
-    id: 'demo-project-03', title: 'Dashboard React untuk logistik',
-    description: 'Dashboard internal untuk status pengiriman dan filter laporan. Data contoh ini tidak mewakili peluang marketplace aktif.',
-    clientName: 'Demo Client C', budgetMin: 500, budgetMax: 1200, currency: 'USD', skills: ['Frontend Engineer', 'React', 'TypeScript'],
-    deadlineDays: 21, briefQuality: 0.88, riskScore: 0.22, status: 'open', source: 'fixture', createdAt: '2026-10-12T10:15:00.000Z',
-  },
-  {
-    id: 'demo-project-04', title: 'Prototype integrasi pembayaran',
-    description: 'Integrasi perlu memproses transaksi finansial; fixture ini sengaja ditandai berisiko tinggi untuk menguji skip policy.',
-    clientName: 'Demo Client D', budgetMin: 400, budgetMax: 900, currency: 'USD', skills: ['Backend Engineer', 'TypeScript', 'Payments'],
-    deadlineDays: 10, briefQuality: 0.72, riskScore: 0.82, status: 'open', source: 'fixture', createdAt: '2026-10-11T03:00:00.000Z',
-  },
-];
-
 function parseJson<T>(value: string): T {
   return JSON.parse(value) as T;
 }
@@ -107,11 +80,23 @@ export class WorkspaceRepository {
     this.db.insert(workspaces).values({ id: WORKSPACE_ID, name: 'Freelancer Virtual House', createdAt: now }).onConflictDoNothing().run();
     this.db.insert(serviceProfiles).values({ workspaceId: WORKSPACE_ID, profileJson: JSON.stringify(initialProfile()), updatedAt: now }).onConflictDoNothing().run();
     this.db.insert(autonomyPolicies).values({ workspaceId: WORKSPACE_ID, policyJson: JSON.stringify(initialPolicy()), updatedAt: now }).onConflictDoNothing().run();
-    for (const project of sampleProjects) {
-      this.db.insert(projects).values({
-        id: project.id, platform: 'fixture', externalId: project.id, projectJson: JSON.stringify(project),
-        pipelineStatus: 'new', score: 0, scoreFactorsJson: '[]', createdAt: project.createdAt,
-      }).onConflictDoNothing().run();
+    this.removeFixtureProjects();
+  }
+
+  private removeFixtureProjects() {
+    this.sqlite.exec('BEGIN IMMEDIATE');
+    try {
+      this.sqlite.exec(`
+        DELETE FROM audit_events
+        WHERE resource_id IN (SELECT id FROM projects WHERE platform = 'fixture');
+        DELETE FROM bid_drafts
+        WHERE project_id IN (SELECT id FROM projects WHERE platform = 'fixture');
+        DELETE FROM projects WHERE platform = 'fixture';
+      `);
+      this.sqlite.exec('COMMIT');
+    } catch (error) {
+      this.sqlite.exec('ROLLBACK');
+      throw error;
     }
   }
 
@@ -127,6 +112,26 @@ export class WorkspaceRepository {
   getProject(id: string): ProjectOpportunity | undefined {
     const row = this.db.select().from(projects).where(eq(projects.id, id)).get();
     return row ? parseJson<ProjectOpportunity>(row.projectJson) : undefined;
+  }
+
+  syncFreelancerProjects(incoming: ProjectOpportunity[]) {
+    if (incoming.length === 0) return { upserted: 0 };
+    const upsert = this.sqlite.prepare(`
+      INSERT INTO projects (id, platform, external_id, project_json, pipeline_status, score, score_factors_json, created_at)
+      VALUES (?, 'freelancer', ?, ?, 'new', 0, '[]', ?)
+      ON CONFLICT(id) DO UPDATE SET project_json = excluded.project_json
+    `);
+    this.sqlite.exec('BEGIN IMMEDIATE');
+    try {
+      for (const project of incoming) {
+        upsert.run(project.id, project.id.replace(/^freelancer:/, ''), JSON.stringify(project), project.createdAt);
+      }
+      this.sqlite.exec('COMMIT');
+      return { upserted: incoming.length };
+    } catch (error) {
+      this.sqlite.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   evaluateProject(id: string, score: number, factors: unknown) {

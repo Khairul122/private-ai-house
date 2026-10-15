@@ -19,7 +19,7 @@ Open `http://127.0.0.1:5173`. SQLite data is kept in the ignored `.local` direct
 
 - Public GitHub repositories can be read by owner/name. For a private repository, set `GITHUB_TOKEN` in the server environment with access only to the selected repository and `Contents: read` permission. The token is never returned to the browser or written to the database.
 - LinkedIn API access is not configured. Import a text or CSV export that belongs to you, or enter profile facts manually.
-- Fixture drafting is the default. To use OpenCode, set `FVH_AI_MODE=opencode` and `FVH_AI_DATA_CONSENT=true` in the server environment, configure `OPENCODE_BIN`, and configure the provider in OpenCode. Only the selected project, supplied profile facts, and up to four relevant local evidence chunks are passed to the CLI. Marketplace credentials are excluded. The drafting agent has no read, edit, shell, web, or subagent tools.
+- Fixture drafting is the default. To use Hermes Agent, follow [the local profile and cron setup](docs/hermes-agent-setup.md), then set `FVH_AI_MODE=hermes`, `FVH_AI_DATA_CONSENT=true`, and the Hermes profile name in the project `.env`. Only the selected project, supplied profile facts, and up to four relevant local evidence chunks are passed to the CLI. Marketplace credentials are excluded. The dedicated Hermes profile must have an empty `cli` toolset; drafting never submits marketplace actions.
 
 ## Checks
 

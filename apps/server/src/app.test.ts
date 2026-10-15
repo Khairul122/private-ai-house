@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { FixtureDraftingAdapter } from '@fvh/application';
 import { WorkspaceRepository } from '@fvh/persistence';
 import { createApp } from './app.js';
 
@@ -46,6 +47,17 @@ describe('local API', () => {
     expect(capabilities.json().linkedin.clientConfigured).toBe(false);
     expect(projects.json()).toHaveLength(4);
     expect(projects.json()[0].source).toBe('fixture');
+  });
+
+  it('reports Hermes drafting as active without enabling marketplace writes', async () => {
+    const hermesApp = createApp({ drafting: new FixtureDraftingAdapter(), draftingMode: 'hermes' });
+    const health = await hermesApp.inject({ method: 'GET', url: '/api/health' });
+    const capabilities = await hermesApp.inject({ method: 'GET', url: '/api/capabilities' });
+
+    expect(health.json().ai).toBe('hermes');
+    expect(capabilities.json().hermes).toMatchObject({ draft: 'optional', active: true });
+    expect(capabilities.json().marketplace.find((item: { operation: string }) => item.operation === 'submit_bid').status).toBe('unknown');
+    await hermesApp.close();
   });
 
   it('reports credential presence without exposing credential values', async () => {

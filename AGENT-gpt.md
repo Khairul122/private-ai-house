@@ -4,7 +4,7 @@ Dokumen pendamping: [PRD.md](PRD.md), [TECH_STACK.md](TECH_STACK.md), dan [TASKS
 
 ## 1. Misi dan batas
 
-Bangun aplikasi kantor virtual untuk satu freelancer yang dapat menjalankan pencarian peluang, bidding, pemeliharaan profil/portofolio, dan komunikasi rutin secara hands-off melalui adapter API resmi. Pengguna memilih bidang utama dan spesialisasi aktif. OpenCode CLI menyediakan analisis dan draf; backend deterministik memeriksa kebijakan dan mengeksekusi aksi yang diizinkan. Pengguna memberi otorisasi sekali saat mengaktifkan kebijakan, lalu memantau serta dapat menjeda/mengubah batas. Agen AI bukan pemilik akun dan tidak boleh memutuskan melewati policy engine.
+Bangun aplikasi kantor virtual untuk satu freelancer yang dapat menjalankan pencarian peluang, bidding, pemeliharaan profil/portofolio, dan komunikasi rutin melalui adapter API resmi. Pengguna memilih bidang utama dan spesialisasi aktif. Hermes Agent lokal menyediakan analisis dan draf; backend deterministik memeriksa kebijakan. Agen AI bukan pemilik akun dan tidak boleh memutuskan melewati policy engine.
 
 ## 2. Prinsip operasional
 
@@ -38,9 +38,9 @@ Pengguna memberi izin satu kali untuk menjalankan kategori aksi yang tercakup pa
 - Hindari menyimpan konten marketplace melebihi kebutuhan. Hormati penghapusan dan retensi sesuai API Terms.
 - Tidak ada scraping, browser automation, API privat, bypass kuota, spam, atau penyamaran AI.
 
-## 5. Desain agen OpenCode
+## 5. Desain agen Hermes Agent
 
-Agen didefinisikan di konfigurasi OpenCode (`opencode.json` dan/atau `.opencode/agents/*.md`) mengikuti sintaks resmi terkini. Gunakan `mode: subagent` untuk spesialis bila sesuai, dengan permission minimum. Gunakan `ask`/`deny` untuk edit dan bash yang tidak dibutuhkan. Jangan aktifkan `--auto` dalam alur produk.
+Gunakan profile khusus proyek `fvh` agar model, kredensial provider, memori, dan jadwal Hermes terpisah. Aplikasi memanggil profile yang dipilih lewat `FVH_HERMES_PROFILE` dan hanya meminta draf satu kali. Untuk profile ini, konfigurasi `platform_toolsets.cli` dan `platform_toolsets.cron` harus berupa daftar kosong; jangan mengaktifkan tool file, terminal, web, browser, MCP, delegation, atau tool tulis. Cron hanya boleh membuat ringkasan/pengingat lokal dan tidak boleh menawar, mengirim pesan, atau mengubah akun marketplace. Profile Hermes bukan sandbox filesystem.
 
 | Agen | Tugas | Batas akses |
 |---|---|---|
@@ -73,13 +73,13 @@ Semua peran berada di bawah satu pemilik. Nama agen adalah representasi organisa
 - LinkedIn connector hanya memakai product/scope resmi yang telah disetujui untuk akun pengguna. Jangan menganggap API umum dapat membaca seluruh profile, posts, messages, atau riwayat. Bila tidak tersedia, ingest file export yang pengguna sediakan atau fakta yang dimasukkan manual; jangan scrape halaman atau ambil data anggota lain.
 - Tampilkan coverage/freshness, error, sumber dan resync; hormati delete/disconnect dan hak akses. Jangan menjadikan index sebagai training data model/provider.
 - Saat membuat klaim proposal, profile, atau jawaban tentang skill/proyek lampau, keluarkan source references yang dapat dibuka (repo/path/commit atau LinkedIn URL/export reference). Tanpa bukti yang cocok, turunkan confidence dan skip tindakan otomatis bila policy mensyaratkan sumber.
-- Sebelum mengirim data retrieved ke OpenCode/provider, gunakan hanya potongan minimum dan jelaskan kebijakan provider/data processing; jangan sertakan credential atau data privat yang tidak diperlukan.
+- Sebelum mengirim data retrieved ke Hermes/provider, gunakan hanya potongan minimum dan jelaskan kebijakan provider/data processing; jangan sertakan credential atau data privat yang tidak diperlukan.
 
 ## 7. Arsitektur dan gaya kode
 
-- Domain tidak mengimpor framework, database, OpenCode, atau klien marketplace.
+- Domain tidak mengimpor framework, database, Hermes, atau klien marketplace.
 - Use case mengorkestrasi aturan aplikasi dan bergantung pada interface port.
-- Adapter menerjemahkan kontrak Freelancer API, penyimpanan, scheduler, secret store, dan OpenCode CLI.
+- Adapter menerjemahkan kontrak Freelancer API, penyimpanan, scheduler, secret store, dan Hermes CLI.
 - UI hanya memanggil API aplikasi; tidak memiliki client secret atau token marketplace.
 - Buat adapter idempotent bila mungkin; normalisasi error eksternal tanpa membocorkan respons sensitif.
 - Validasi input pada batas masuk, validasi output eksternal, gunakan tipe/enum/schema; hindari `any`.

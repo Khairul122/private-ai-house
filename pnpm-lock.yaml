@@ -199,9 +199,9 @@ importers:
       '@fvh/adapter-github':
         specifier: workspace:*
         version: link:../../packages/adapter-github
-      '@fvh/adapter-opencode':
+      '@fvh/adapter-hermes':
         specifier: workspace:*
-        version: link:../../packages/adapter-opencode
+        version: link:../../packages/adapter-hermes
       '@fvh/application':
         specifier: workspace:*
         version: link:../../packages/application
@@ -277,7 +277,7 @@ importers:
         specifier: workspace:*
         version: link:../knowledge
 
-  packages/adapter-opencode:
+  packages/adapter-hermes:
     dependencies:
       '@fvh/application':
         specifier: workspace:*

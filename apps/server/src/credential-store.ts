@@ -110,6 +110,14 @@ export async function getLinkedInClientCredentials(storePath: string, scriptPath
   return { clientId, clientSecret };
 }
 
+export async function getFreelancerAccessToken(storePath: string, scriptPath: string): Promise<string> {
+  const token = await runCredentialAction('GetFreelancerAccessToken', storePath, scriptPath);
+  if (token.length < 16 || token.length > 4096 || /[\0\r\n]/.test(token)) {
+    throw new Error('Freelancer token is not configured in the secure store.');
+  }
+  return token;
+}
+
 export async function storeLinkedInAccessToken(storePath: string, scriptPath: string, accessToken: string, expiresAt: string): Promise<void> {
   if (accessToken.length < 100 || accessToken.length > 3000 || !Number.isFinite(Date.parse(expiresAt)) || Date.parse(expiresAt) <= Date.now()) {
     throw new Error('LinkedIn authorization response is invalid.');

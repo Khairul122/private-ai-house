@@ -1,11 +1,13 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import fastifyStatic from '@fastify/static';
-import { OpenCodeCliDraftingAdapter } from '@fvh/adapter-opencode';
+import { FreelancerReadAdapter, FreelancerReadError } from '@fvh/adapter-freelancer';
+import { HermesCliDraftingAdapter } from '@fvh/adapter-hermes';
 import { createDatabase, WorkspaceRepository } from '@fvh/persistence';
-import { deleteLinkedInAccessToken, getLinkedInClientCredentials, readCredentialStatus, storeLinkedInAccessToken, verifyFreelancerCredential } from './credential-store.js';
+import { deleteLinkedInAccessToken, getFreelancerAccessToken, getLinkedInClientCredentials, readCredentialStatus, storeLinkedInAccessToken } from './credential-store.js';
 import { LinkedInOAuthService } from './linkedin-oauth.js';
 import { readLinkedInEnvironment } from './linkedin-env.js';
+import { readDraftingEnvironment } from './ai-env.js';
 import { createApp } from './app.js';
 
 function findProjectRoot(start: string): string {
@@ -43,18 +45,20 @@ const linkedinOAuth = new LinkedInOAuthService({
 });
 
 const repository = new WorkspaceRepository(createDatabase(databaseFile));
-const opencodeEnabled = process.env.FVH_AI_MODE === 'opencode' && process.env.FVH_AI_DATA_CONSENT === 'true';
-const providerEnvironment: Record<string, string> = {};
-for (const name of ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'OPENROUTER_API_KEY']) {
-  const value = process.env[name];
-  if (value) providerEnvironment[name] = value;
-}
-const drafting = opencodeEnabled ? new OpenCodeCliDraftingAdapter({
-  executable: process.env.OPENCODE_BIN ?? 'opencode',
+const draftingConfig = readDraftingEnvironment(projectRoot);
+const hermesEnabled = draftingConfig.valid && draftingConfig.mode === 'hermes' && draftingConfig.consent;
+const drafting = hermesEnabled ? new HermesCliDraftingAdapter({
+  executable: draftingConfig.executable,
+  profile: draftingConfig.profile,
   workspaceRoot: projectRoot,
-  ...(process.env.OPENCODE_MODEL ? { model: process.env.OPENCODE_MODEL } : {}),
-  providerEnvironment,
 }) : undefined;
+const draftingReason = !draftingConfig.valid
+  ? 'Konfigurasi Hermes tidak valid. Periksa nama profile dan executable di .env.'
+  : draftingConfig.mode !== 'hermes'
+    ? 'Mode Hermes belum dipilih. Draf AI tetap nonaktif.'
+    : !draftingConfig.consent
+      ? 'Hermes sudah dipilih, tetapi persetujuan pengiriman data belum diberikan. Tidak ada draf sintetis yang digunakan.'
+      : 'Hermes belum tersedia. Periksa instalasi profile fvh dan jalankan ulang server.';
 const webBuild = resolve(projectRoot, 'apps/web/dist');
 const hasWebBuild = existsSync(webBuild);
 const app = createApp({
@@ -67,11 +71,38 @@ const app = createApp({
       linkedinClientConfigured: environment.declared ? Boolean(environment.credentials) : stored.linkedinClientConfigured,
     };
   },
-  verifyFreelancer: () => verifyFreelancerCredential(credentialStorePath, credentialScriptPath),
+  verifyFreelancer: async () => {
+    let adapter: FreelancerReadAdapter;
+    try {
+      adapter = new FreelancerReadAdapter({ token: await getFreelancerAccessToken(credentialStorePath, credentialScriptPath) });
+    } catch {
+      return { connected: false, readProfile: false, readProjects: false, reason: 'invalid_token' };
+    }
+    try {
+      await adapter.readOwnProfile();
+    } catch (error) {
+      const code = error instanceof FreelancerReadError ? error.code : 'verification_unavailable';
+      const reason = code === 'invalid_token' ? 'invalid_token' : code === 'scope_denied' ? 'scope_denied' : code === 'rate_limited' ? 'rate_limited' : code === 'invalid_response' ? 'invalid_response' : 'verification_unavailable';
+      return { connected: false, readProfile: false, readProjects: false, reason };
+    }
+    try {
+      await adapter.searchActiveProjects('typescript', 1);
+      return { connected: true, readProfile: true, readProjects: true, reason: 'verified' };
+    } catch (error) {
+      const code = error instanceof FreelancerReadError ? error.code : 'projects_unavailable';
+      const reason = code === 'scope_denied' ? 'project_scope_denied' : code === 'rate_limited' ? 'rate_limited' : code === 'invalid_response' ? 'invalid_response' : code === 'invalid_token' ? 'invalid_token' : 'projects_unavailable';
+      return { connected: true, readProfile: true, readProjects: false, reason };
+    }
+  },
+  readFreelancerProjects: async (query, limit) => {
+    const token = await getFreelancerAccessToken(credentialStorePath, credentialScriptPath);
+    return new FreelancerReadAdapter({ token }).searchActiveProjects(query, limit);
+  },
   linkedinOAuth,
   disconnectLinkedIn: () => deleteLinkedInAccessToken(credentialStorePath, credentialScriptPath),
   spaFallback: hasWebBuild,
-  ...(drafting ? { drafting, draftingMode: 'opencode' as const } : {}),
+  draftingReason,
+  ...(drafting ? { drafting, draftingMode: 'hermes' as const } : { draftingMode: 'disabled' as const }),
 });
 if (hasWebBuild) {
   await app.register(fastifyStatic, { root: webBuild, prefix: '/' });

@@ -14,7 +14,7 @@ Dokumen pendamping: [PRD.md](PRD.md), [AGENT.md](AGENT.md), dan [TECH_STACK.md](
 - [x] **0.1 Verifikasi dokumentasi Freelancer API**: autentikasi, OAuth callback, scopes, resource proyek, profil, portofolio, komunikasi, bid; pagination, limit headers, sandbox, error, retensi data, dan API terms. Kontrak endpoint belum dapat diverifikasi; capability tetap `unknown` dan adapter tidak mengirim request.
 - [x] **0.2 Verifikasi akses GitHub dan LinkedIn**: GitHub App permissions/repo selection; LinkedIn OAuth/API product approval, profile fields, data storage policy, serta opsi ekspor data pengguna. Hasil dan batas akses dicatat di capability matrix.
 - [x] **0.3 Catat capability matrix**: endpoint/version, tautan docs resmi, scope, sandbox test, dan status `supported`/`unsupported`/`unknown`.
-- [x] **0.4 Tentukan katalog bidang/spesialisasi** dan pilihan pengguna (contoh Fullstack Engineer, Backend Engineer, Android Engineer), bidang utama, mata uang, bahasa, jam kerja, batas harga, deployment target, dan model/provider OpenCode.
+- [x] **0.4 Tentukan katalog bidang/spesialisasi** dan pilihan pengguna (contoh Fullstack Engineer, Backend Engineer, Android Engineer), bidang utama, mata uang, bahasa, jam kerja, batas harga, deployment target, dan model/provider Hermes Agent.
 - [x] **0.5 Definisikan kebijakan hands-off**: aksi otomatis, ambang confidence, filter peluang, budget, batas bid dan pesan, aturan pembaruan profil, jam aktif, masa berlaku, feed audit, dan kill switch.
 - [x] **0.6 Buat threat model ringkas**: pencurian token, OAuth CSRF, prompt injection dari repo/LinkedIn, duplicate submit, log leakage, dan penyalahgunaan akun. Lihat [docs/threat-model.md](docs/threat-model.md).
 
@@ -52,7 +52,7 @@ Dokumen pendamping: [PRD.md](PRD.md), [AGENT.md](AGENT.md), dan [TECH_STACK.md](
 - [x] **2.5.4 Bangun normalizer/chunker dan SQLite FTS5 index** untuk dokumentasi/source code; simpan repo/path/ref/URL/timestamp provenance.
 - [ ] **2.5.5 Terapkan secret scanning dan exclusions** untuk credential, `.env`, key files, binary, vendor/dependency, generated output, large files, dan user-defined patterns.
 - [x] **2.5.6 Buat Knowledge Hub monitor**: daftar repositori/sumber, coverage, last sync, error, exclusions, resync, disconnect, dan purge.
-- [x] **2.5.7 Buat retrieval port** yang hanya mengirim top-k chunk relevan dan bukti URL/path ke OpenCode, dengan token budget; knowledge base bukan model training.
+- [x] **2.5.7 Buat retrieval port** yang hanya mengirim top-k chunk relevan dan bukti URL/path ke Hermes Agent, dengan token budget; knowledge base bukan model training.
 - [ ] **2.5.8 Uji fixture** untuk permissions, incremental changes, secret exclusion, prompt injection, stale results, provenance, disconnect/delete. Fixture menguji secret, provenance, pencarian, dan penghapusan; incremental cursor belum tersedia.
 
 **Acceptance:** semua repo terpilih terindeks setelah full sync; sync incremental tidak menggandakan data; LinkedIn berfungsi hanya sesuai approved API atau user-provided export; secret dikecualikan; jawaban AI menyertakan sumber yang dapat ditelusuri; disconnect/delete menghapus index terkait.
@@ -72,16 +72,16 @@ Dokumen pendamping: [PRD.md](PRD.md), [AGENT.md](AGENT.md), dan [TECH_STACK.md](
 
 **Status:** selesai untuk pipeline lokal dan simulasi. Tidak ada submit marketplace.
 
-## Phase 4 — OpenCode CLI dan agen virtual
+## Phase 4 — Hermes CLI dan agen virtual
 
-- [x] **4.1 Buat AiDraftingPort dan adapter OpenCode CLI** dengan process spawn aman, `shell:false`, timeout, output limit, validasi exit code, dan redaksi.
+- [x] **4.1 Buat AiDraftingPort dan adapter Hermes CLI** dengan process spawn aman, `shell:false`, query file, timeout, output limit, validasi JSONL/schema, dan redaksi.
 - [ ] **4.2 Buat prompt dan schema output berversi** untuk assessment, proposal, profile diff, dan reply draft; gunakan knowledge retrieval dengan source citations.
 - [ ] **4.3 Konfigurasikan agen virtual** sesuai AGENT.md dengan permission minimum; drafting/read-only, tanpa API credentials/tools tulis.
 - [x] **4.4 Tambahkan sanitasi input/untrusted project text**, sumber fakta, dan guard klaim tanpa dukungan.
 - [ ] **4.5 Buat health/status UX** untuk CLI/model tidak tersedia, timeout, malformed output, dan fallback manual.
 - [ ] **4.6 Tambahkan targeted tests** untuk process failure, truncation, konten injection-like, schema mismatch, dan secret redaction.
 
-**Acceptance:** bila OpenCode gagal, tindakan berbasis AI yang terkait tidak dieksekusi dan tercatat; output divalidasi; prompt tanpa secret; klaim pengalaman tertaut ke sumber GitHub/LinkedIn; tidak ada jalur langsung AI→marketplace.
+**Acceptance:** bila Hermes gagal, draf tidak disimpan sebagai usulan tervalidasi; output divalidasi; prompt tanpa secret; klaim pengalaman tertaut ke sumber GitHub/LinkedIn; tidak ada jalur langsung AI→marketplace.
 
 **Status:** adapter dan skema diuji memakai process runner fixture. CLI/model nyata belum dikonfigurasi, sehingga belum diuji dengan provider eksternal.
 

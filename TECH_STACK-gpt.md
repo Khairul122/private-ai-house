@@ -16,7 +16,7 @@ Dokumen pendamping: [PRD.md](PRD.md), [AGENT.md](AGENT.md), dan [TASKS.md](TASKS
 | Database lokal MVP | SQLite + Drizzle ORM | Setup single-user sederhana, migrasi SQL jelas |
 | Knowledge search | SQLite FTS5 full-text index | Index lokal ringan; retrieval berbasis kata kunci/relevance pada MVP |
 | Database deployment | PostgreSQL bila multi-instance/hosted | Dipilih saat kebutuhan operasional memerlukannya |
-| AI | OpenCode CLI `opencode run` melalui process adapter backend | Interface non-interaktif untuk automasi; model/provider dari konfigurasi OpenCode |
+| AI | Hermes Agent CLI melalui process adapter backend | `--query-file` + JSONL; model/provider dari profile Hermes lokal |
 | Test | Vitest + Fastify API tests + Playwright smoke | Unit, boundary, jalur pengguna utama |
 | Styling | CSS Modules atau vanilla CSS + token | Menghindari runtime UI berat |
 
@@ -41,7 +41,7 @@ Fastify Application
   ├─ Audit & Notifications
   ├─ Knowledge Hub (GitHub + LinkedIn)
   └─ AI Orchestration
-       ├─ OpenCode CLI adapter
+       ├─ Hermes Agent CLI adapter
        └─ Provider-independent prompt/schema boundary
           │ ports
           ▼
@@ -68,7 +68,7 @@ packages/
   application/           # Use cases dan port
   contracts/             # Schema API, DTO, schema keluaran AI
   adapter-freelancer/     # OAuth/API, mapping, rate-limit, capabilities
-  adapter-opencode/       # CLI process, prompt templates, schema parsing
+  adapter-hermes/         # CLI process, prompt templates, schema parsing
   adapter-github/         # OAuth/App, repository contents, sync cursor
   adapter-linkedin/       # Only approved official endpoints and user exports
   knowledge/              # source registry, chunking, exclusions, retrieval
@@ -113,7 +113,7 @@ Entitas/aggregate: `Workspace`, `FreelancerAccount`, `MarketplaceConnection`, `K
 - **LinkedIn:** Profile API memerlukan developer approval serta tunduk pada field/privacy/data restrictions; OIDC Sign In umumnya hanya menyediakan lite profile. Jangan mengasumsikan akses komprehensif ke seluruh profile/posts/messages. Adapter hanya memakai product/scope yang tersedia dan approved. Jika data yang dibutuhkan tidak tersedia, terima file export/profile content yang pengguna miliki atau input manual; tidak scraping.
 - **Indexing:** baca konten yang dicakup, normalisasi markdown/source text, chunk per file/section, simpan pointer `provider/repo/path/ref/url/updated_at`, dan indeks dengan SQLite FTS5. Gunakan pagination/cursor dan resumable job untuk backfill.
 - **Exclusion sebelum index:** scan secret/credential, abaikan `.env`, key files, binary, vendor/dependency, generated/build output, files oversized, dan patterns yang dikonfigurasi. Simpan hash agar unchanged files tidak diulang.
-- **Retrieval:** cari hanya untuk konteks pekerjaan tertentu, batasi top-k dan token budget, sertakan provenance di prompt/output. Jangan mengirim full repo atau seluruh LinkedIn export ke OpenCode setiap kali.
+- **Retrieval:** cari hanya untuk konteks pekerjaan tertentu, batasi top-k dan token budget, sertakan provenance di prompt/output. Jangan mengirim full repo atau seluruh LinkedIn export ke Hermes setiap kali.
 - **Refresh dan penghapusan:** monitor mencatat coverage, cursor, last sync, error; dukung full resync, repo/file exclude, disconnect, source deletion, dan purge index.
 - **MVP search:** FTS5 untuk simplicity/offline operation. Tambahkan embeddings/vector search hanya setelah kualitas pencarian diuji dan biaya/provider/privacy diputuskan; jangan membuat external embedding call default.
 - **Meaning of learning:** knowledge base retrieval (RAG) yang dapat diperbarui/dihapus; bukan fine-tuning atau training model pada data pengguna.
@@ -132,22 +132,21 @@ Rujukan: [GitHub App permissions](https://docs.github.com/en/apps/creating-githu
 - Adapter memetakan `429` dan limit ke rate limiter per akun/endpoint; berikan cooldown dan jangan retry ketat.
 - Tidak ada scraping, private endpoint, login cookie injection, atau browser automation.
 
-## 8. Integrasi OpenCode CLI
+## 8. Integrasi Hermes Agent
 
-Dokumentasi OpenCode CLI saat diperiksa mencantumkan `opencode run` untuk prompt non-interaktif dan opsi seperti `--model`, `--agent`, `--file`, `--format`, serta `--attach`. Dokumentasi agent menyediakan `mode`, permission `allow`/`ask`/`deny`, dan model berformat `provider/model`.
+CLI Hermes menyediakan query non-interaktif `hermes -p <profile> chat --query-file <path> --oneshot --quiet --format stream-json`. Profile memisahkan konfigurasi model/provider, secret, state, dan cron; pemilihan profile tidak membatasi akses file atau tool dengan sendirinya.
 
 Rancangan adapter:
 
-1. Server-side only; konfigurasi executable path, timeout, model, agent, dan concurrency melalui environment/config.
-2. Jalankan `spawn` memakai executable dan argument array, `shell: false`, input terbatas; jangan membangun command string dari teks proyek.
-3. Kirim prompt/context melalui mekanisme input aman dan batasi ukuran; hindari konten privat di process arguments/log.
-4. Tentukan agent read-only/drafting dengan permission minimum. Agent tidak memiliki tool/API untuk mengeksekusi tindakan marketplace; backend memanggil adapter hanya sesudah policy engine memutuskan `allowed`.
-5. Parse output, validasi schema domain, tangani exit code, timeout, stderr, output terlalu besar, dan CLI yang tak ditemukan.
-6. Jangan gunakan `--auto` untuk melewati prompt permission. Approval produk tetap diwajibkan dan tidak digantikan permission OpenCode.
-7. Jangan membuka `opencode serve` ke jaringan publik. Jika perlu service mode, bind localhost/private network dan autentikasi.
-8. Kredensial model dikelola OpenCode/provider; jangan gabungkan secret Freelancer ke environment proses AI.
+1. Server-side only. Nama profile dan executable berasal dari konfigurasi lokal yang tervalidasi; default drafting tetap fixture sampai mode Hermes dan consent data diaktifkan.
+2. Jalankan `spawn` memakai executable dan argument array dengan `shell: false`; kirim semua teks melalui file temporer yang dibatasi dan hapus setelah proses selesai.
+3. Kirim hanya proyek terpilih, fakta profil yang diberikan, dan maksimal empat bukti retrieval. Kredensial marketplace tidak masuk ke environment proses Hermes.
+4. Profile `fvh` wajib memakai `platform_toolsets.cli: []`, tanpa tool file, terminal, browser, web, MCP, atau delegation. Cron dijalankan dengan `platform_toolsets.cron: []` dan hanya menghasilkan ringkasan/pengingat lokal. Profile bukan sandbox.
+5. Parse JSONL final, tolak aktivitas tool, validasi schema domain, dan tangani exit code, timeout, stderr, batas output, dan CLI yang tak ditemukan.
+6. Hermes hanya membuat usulan. Backend tidak memanggil marketplace write; kebijakan dan capability API tetap diperiksa secara deterministik.
+7. Kredensial provider berada di profile Hermes. Project `.env` hanya memilih binary/profile dan consent, bukan menyalin API key provider atau kredensial marketplace ke agent.
 
-Referensi: [CLI](https://dev.opencode.ai/docs/cli/), [Agents](https://docs.opencode.ai/docs/agents/), [Models](https://docs.opencode.ai/docs/models/).
+Langkah konfigurasi Windows ada di [docs/hermes-agent-setup.md](docs/hermes-agent-setup.md). Referensi resmi: [CLI](https://hermes-agent.nousresearch.com/docs/user-guide/cli), [profiles](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/profiles.md), [toolsets](https://hermes-agent.nousresearch.com/docs/reference/toolsets-reference), dan [cron](https://hermes-agent.nousresearch.com/docs/user-guide/features/cron).
 
 ## 9. Penyimpanan dan secret
 
@@ -170,7 +169,7 @@ Referensi: [CLI](https://dev.opencode.ai/docs/cli/), [Agents](https://docs.openc
 ## 11. Keamanan, compliance, dan kegagalan
 
 - TLS, secure headers, rate limit aplikasi, input validation, CSRF, content escaping, dan CSP yang sesuai integrasi.
-- Least privilege untuk OAuth, OpenCode agents, filesystem, dan process permissions.
+- Least privilege untuk OAuth, Hermes profiles/toolsets, filesystem, dan process permissions.
 - Adapter API tidak dipanggil langsung dari browser.
 - AI prompt hanya memuat data terpilih. Sanitize lampiran/teks dan cegah konten tak tepercaya mengambil alih system prompt.
 - GitHub/LinkedIn content dianggap milik pengguna hanya dalam cakupan grant/export; hormati lisensi dan data pihak ketiga, jangan scrape, dan jangan masukkan ke training model. Secret scan/exclusion harus lulus sebelum chunk menjadi retrievable.

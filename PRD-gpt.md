@@ -9,7 +9,7 @@ Dokumen pendamping: [AGENT.md](AGENT.md), [TECH_STACK.md](TECH_STACK.md), dan [T
 
 ## 1. Ringkasan
 
-Freelancer Virtual House adalah kantor virtual 3D ringan yang menjalankan operasi freelancer secara mandiri setelah setup dan aktivasi kebijakan. Aplikasi menghubungkan akun Freelancer.com milik pengguna melalui API resmi yang sah, menemukan dan menilai proyek, menyiapkan serta mengirim bid, merawat profil/portofolio, dan mengorganisasi komunikasi. Model AI diakses melalui OpenCode CLI. Pengguna memantau dashboard; tidak perlu menyetujui tiap tindakan rutin. Sistem hanya bertindak di dalam batas otomatisasi, budget, fakta, frekuensi, dan izin yang sudah ditetapkan. Jika kondisi di luar kebijakan atau kemampuan API tidak pasti, sistem melewati tindakan dan mencatat alasannya.
+Freelancer Virtual House adalah kantor virtual 3D ringan untuk mengelola operasi freelancer. Aplikasi menghubungkan akun Freelancer.com melalui API resmi yang diizinkan, menemukan dan menilai proyek, menyiapkan draf bid, merawat profil/portofolio, dan mengorganisasi komunikasi. Model AI opsional dijalankan melalui Hermes Agent lokal. Pengguna memantau dashboard; sistem bertindak hanya dalam batas kebijakan dan kemampuan API yang telah diverifikasi. Jika kondisi di luar batas atau tidak pasti, sistem melewati tindakan dan mencatat alasannya.
 
 Pengalaman 3D adalah cara menjelajahi dashboard, bukan prasyarat untuk menjalankan bisnis. Jika WebGL tidak tersedia atau pengguna memilih mode ringan, semua fungsi tetap tersedia melalui tampilan 2D.
 
@@ -45,7 +45,7 @@ MVP mendukung satu pemilik, satu workspace, dan satu profil freelancer. Model da
 - **Evidence-first:** fakta profil dan proposal bersumber dari data terverifikasi pengguna atau data proyek yang diizinkan API. AI tidak mengarang pengalaman, hasil, harga, ketersediaan, atau kredensial.
 - **API-first, adapter-based:** integrasi hanya melalui API resmi dengan autentikasi dan scope yang sah.
 - **Fail closed:** jika izin, token, kuota, validitas data, atau kemampuan endpoint tidak jelas, tindakan tulis dinonaktifkan.
-- **Progressive enhancement:** inti tetap dapat dipakai tanpa 3D atau OpenCode.
+- **Progressive enhancement:** inti tetap dapat dipakai tanpa 3D atau Hermes Agent.
 - **Spesialisasi terpilih:** rekomendasi dan template memprioritaskan bidang utama serta spesialisasi yang diaktifkan pengguna.
 
 ## 5. Kebutuhan fungsional
@@ -94,11 +94,11 @@ Status internal: `new`, `scored`, `draft_ready`, `policy_check`, `submitted`, `i
 - Sistem boleh mengirim balasan rutin yang faktual (misalnya konfirmasi penerimaan atau klarifikasi standar) sesuai template dan batas kebijakan. Sistem tidak menyepakati kontrak, menerima pekerjaan, menawar di luar batas, atau menjanjikan tenggat yang tidak dikonfigurasi.
 - Jika API tidak mendukung akses pesan atau ada batas kebijakan, fitur menjadi pencatatan/link/manual checklist.
 
-### 5.6 AI/OpenCode
+### 5.6 AI/Hermes Agent
 
-- Backend menjalankan OpenCode CLI melalui integrasi terbatas. Panggilan AI memakai input terpilih, schema output, batas waktu/ukuran, dan pencatatan metadata.
-- Gunakan agen terpisah untuk riset, penilaian, proposal, profil, komunikasi, dan audit; agen tidak menjalankan tindakan marketplace.
-- AI hanya mengusulkan operasi domain internal. Agent tidak diberi kredensial Freelancer, akses jaringan bebas, atau hak menulis ke API marketplace.
+- Backend menjalankan Hermes CLI dari profile proyek dengan prompt terpilih, schema output, batas waktu/ukuran, dan tanpa toolset CLI.
+- Kredensial provider dikelola oleh profile Hermes; kredensial Freelancer/LinkedIn tidak diteruskan ke proses drafting.
+- AI hanya menghasilkan usulan terstruktur. Tidak ada jalur Hermes langsung ke endpoint marketplace atau aksi tulis.
 - Jika CLI/model tidak tersedia atau output gagal divalidasi, sistem tidak mengirim tindakan AI yang bersangkutan, mencatat kegagalan, dan melanjutkan tindakan independen yang aman.
 
 ### 5.7 Kantor virtual 3D/2D
@@ -193,8 +193,9 @@ Status internal: `new`, `scored`, `draft_ready`, `policy_check`, `submitted`, `i
 
 Tautan diperiksa pada 14 Oktober 2026. Detail endpoint dan batas numerik perlu diverifikasi pada dokumentasi interaktif saat implementasi.
 
-- [OpenCode CLI](https://dev.opencode.ai/docs/cli/) — `opencode run`, `opencode serve`, flags, dan perintah.
-- [OpenCode Agents](https://docs.opencode.ai/docs/agents/) — agen, model, mode, dan permission `allow`/`ask`/`deny`.
+- [Hermes CLI](https://hermes-agent.nousresearch.com/docs/user-guide/cli) — mode query tunggal, `--query-file`, dan JSONL.
+- [Hermes profiles](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/profiles.md) — konfigurasi profile terisolasi.
+- [Hermes toolsets](https://hermes-agent.nousresearch.com/docs/reference/toolsets-reference) — batas kemampuan per platform dan sesi.
 - [Freelancer API for Developers](https://developer.freelancer.com/) — dokumentasi API, versi, dan sandbox yang dipublikasikan.
 - [Freelancer API Terms & Conditions](https://www.freelancer.com/about/apiterms) — lisensi, batas penggunaan, akses, dan kewajiban data.
 - [Freelancer OAuth Sandbox Demo](https://github.com/freelancer/freelancer-oauth-demo-app) — contoh OAuth sandbox; contoh lama, bukan kontrak endpoint terbaru.

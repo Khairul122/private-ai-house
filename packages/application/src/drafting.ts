@@ -22,6 +22,12 @@ export interface AiDraftingPort {
   draftBid(input: DraftingInput): Promise<DraftingOutput>;
 }
 
+export class UnavailableDraftingAdapter implements AiDraftingPort {
+  async draftBid(): Promise<DraftingOutput> {
+    throw new Error('Hermes drafting is not configured or data processing consent is not enabled.');
+  }
+}
+
 export class FixtureDraftingAdapter implements AiDraftingPort {
   async draftBid(input: DraftingInput): Promise<DraftingOutput> {
     const { project, profileFacts, evidence, profileRate, score } = input;

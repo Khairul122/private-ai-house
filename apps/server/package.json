@@ -15,7 +15,7 @@
     "fastify": "latest",
     "@fvh/adapter-freelancer": "workspace:*",
     "@fvh/adapter-github": "workspace:*",
-    "@fvh/adapter-opencode": "workspace:*",
+    "@fvh/adapter-hermes": "workspace:*",
     "@fvh/application": "workspace:*",
     "@fvh/contracts": "workspace:*",
     "@fvh/domain": "workspace:*",

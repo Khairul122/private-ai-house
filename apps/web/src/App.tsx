@@ -527,7 +527,7 @@ function CapabilitiesPage() {
     freelancerCredentials: { accessTokenConfigured: boolean; verificationStatus: string; readProfile: boolean; readProjects: boolean };
     github: { read: string; scope: string; tokenConfigured: boolean };
     linkedin: { read: string; reason: string; redirectUri: string | null; clientConfigured: boolean; authorized: boolean; accessTokenExpiresAt: string | null };
-    opencode: { draft: string; active: boolean; reason: string };
+    hermes: { draft: string; active: boolean; reason: string };
   }>('/capabilities') });
   const verifyFreelancer = useMutation({
     mutationFn: () => api<{ message: string }>('/freelancer/verify', jsonRequest('POST')),
@@ -570,7 +570,7 @@ function CapabilitiesPage() {
         {query.data.linkedin.authorized
           ? <button type="button" className="button button-secondary" disabled={disconnectLinkedIn.isPending} onClick={() => disconnectLinkedIn.mutate()}>{disconnectLinkedIn.isPending ? 'Menghapus…' : 'Hapus token LinkedIn lokal'}</button>
           : <button type="button" className="button button-secondary" disabled={!query.data.linkedin.clientConfigured || connectLinkedIn.isPending} onClick={() => connectLinkedIn.mutate()}>{connectLinkedIn.isPending ? 'Menyiapkan OAuth…' : 'Hubungkan LinkedIn'}</button>}
-        <div className="capability-row"><div><strong>OpenCode CLI</strong><p>{query.data.opencode.reason}</p></div><StateLabel state="draft" /></div>
+        <div className="capability-row"><div><strong>Hermes Agent</strong><p>{query.data.hermes.reason}</p></div><StateLabel state={query.data.hermes.active ? 'active' : 'draft'} /></div>
       </section>
     </div>
   </>;

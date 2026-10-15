@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet('Store', 'Status', 'VerifyFreelancer', 'GetLinkedInClientCredentials', 'StoreLinkedInAccessToken', 'DeleteLinkedInAccessToken')]
+  [ValidateSet('Store', 'Status', 'VerifyFreelancer', 'GetFreelancerAccessToken', 'GetLinkedInClientCredentials', 'StoreLinkedInAccessToken', 'DeleteLinkedInAccessToken')]
   [string]$Action,
 
   [Parameter(Mandatory = $true)]
@@ -51,6 +51,17 @@ if ($Action -eq 'GetLinkedInClientCredentials') {
   } finally {
     [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($clientIdPointer)
     [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($clientSecretPointer)
+  }
+  exit 0
+}
+
+if ($Action -eq 'GetFreelancerAccessToken') {
+  $secureToken = ConvertTo-SecureString -String $store.freelancerAccessToken
+  $tokenPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)
+  try {
+    [Runtime.InteropServices.Marshal]::PtrToStringBSTR($tokenPointer) | Write-Output
+  } finally {
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($tokenPointer)
   }
   exit 0
 }

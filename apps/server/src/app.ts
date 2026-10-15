@@ -4,11 +4,11 @@ import type {} from '@fastify/static';
 import { z } from 'zod';
 import { getFreelancerCapabilities } from '@fvh/adapter-freelancer';
 import { GitHubReadAdapter, GitHubReadError } from '@fvh/adapter-github';
-import { assessProject, createId, decideBid, FixtureDraftingAdapter, hashPayload } from '@fvh/application';
+import { assessProject, createId, decideBid, hashPayload, UnavailableDraftingAdapter } from '@fvh/application';
 import type { AiDraftingPort } from '@fvh/application';
 import { activatePolicySchema, knowledgeImportSchema, knowledgeSearchSchema, updatePolicySchema, updateProfileSchema } from '@fvh/contracts';
 import { transitionPipeline } from '@fvh/domain';
-import type { AutonomyPolicy, BidDraft } from '@fvh/domain';
+import type { AutonomyPolicy, BidDraft, ProjectOpportunity } from '@fvh/domain';
 import { prepareKnowledgeFile } from '@fvh/knowledge';
 import { WorkspaceRepository } from '@fvh/persistence';
 import type { CredentialStatus, FreelancerVerification } from './credential-store.js';
@@ -17,6 +17,7 @@ import type { LinkedInOAuthService } from './linkedin-oauth.js';
 const paramsSchema = z.object({ id: z.string().min(1).max(150) });
 const draftUpdateSchema = z.object({ proposal: z.string().trim().min(40).max(4_000), proposedPrice: z.number().finite().positive() });
 const githubSyncSchema = z.object({ repository: z.string().trim().min(3).max(200) });
+const freelancerSyncSchema = z.object({ query: z.string().trim().min(2).max(120), limit: z.number().int().min(1).max(50).default(25) });
 const allowedDevOrigins = new Set(['http://127.0.0.1:5173', 'http://localhost:5173']);
 
 export type AppOptions = {
@@ -25,12 +26,14 @@ export type AppOptions = {
   credentialStatus?: CredentialStatus;
   getCredentialStatus?: () => CredentialStatus;
   verifyFreelancer?: () => Promise<FreelancerVerification>;
+  readFreelancerProjects?: (query: string, limit: number) => Promise<{ projects: ProjectOpportunity[]; skipped: number }>;
   linkedinOAuth?: Pick<LinkedInOAuthService, 'redirectUri' | 'start' | 'handleCallback' | 'close'>;
   disconnectLinkedIn?: () => Promise<void>;
   fetcher?: typeof fetch;
   clock?: () => Date;
   drafting?: AiDraftingPort;
-  draftingMode?: 'fixture' | 'opencode';
+  draftingMode?: 'disabled' | 'fixture' | 'hermes';
+  draftingReason?: string;
   spaFallback?: boolean;
 };
 
@@ -66,8 +69,8 @@ function isSameOrigin(origin: string, protocol: string, host: string | undefined
 export function createApp(options: AppOptions = {}): FastifyInstance {
   const repository = options.repository ?? new WorkspaceRepository();
   const now = options.clock ?? (() => new Date());
-  const drafting = options.drafting ?? new FixtureDraftingAdapter();
-  const draftingMode = options.draftingMode ?? 'fixture';
+  const drafting = options.drafting ?? new UnavailableDraftingAdapter();
+  const draftingMode = options.drafting ? options.draftingMode ?? 'fixture' : 'disabled';
   const app = Fastify({ logger: false, bodyLimit: 2_500_000, trustProxy: false });
   let freelancerVerification: FreelancerVerification | null = null;
 
@@ -85,7 +88,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     return payload;
   });
 
-  app.get('/api/health', async () => ({ ok: true, mode: 'local', database: 'sqlite', ai: 'fixture', liveWrites: false }));
+  app.get('/api/health', async () => ({ ok: true, mode: 'local', database: 'sqlite', ai: draftingMode, liveWrites: false }));
   app.get('/api/capabilities', async () => {
     const credentialStatus = options.getCredentialStatus?.() ?? options.credentialStatus;
     return {
@@ -105,11 +108,11 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       redirectUri: options.linkedinOAuth?.redirectUri ?? null,
       reason: 'Hanya profil OIDC ringan yang diminta. Produk OIDC LinkedIn harus disetujui dan URL callback yang ditampilkan harus diterima di Developer Portal; akses profil lengkap tetap tidak tersedia.',
     },
-    opencode: {
-      draft: 'optional', active: draftingMode === 'opencode',
-      reason: draftingMode === 'opencode'
-        ? 'Selected project details, supplied profile facts, and up to four relevant local evidence chunks are sent to the configured OpenCode provider; marketplace credentials are excluded.'
-        : 'Fixture drafting is the default until a provider is configured and data-processing consent is set.',
+    hermes: {
+      draft: 'optional', active: draftingMode === 'hermes',
+      reason: draftingMode === 'hermes'
+        ? 'Data proyek terpilih, fakta profil yang diberikan, dan hingga empat potongan bukti lokal dikirim ke profil Hermes yang dikonfigurasi; kredensial marketplace tidak disertakan.'
+        : options.draftingReason ?? 'Hermes belum aktif. Draf AI tidak dibuat sampai profil Hermes dikonfigurasi dan persetujuan pemrosesan data diberikan.',
     },
   };
   });
@@ -125,6 +128,34 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
         ? 'Koneksi Freelancer terverifikasi. Akses profil dan pencarian proyek baca-saja tersedia.'
         : 'Koneksi belum terverifikasi. Periksa token, scope, atau koneksi jaringan lalu coba lagi.',
     };
+  });
+
+  app.post('/api/freelancer/projects/sync', async (request, reply) => {
+    const credentialStatus = options.getCredentialStatus?.() ?? options.credentialStatus;
+    if (!credentialStatus?.freelancerAccessTokenConfigured) return reply.code(409).send({ error: 'Token Freelancer belum tersimpan di secure store Windows.' });
+    if (!options.readFreelancerProjects) return reply.code(503).send({ error: 'Sinkronisasi Freelancer belum tersedia di server ini.' });
+    const parsed = parseBody(freelancerSyncSchema, request.body);
+    if ('issues' in parsed) return reply.code(400).send({ error: 'Pencarian proyek tidak valid.', issues: parsed.issues });
+    try {
+      const result = await options.readFreelancerProjects(parsed.value.query, parsed.value.limit);
+      const synced = repository.syncFreelancerProjects(result.projects);
+      freelancerVerification = {
+        connected: true,
+        readProfile: freelancerVerification?.readProfile ?? false,
+        readProjects: true,
+        reason: freelancerVerification?.readProfile ? 'verified' : 'projects_unavailable',
+      };
+      repository.appendAudit({
+        type: 'marketplace.projects_synced', resourceId: 'freelancer', status: 'recorded',
+        reason: `Sinkronisasi baca-saja menyimpan ${synced.upserted} proyek dari Freelancer; ${result.skipped} hasil tidak valid dilewati.`,
+        policyVersion: repository.getPolicy().version, payloadHash: null,
+      });
+      return { imported: synced.upserted, skipped: result.skipped, projects: repository.listProjects().filter((project) => project.source === 'freelancer') };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Freelancer tidak dapat diperiksa.';
+      repository.appendAudit({ type: 'marketplace.sync_failed', resourceId: 'freelancer', status: 'failed', reason: message, policyVersion: repository.getPolicy().version, payloadHash: null });
+      return reply.code(message.includes('token') ? 401 : message.includes('izin') ? 403 : 502).send({ error: message });
+    }
   });
 
   app.post('/api/linkedin/connect', async (request, reply) => {
@@ -255,6 +286,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     const project = repository.getProject(params.data.id);
     if (!project) return reply.code(404).send({ error: 'Peluang tidak ditemukan.' });
     if (project.status !== 'open') return reply.code(409).send({ error: 'Peluang ini sudah tidak terbuka.' });
+    if (draftingMode === 'disabled') return reply.code(503).send({ error: options.draftingReason ?? 'Hermes belum aktif. Hubungkan profil Hermes dan aktifkan persetujuan pemrosesan data sebelum meminta draf AI.' });
     const profile = repository.getProfile();
     const score = assessProject(project, profile.specializations).score;
     let generated;
@@ -275,7 +307,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       status: 'draft_ready', createdAt: now().toISOString(),
     };
     repository.createDraft(draft);
-    repository.appendAudit({ type: 'bid.draft_created', resourceId: project.id, status: 'recorded', reason: 'Draf contoh dibuat dari brief; klaim profil belum ditambahkan tanpa fakta bersumber.', policyVersion: repository.getPolicy().version, payloadHash: hashPayload({ proposal: draft.proposal, proposedPrice: draft.proposedPrice, currency: draft.currency }) });
+    repository.appendAudit({ type: 'bid.draft_created', resourceId: project.id, status: 'recorded', reason: draftingMode === 'hermes' ? 'Draf dibuat Hermes dari fakta dan bukti lokal yang dipilih.' : 'Draf dibuat oleh adapter yang secara eksplisit dipilih untuk pengujian.', policyVersion: repository.getPolicy().version, payloadHash: hashPayload({ proposal: draft.proposal, proposedPrice: draft.proposedPrice, currency: draft.currency }) });
     return reply.code(201).send(draft);
   });
   app.put('/api/drafts/:id', async (request, reply) => {
@@ -331,7 +363,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     const policy = repository.getPolicy();
     const profile = repository.getProfile();
     return {
-      mode: 'contoh lokal',
+      mode: 'workspace lokal',
       counts: {
         openProjects: projects.filter((project) => project.status === 'open').length,
         drafts: projects.filter((project) => repository.getLatestDraft(project.id)).length,
@@ -424,7 +456,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
         freelancer: { connection: freelancerVerification?.connected ? 'connected' : 'unverified', readProjects: 'supported', readProfile: 'supported', writes: 'unknown' },
         github: 'read-only',
         linkedin: { read: linkedinAuthorized ? 'oidc-lite' : 'manual-only', clientConfigured: credentialStatus?.linkedinClientConfigured ?? false, authorized: linkedinAuthorized },
-        opencode: 'optional',
+        hermes: 'optional',
       },
       externalWrites: false,
     };

@@ -1,5 +1,5 @@
 {
-  "name": "@fvh/adapter-opencode",
+  "name": "@fvh/adapter-hermes",
   "private": true,
   "type": "module",
   "exports": { ".": "./src/index.ts" },
