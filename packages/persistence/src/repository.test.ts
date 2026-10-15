@@ -71,4 +71,20 @@ describe('WorkspaceRepository', () => {
     expect(repository.searchKnowledge('cursor pagination')).toEqual([]);
     expect(repository.knowledgeCoverage()).toEqual({ sources: 0, chunks: 0 });
   });
+
+  it('stores client threads, dedupes won projects by external id, and tracks payments', () => {
+    repository = new WorkspaceRepository();
+    repository.upsertClientThreads([{ threadId: '501', projectId: '77', lastSenderId: '42', lastMessageAt: '2026-10-15T01:00:00.000Z', preview: 'Halo', syncedAt: '2026-10-15T02:00:00.000Z' }]);
+    repository.upsertClientThreads([{ threadId: '501', projectId: '77', lastSenderId: '7', lastMessageAt: '2026-10-15T03:00:00.000Z', preview: 'Balasan', syncedAt: '2026-10-15T04:00:00.000Z' }]);
+    expect(repository.listClientThreads()).toEqual([expect.objectContaining({ threadId: '501', lastSenderId: '7', preview: 'Balasan' })]);
+
+    const input = { title: 'API', client: 'Acme', source: 'freelancer' as const, externalProjectId: 'freelancer:77', status: 'active' as const, deadline: null, value: 300, currency: 'USD' };
+    const project = repository.createClientProject(input)!;
+    expect(repository.createClientProject(input)).toBeUndefined();
+    expect(repository.updateClientProject(project.id, { status: 'delivered' })).toMatchObject({ status: 'delivered', value: 300 });
+
+    const payment = repository.createPayment({ projectId: project.id, amount: 150, currency: 'USD', status: 'expected', dueDate: '2026-10-20', receivedAt: null, note: '' });
+    expect(repository.markPaymentReceived(payment.id, '2026-10-16T00:00:00.000Z')).toMatchObject({ status: 'received', receivedAt: '2026-10-16T00:00:00.000Z' });
+    expect(repository.markPaymentReceived('missing', '2026-10-16T00:00:00.000Z')).toBeUndefined();
+  });
 });

@@ -7,7 +7,7 @@ import type { FreelancerSandboxWriteInput, FreelancerSandboxWriteOperation, Free
 import { GitHubReadAdapter, GitHubReadError } from '@fvh/adapter-github';
 import { assessProject, createId, decideBid, hashPayload, UnavailableDraftingAdapter } from '@fvh/application';
 import type { AiDraftingPort } from '@fvh/application';
-import { activatePolicySchema, knowledgeImportSchema, knowledgeSearchSchema, updatePolicySchema, updateProfileSchema } from '@fvh/contracts';
+import { activatePolicySchema, createClientProjectSchema, createPaymentSchema, knowledgeImportSchema, knowledgeSearchSchema, updateClientProjectSchema, updatePolicySchema, updateProfileSchema } from '@fvh/contracts';
 import { transitionPipeline } from '@fvh/domain';
 import type { AutonomyPolicy, BidDraft, ProjectOpportunity } from '@fvh/domain';
 import { prepareKnowledgeFile } from '@fvh/knowledge';
@@ -19,6 +19,7 @@ import type { FreelancerAutopilot } from './autopilot.js';
 import type { BusinessSync } from './business-sync.js';
 
 const paramsSchema = z.object({ id: z.string().min(1).max(150) });
+const FOLLOW_UP_DAYS = 3;
 const draftUpdateSchema = z.object({ proposal: z.string().trim().min(40).max(4_000), proposedPrice: z.number().finite().positive() });
 const githubSyncSchema = z.object({ repository: z.string().trim().min(3).max(200) });
 const freelancerSyncSchema = z.object({ query: z.string().trim().min(2).max(120), limit: z.number().int().min(1).max(50).default(25) });
@@ -149,21 +150,116 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     state: 'blocked', lastRunAt: null, nextRunAt: null, lastMessage: 'Autopilot belum tersedia pada server ini.', lastImported: 0, lastSubmitted: 0, specializations: [],
   });
   app.get('/api/business-sync', async () => options.businessSync?.getStatus() ?? null);
+  // Thread project ids are bare Freelancer ids; local project ids are 'freelancer:<id>'.
+  const threadProjectIds = () => new Set(repository.listClientThreads().map((thread) => thread.projectId).filter((id): id is string => id !== null).map((id) => `freelancer:${id}`));
+  const dayDiff = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
+
   app.get('/api/insights/bids', async () => {
     const outcomes = repository.listBidOutcomes();
     const won = outcomes.filter(({ outcome }) => outcome === 'won').length;
     const lost = outcomes.filter(({ outcome }) => outcome === 'lost').length;
     const pending = outcomes.filter(({ outcome }) => outcome === 'pending').length;
+    const conversations = threadProjectIds();
     const since = new Date(now().getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
     const reasons = repository.skipReasonSummary(since);
-    const lastCheck = outcomes.map(({ checkedAt }) => checkedAt).filter((value): value is string => value !== null).sort().at(-1) ?? null;
+    const sync = options.businessSync?.getStatus().outcomes;
+    const lastChecked = outcomes.map(({ checkedAt }) => checkedAt).filter((value): value is string => value !== null).sort().at(-1) ?? null;
     return {
-      outcomes: { submitted: outcomes.length, won, lost, pending, winRate: won + lost === 0 ? null : won / (won + lost) },
+      outcomes: { submitted: outcomes.length, won, lost, pending, withConversation: outcomes.filter((row) => conversations.has(row.projectId)).length, winRate: won + lost === 0 ? null : won / (won + lost) },
       recent: outcomes.slice(0, 10).map((outcome) => ({ projectId: outcome.projectId, title: repository.getProject(outcome.projectId)?.title ?? null, submittedAt: outcome.submittedAt, outcome: outcome.outcome, awardStatus: outcome.awardStatus, checkedAt: outcome.checkedAt })),
       skips: { total: reasons.reduce((total, reason) => total + Number(reason.total), 0), recent7d: reasons.reduce((total, reason) => total + Number(reason.recent), 0), reasons },
-      lastCheck: { at: lastCheck, ok: lastCheck ? true : null, error: null },
+      lastCheck: sync?.lastRunAt ? { at: sync.lastRunAt, ok: sync.ok, error: sync.error } : { at: lastChecked, ok: lastChecked ? true : null, error: null },
     };
   });
+
+  app.get('/api/inbox', async () => {
+    const sync = options.businessSync?.getStatus().messages ?? null;
+    const selfId = sync?.selfId ?? null;
+    const nowMs = now().getTime();
+    const needsReply = selfId === null ? [] : repository.listClientThreads()
+      .filter((thread) => thread.lastSenderId !== selfId)
+      .sort((a, b) => a.lastMessageAt.localeCompare(b.lastMessageAt))
+      .map((thread) => ({
+        threadId: thread.threadId, projectId: thread.projectId, preview: thread.preview, lastMessageAt: thread.lastMessageAt,
+        projectTitle: thread.projectId ? repository.getProject(`freelancer:${thread.projectId}`)?.title ?? null : null,
+        waitingHours: Math.max(0, Math.floor((nowMs - Date.parse(thread.lastMessageAt)) / 3_600_000)),
+      }));
+    const conversations = threadProjectIds();
+    const followUps = repository.listBidOutcomes()
+      .filter((row) => row.outcome === 'pending' && !conversations.has(row.projectId))
+      .map((row) => ({ projectId: row.projectId, title: repository.getProject(row.projectId)?.title ?? row.projectId, submittedAt: row.submittedAt, daysSinceBid: Math.floor((nowMs - Date.parse(row.submittedAt)) / 86_400_000) }))
+      .filter((row) => row.daysSinceBid >= FOLLOW_UP_DAYS);
+    return { sync: sync && { lastRunAt: sync.lastRunAt, ok: sync.ok, error: sync.error }, needsReply, followUps };
+  });
+
+  app.get('/api/work', async () => {
+    const policy = repository.getPolicy();
+    const today = localDateKey(now(), policy.timezone);
+    const month = today.slice(0, 7);
+    const projectsById = new Map(repository.listClientProjects().map((project) => [project.id, project]));
+    const projects = [...projectsById.values()]
+      .map((project) => ({ ...project, daysToDeadline: project.deadline ? dayDiff(today, project.deadline) : null }))
+      .sort((a, b) => Number(b.status === 'active') - Number(a.status === 'active') || (a.daysToDeadline ?? Infinity) - (b.daysToDeadline ?? Infinity));
+    const payments = repository.listPayments();
+    const received = new Map<string, { currency: string; total: number; bySource: Record<string, number> }>();
+    const expected = new Map<string, { currency: string; total: number }>();
+    for (const payment of payments) {
+      if (payment.status === 'expected') {
+        const entry = expected.get(payment.currency) ?? { currency: payment.currency, total: 0 };
+        entry.total += payment.amount;
+        expected.set(payment.currency, entry);
+      } else if (payment.receivedAt && localDateKey(new Date(payment.receivedAt), policy.timezone).startsWith(month)) {
+        const entry = received.get(payment.currency) ?? { currency: payment.currency, total: 0, bySource: {} };
+        const source = projectsById.get(payment.projectId)?.source ?? 'other';
+        entry.total += payment.amount;
+        entry.bySource[source] = (entry.bySource[source] ?? 0) + payment.amount;
+        received.set(payment.currency, entry);
+      }
+    }
+    return {
+      projects, payments, income: { month, received: [...received.values()], expected: [...expected.values()] },
+      dueSoon: projects.filter((project) => project.status === 'active' && project.daysToDeadline !== null && project.daysToDeadline >= 0 && project.daysToDeadline <= 2).length,
+    };
+  });
+
+  app.post('/api/work/projects', async (request, reply) => {
+    const parsed = parseBody(createClientProjectSchema, request.body);
+    if ('issues' in parsed) return reply.code(400).send({ error: 'Data proyek tidak valid.', issues: parsed.issues });
+    const project = repository.createClientProject({ ...parsed.value, externalProjectId: null });
+    if (!project) return reply.code(409).send({ error: 'Proyek sudah ada.' });
+    repository.appendAudit({ type: 'work.project_created', resourceId: project.id, status: 'recorded', reason: `Proyek klien "${project.title}" ditambahkan.`, policyVersion: null, payloadHash: null });
+    return reply.code(201).send(project);
+  });
+
+  app.put('/api/work/projects/:id', async (request, reply) => {
+    const params = paramsSchema.safeParse(request.params);
+    const parsed = parseBody(updateClientProjectSchema, request.body);
+    if (!params.success || 'issues' in parsed) return reply.code(400).send({ error: 'Perubahan proyek tidak valid.', ...('issues' in parsed ? { issues: parsed.issues } : {}) });
+    const patch = Object.fromEntries(Object.entries(parsed.value).filter(([, value]) => value !== undefined));
+    const project = repository.updateClientProject(params.data.id, patch);
+    if (!project) return reply.code(404).send({ error: 'Proyek tidak ditemukan.' });
+    repository.appendAudit({ type: 'work.project_updated', resourceId: project.id, status: 'recorded', reason: `Proyek "${project.title}" diperbarui (status ${project.status}).`, policyVersion: null, payloadHash: null });
+    return project;
+  });
+
+  app.post('/api/work/payments', async (request, reply) => {
+    const parsed = parseBody(createPaymentSchema, request.body);
+    if ('issues' in parsed) return reply.code(400).send({ error: 'Data pembayaran tidak valid.', issues: parsed.issues });
+    if (!repository.getClientProject(parsed.value.projectId)) return reply.code(404).send({ error: 'Proyek tidak ditemukan.' });
+    const payment = repository.createPayment({ ...parsed.value, receivedAt: parsed.value.status === 'received' ? now().toISOString() : null });
+    repository.appendAudit({ type: 'work.payment_recorded', resourceId: payment.id, status: 'recorded', reason: `Pembayaran ${payment.currency} ${payment.amount} dicatat (${payment.status === 'received' ? 'diterima' : 'diharapkan'}).`, policyVersion: null, payloadHash: null });
+    return reply.code(201).send(payment);
+  });
+
+  app.post('/api/work/payments/:id/received', async (request, reply) => {
+    const params = paramsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'ID pembayaran tidak valid.' });
+    const payment = repository.markPaymentReceived(params.data.id, now().toISOString());
+    if (!payment) return reply.code(404).send({ error: 'Pembayaran tidak ditemukan.' });
+    repository.appendAudit({ type: 'work.payment_received', resourceId: payment.id, status: 'recorded', reason: `Pembayaran ${payment.currency} ${payment.amount} ditandai diterima.`, policyVersion: null, payloadHash: null });
+    return payment;
+  });
+
   app.get('/api/capabilities', async () => {
     refreshProductionWriteChecks();
     const credentialStatus = options.getCredentialStatus?.() ?? options.credentialStatus;

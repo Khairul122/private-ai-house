@@ -78,10 +78,10 @@ describe('local API', () => {
     expect(projects.json()).toEqual([]);
     expect(businessSync.json()).toBeNull();
     expect(bidInsights.json()).toEqual({
-      outcomes: { submitted: 0, won: 0, lost: 0, pending: 0, winRate: 0 },
+      outcomes: { submitted: 0, won: 0, lost: 0, pending: 0, withConversation: 0, winRate: null },
       recent: [],
       skips: { total: 0, recent7d: 0, reasons: [] },
-      lastCheck: null,
+      lastCheck: { at: null, ok: null, error: null },
     });
     expect(draft.statusCode).toBe(503);
     expect(draft.json().error).toContain('Hermes belum diaktifkan');
@@ -427,5 +427,48 @@ describe('local API', () => {
 
     await githubApp.close();
     githubRepository.close();
+  });
+});
+
+describe('business operations API', () => {
+  it('reports an empty inbox without inventing threads when message sync is unavailable', async () => {
+    const inbox = await app.inject({ method: 'GET', url: '/api/inbox' });
+    expect(inbox.json()).toEqual({ sync: null, needsReply: [], followUps: [] });
+    const insights = (await app.inject({ method: 'GET', url: '/api/insights/bids' })).json();
+    expect(insights.outcomes).toEqual({ submitted: 0, won: 0, lost: 0, pending: 0, withConversation: 0, winRate: null });
+  });
+
+  it('lists bids without any client conversation after three days as follow-ups', async () => {
+    repository.recordSubmittedBid({ projectId: testOpportunity.id, bidId: '9001', amount: 200, currency: 'USD', submittedAt: '2026-10-10T00:00:00.000Z' });
+    const inbox = (await app.inject({ method: 'GET', url: '/api/inbox' })).json();
+    expect(inbox.followUps).toEqual([expect.objectContaining({ projectId: testOpportunity.id, daysSinceBid: 4 })]);
+  });
+
+  it('tracks client projects, deadlines, and monthly income per currency', async () => {
+    const created = await app.inject({ method: 'POST', url: '/api/work/projects', payload: {
+      title: 'Company profile', client: 'Toko Maju', source: 'direct', deadline: '2026-10-15', value: 5_000_000, currency: 'idr',
+    } });
+    expect(created.statusCode).toBe(201);
+    const project = created.json();
+    expect((await app.inject({ method: 'POST', url: '/api/work/projects', payload: { title: '', client: 'X', source: 'direct', deadline: '15-10-2026', value: null, currency: 'IDR' } })).statusCode).toBe(400);
+
+    const payment = (await app.inject({ method: 'POST', url: '/api/work/payments', payload: { projectId: project.id, amount: 2_500_000, currency: 'IDR', status: 'expected', dueDate: null } })).json();
+    await app.inject({ method: 'POST', url: '/api/work/payments', payload: { projectId: project.id, amount: 100, currency: 'USD', status: 'received', dueDate: null } });
+    expect((await app.inject({ method: 'POST', url: `/api/work/payments/${payment.id}/received` })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'POST', url: '/api/work/payments/missing/received' })).statusCode).toBe(404);
+
+    const work = (await app.inject({ method: 'GET', url: '/api/work' })).json();
+    expect(work.projects[0]).toMatchObject({ title: 'Company profile', currency: 'IDR', daysToDeadline: 1 });
+    expect(work.dueSoon).toBe(1);
+    expect(work.income.month).toBe('2026-10');
+    expect(work.income.received).toEqual(expect.arrayContaining([
+      { currency: 'IDR', total: 2_500_000, bySource: { direct: 2_500_000 } },
+      { currency: 'USD', total: 100, bySource: { direct: 100 } },
+    ]));
+    expect(work.income.expected).toEqual([]);
+
+    const updated = await app.inject({ method: 'PUT', url: `/api/work/projects/${project.id}`, payload: { status: 'delivered' } });
+    expect(updated.json()).toMatchObject({ status: 'delivered' });
+    expect((await app.inject({ method: 'GET', url: '/api/work' })).json().dueSoon).toBe(0);
   });
 });

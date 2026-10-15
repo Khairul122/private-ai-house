@@ -73,39 +73,44 @@ function activityFor(id: string, activity: AuditEvent[]): AuditEvent[] {
     if (id === 'compliance-auditor') return event.type === 'autopilot.bid_skipped' || event.type.startsWith('policy.');
     if (id === 'profile-editor') return event.type === 'profile.updated' || event.type === 'marketplace.production.edit_profile';
     if (id === 'knowledge-curator') return event.type.startsWith('knowledge.');
-    if (id === 'operations-analyst') return event.type === 'autopilot.policy_bootstrapped';
+    if (id === 'operations-analyst') return event.type === 'autopilot.policy_bootstrapped' || event.type.startsWith('work.');
     return false;
   };
   return activity.filter(matches).slice(0, 3);
 }
 
-export type OfficeStateOverride = Partial<Record<string, { state: AgentState; reason?: string }>> | boolean;
+/** Extra real signals beyond the autopilot. `undefined` means the source could not be loaded. */
+export type OfficeContext = {
+  sync?: BusinessSyncStatus | null | undefined;
+  inboxWaiting?: number | undefined;
+  dueSoon?: number | undefined;
+};
 
-export function deriveOfficeAgents(autopilot: Autopilot | undefined, activity: AuditEvent[] | undefined, syncOrOverrides?: BusinessSyncStatus | OfficeStateOverride, overrides?: OfficeStateOverride): OfficeAgent[] {
+type Derived = { state: AgentState; reason: string; task?: string | null };
+
+function clientRelationsState(sync: BusinessSyncStatus | null | undefined, inboxWaiting: number | undefined): Derived {
+  if (!sync) return { state: 'unknown', reason: 'Status sinkronisasi pesan tidak tersedia.' };
+  if (sync.step === 'messages') return { state: 'working', reason: 'Membaca pesan klien dari Freelancer.', task: 'Sinkronisasi kotak masuk.' };
+  if (sync.messages.ok === false) return { state: 'offline', reason: `Sinkronisasi pesan gagal: ${sync.messages.error ?? 'tidak diketahui'}` };
+  if (sync.messages.ok === null) return { state: 'unknown', reason: 'Pesan belum pernah disinkronkan.' };
+  return { state: 'idle', reason: 'Kotak masuk tersinkron.', task: inboxWaiting ? `${inboxWaiting} pesan menunggu balasan` : null };
+}
+
+export function deriveOfficeAgents(autopilot: Autopilot | undefined, activity: AuditEvent[] | undefined, context: OfficeContext = {}): OfficeAgent[] {
   const events = activity ?? [];
-  const sync = typeof syncOrOverrides === 'object' && syncOrOverrides !== null && 'step' in syncOrOverrides ? syncOrOverrides : undefined;
-  const effectiveOverrides = overrides ?? (sync ? undefined : syncOrOverrides);
-  const syncInProgress = effectiveOverrides === true;
+  const { sync, inboxWaiting, dueSoon } = context;
   return ROSTER.map((entry) => {
-    let state: AgentState;
-    let reason: string;
-    if (entry.id === 'market-scout') ({ state, reason } = autopilotState(autopilot, false));
-    else if (entry.id === 'bid-strategist' || entry.id === 'compliance-auditor') ({ state, reason } = autopilotState(autopilot, true));
-    else if (['chief-of-staff', 'profile-editor', 'operations-analyst', 'knowledge-curator'].includes(entry.id)) ({ state, reason } = autopilot ? { state: 'idle', reason: ON_DEMAND_REASON } : { state: 'unknown', reason: 'Data server tidak tersedia.' });
-    else if (entry.id === 'client-relations') ({ state, reason } = { state: 'offline', reason: 'Fitur pesan belum aktif.' });
-    else ({ state, reason } = { state: 'offline', reason: 'Tidak ada komponen runtime; tes dijalankan di luar aplikasi.' });
-    const override = typeof effectiveOverrides === 'object' && effectiveOverrides !== null ? (effectiveOverrides as Record<string, { state: AgentState; reason?: string }>)[entry.id] : undefined;
-    if (syncInProgress && entry.id === 'market-scout') {
-      state = 'working';
-      reason = 'Sinkronisasi proyek Freelancer sedang berjalan.';
-    } else if (sync?.step && entry.id === 'bid-strategist') {
-      state = 'reviewing';
-      reason = 'Meninjau hasil bid Freelancer.';
-    } else if (override) {
-      state = override.state;
-      reason = override.reason ?? `Status disinkronkan dari server: ${STATE_LABELS[state]}.`;
-    }
-    return { ...entry, state, room: roomFor(state), reason, task: sync?.step && entry.id === 'bid-strategist' ? 'Meninjau hasil bid Freelancer.' : (state === 'working' || state === 'collaborating') ? autopilot?.lastMessage ?? null : null, recentActivity: activityFor(entry.id, events) };
+    let derived: Derived;
+    if (entry.id === 'market-scout') derived = autopilotState(autopilot, false);
+    else if (entry.id === 'bid-strategist' && sync?.step === 'outcomes') derived = { state: 'reviewing', reason: 'Memeriksa hasil bid di Freelancer.', task: 'Memeriksa status bid yang menunggu.' };
+    else if (entry.id === 'bid-strategist' || entry.id === 'compliance-auditor') derived = autopilotState(autopilot, true);
+    else if (entry.id === 'client-relations') derived = clientRelationsState(sync, inboxWaiting);
+    else if (entry.id === 'operations-analyst' && autopilot && dueSoon) derived = { state: 'reviewing', reason: `Memantau ${dueSoon} tenggat proyek dalam 48 jam.`, task: `Memantau ${dueSoon} tenggat proyek dalam 48 jam.` };
+    else if (['chief-of-staff', 'profile-editor', 'operations-analyst', 'knowledge-curator'].includes(entry.id)) derived = autopilot ? { state: 'idle', reason: ON_DEMAND_REASON } : { state: 'unknown', reason: 'Data server tidak tersedia.' };
+    else derived = { state: 'offline', reason: 'Tidak ada komponen runtime; tes dijalankan di luar aplikasi.' };
+    const { state, reason } = derived;
+    const task = derived.task !== undefined ? derived.task : (state === 'working' || state === 'collaborating') ? autopilot?.lastMessage ?? null : null;
+    return { ...entry, state, room: roomFor(state), reason, task, recentActivity: activityFor(entry.id, events) };
   });
 }
 

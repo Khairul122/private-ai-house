@@ -32,18 +32,25 @@ describe('office state', () => {
     expect(agent(agents, 'chief-of-staff').recentActivity).toHaveLength(3);
   });
 
-  it('overrides scout while marketplace sync is running', () => {
-    expect(agent(deriveOfficeAgents(autopilot(), [], true), 'market-scout')).toMatchObject({ state: 'working', room: 'workspace' });
-  });
-
-  it('marks bid strategist reviewing during business sync', () => {
-    const sync: BusinessSyncStatus = { state: 'running', outcomes: { state: 'running', checked: 0, error: null }, step: 'outcomes', lastRunAt: null, lastMessage: null };
-    expect(agent(deriveOfficeAgents(autopilot(), [], sync), 'bid-strategist')).toMatchObject({ state: 'reviewing', room: 'workspace', reason: 'Memeriksa hasil bid di Freelancer.', task: 'Memeriksa status bid yang menunggu.' });
+  it('uses business sync, inbox, and deadlines as real signals', () => {
+    const sync = (overrides: Partial<BusinessSyncStatus> = {}): BusinessSyncStatus => ({
+      step: null, outcomes: { lastRunAt: null, ok: true, error: null, checked: 0 },
+      messages: { lastRunAt: null, ok: true, error: null, threads: 2, selfId: '7' }, ...overrides,
+    });
+    expect(agent(deriveOfficeAgents(autopilot({ state: 'paused' }), [], { sync: sync({ step: 'outcomes' }) }), 'bid-strategist'))
+      .toMatchObject({ state: 'reviewing', room: 'workspace', task: 'Memeriksa status bid yang menunggu.' });
+    expect(agent(deriveOfficeAgents(autopilot(), [], { sync: sync({ step: 'messages' }) }), 'client-relations')).toMatchObject({ state: 'working', room: 'workspace' });
+    expect(agent(deriveOfficeAgents(autopilot(), [], { sync: sync(), inboxWaiting: 2 }), 'client-relations')).toMatchObject({ state: 'idle', task: '2 pesan menunggu balasan' });
+    expect(agent(deriveOfficeAgents(autopilot(), [], { sync: sync({ messages: { lastRunAt: null, ok: false, error: 'HTTP 429', threads: 0, selfId: null } }) }), 'client-relations'))
+      .toMatchObject({ state: 'offline', reason: 'Sinkronisasi pesan gagal: HTTP 429' });
+    expect(agent(deriveOfficeAgents(autopilot(), []), 'client-relations')).toMatchObject({ state: 'unknown', room: 'lobby' });
+    expect(agent(deriveOfficeAgents(autopilot(), [], { dueSoon: 1 }), 'operations-analyst')).toMatchObject({ state: 'reviewing', room: 'workspace' });
+    expect(agent(deriveOfficeAgents(autopilot(), [], { dueSoon: 0 }), 'operations-analyst')).toMatchObject({ state: 'idle' });
   });
 
   it('summarizes derived states', () => {
     const agents = deriveOfficeAgents(autopilot({ cycleInProgress: true }), []);
-    expect(summarize(agents)).toEqual({ working: 3, idle: 4, offline: 2, unknown: 0 });
-    expect(summarize(deriveOfficeAgents(undefined, []))).toEqual({ working: 0, idle: 0, offline: 2, unknown: 7 });
+    expect(summarize(agents)).toEqual({ working: 3, idle: 4, offline: 1, unknown: 1 });
+    expect(summarize(deriveOfficeAgents(undefined, []))).toEqual({ working: 0, idle: 0, offline: 1, unknown: 8 });
   });
 });

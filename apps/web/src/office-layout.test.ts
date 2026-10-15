@@ -14,7 +14,7 @@ describe('office layout', () => {
       const spots = spotsFor(agents);
       expect(spots.size).toBe(agents.filter((agent) => agent.room).length);
       expect(new Set([...spots.values()].map((spot) => `${spot.x},${spot.z}`)).size).toBe(spots.size);
-      expect(spots.has('client-relations')).toBe(false);
+      expect(spots.has('qa-engineer')).toBe(false);
     }
   });
 

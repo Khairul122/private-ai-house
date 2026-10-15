@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, NavLink, Outlet, Route, Routes, useLocation } from 'react-router';
-import { api, jsonRequest, type AuditEvent, type Autopilot, type BidDraft, type BusinessSyncStatus, type Capabilities, type Insights, type Opportunity, type Policy, type Profile, type PipelineItem } from './api.js';
+import { api, jsonRequest, type AuditEvent, type Autopilot, type BidDraft, type BusinessSyncStatus, type Capabilities, type ClientProject, type Inbox, type Insights, type Opportunity, type Policy, type Profile, type Work } from './api.js';
 import { deriveOfficeAgents, ROOM_LABELS, STATE_COLORS, STATE_LABELS, summarize, type AgentState } from './office-state.js';
 import { dayPhase, FLOOR, PODS, spotsFor, ZONES, type Spot } from './office-layout.js';
 import type { CameraCommand } from './VisualOffice.js';
@@ -15,6 +15,8 @@ const navigation = [
   { to: '/calendar', label: 'Kalender' },
   { to: '/opportunities', label: 'Peluang' },
   { to: '/pipeline', label: 'Pipeline' },
+  { to: '/inbox', label: 'Kotak Masuk' },
+  { to: '/work', label: 'Proyek & Pendapatan' },
   { to: '/profile', label: 'Profil' },
   { to: '/policy', label: 'Kebijakan' },
   { to: '/knowledge', label: 'Knowledge Hub' },
@@ -189,13 +191,24 @@ function OverviewPage() {
     </section>
     {insights.isPending && <LoadingPanel label="Memuat hasil bid..." />}
     {insights.isError && <ErrorNotice message="Hasil bid belum dapat dimuat." onRetry={() => insights.refetch()} />}
-    {insights.data && <section className="form-card" aria-labelledby="bid-results-title">
-      <div className="section-heading"><div><p className="eyebrow">Operasi bisnis</p><h2 id="bid-results-title">Hasil bid</h2></div></div>
-      <div className="metrics-row"><Metric label="Terkirim" value={insights.data.outcomes.submitted} /><Metric label="Menang" value={insights.data.outcomes.won} /><Metric label="Kalah" value={insights.data.outcomes.lost} /><Metric label="Menunggu" value={insights.data.outcomes.pending} /><Metric label="Tingkat kemenangan" value={insights.data.outcomes.winRate === null ? '�' : `${Math.round(insights.data.outcomes.winRate * 100)}%`} /></div>
-      <p className="form-help">{insights.data.lastCheck.ok === false ? `Pengecekan gagal: ${insights.data.lastCheck.error ?? 'Tidak diketahui'}` : insights.data.lastCheck.at ? `Terakhir dicek: ${formatDate(insights.data.lastCheck.at)}` : 'Belum pernah dicek'}</p>
-      <h3>Kenapa peluang dilewati</h3>
-      {insights.data.skips.reasons.slice(0, 5).map(({ reason, total, recent }) => <p key={reason} className="form-help">{reason}: {total} / 7 hari: {recent}</p>)}
-      {!insights.data.skips.reasons.length && <p className="form-help">Belum ada peluang yang dilewati.</p>}
+    {insights.data && <section className="activity-preview" aria-labelledby="bid-results-title">
+      <div className="section-heading"><div><p className="eyebrow">Hasil penawaran</p><h2 id="bid-results-title">Hasil bid</h2></div><Link to="/inbox" className="text-link">Kotak masuk</Link></div>
+      <div className="metrics-row">
+        <Metric label="Menang" value={insights.data.outcomes.won} note={`dari ${insights.data.outcomes.submitted} bid terkirim`} tone="primary" />
+        <Metric label="Kalah" value={insights.data.outcomes.lost} note="Ditolak, dicabut, atau ditarik" />
+        <Metric label="Menunggu" value={insights.data.outcomes.pending} note={`${insights.data.outcomes.withConversation} dengan percakapan klien`} />
+        <Metric label="Tingkat kemenangan" value={insights.data.outcomes.winRate === null ? '–' : `${Math.round(insights.data.outcomes.winRate * 100)}%`} note={insights.data.outcomes.winRate === null ? 'Belum ada bid yang diputuskan' : 'Menang ÷ (menang + kalah)'} />
+      </div>
+      <p className="form-help">{insights.data.lastCheck.ok === false ? `Pengecekan status bid gagal: ${insights.data.lastCheck.error ?? 'tidak diketahui'}` : insights.data.lastCheck.at ? `Status bid dicek dari Freelancer ${formatDate(insights.data.lastCheck.at)}.` : 'Status bid belum pernah dicek.'}</p>
+    </section>}
+    {insights.data && <section className="activity-preview" aria-labelledby="skip-reasons-title">
+      <div className="section-heading"><div><p className="eyebrow">{insights.data.skips.total} keputusan · {insights.data.skips.recent7d} dalam 7 hari</p><h2 id="skip-reasons-title">Kenapa peluang dilewati</h2></div><Link to="/policy" className="text-link">Tinjau kebijakan</Link></div>
+      {insights.data.skips.reasons.length ? <ul className="deadlines-list">
+        {insights.data.skips.reasons.slice(0, 5).map(({ reason, total, recent }) => <li className="deadline-item" key={reason}>
+          <div>{reason}</div>
+          <div style={{ textAlign: 'right' }}><strong>{total}</strong><div style={{ color: 'var(--muted)', fontSize: 10 }}>{recent} dalam 7 hari</div></div>
+        </li>)}
+      </ul> : <p className="form-help">Belum ada peluang yang dilewati.</p>}
     </section>}
     {pipeline.data && (
       <div className="pipeline-overview-bar" aria-label="Ringkasan status pipeline">
@@ -306,12 +319,17 @@ function AgentsPage() {
   const autopilot = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 30_000 });
   const profile = useQuery({ queryKey: ['profile'], queryFn: () => api<Profile>('/profile') });
   const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: () => api<Capabilities>('/capabilities') });
+  const sync = useQuery({ queryKey: ['business-sync'], queryFn: () => api<BusinessSyncStatus | null>('/business-sync'), refetchInterval: 30_000 });
+  const inbox = useQuery({ queryKey: ['inbox'], queryFn: () => api<Inbox>('/inbox'), refetchInterval: 60_000 });
+  const work = useQuery({ queryKey: ['work'], queryFn: () => api<Work>('/work'), refetchInterval: 60_000 });
 
   if (dashboard.isPending || profile.isPending || capabilities.isPending) return <LoadingPanel label="Menyiapkan data karyawan virtual..." />;
   if (dashboard.isError || profile.isError || capabilities.isError) return <ErrorNotice message="Gagal memuat status karyawan virtual." />;
 
-  const sync = useQuery({ queryKey: ['business-sync', 'agents'], queryFn: () => api<BusinessSyncStatus | null>('/business-sync'), refetchInterval: 30_000 });
-  const derived = deriveOfficeAgents(autopilot.isError ? undefined : autopilot.data, dashboard.data.activity, sync.isError ? undefined : sync.data);
+  const inboxWaiting = inbox.isError ? undefined : inbox.data?.needsReply.length;
+  const derived = deriveOfficeAgents(autopilot.isError ? undefined : autopilot.data, dashboard.data.activity, {
+    sync: sync.isError ? undefined : sync.data, inboxWaiting, dueSoon: work.isError ? undefined : work.data?.dueSoon,
+  });
   const agents = [
     {
       id: 'chief-of-staff',
@@ -354,16 +372,16 @@ function AgentsPage() {
       name: 'Client Relations',
       dept: 'Client Relations',
       role: 'Manajer Komunikasi Klien',
-      task: 'Membaca thread pesan dari adapter resmi, mengidentifikasi pertanyaan kunci, dan menyiapkan draf balasan rutin.',
-      boundary: 'Draf rutin informatif saja; dilarang menyepakati kontrak legal, milestone, atau komitmen finansial.',
-      metric: 'Fitur pesan belum aktif',
+      task: 'Membaca pesan Freelancer setiap 10 menit, menandai pesan yang menunggu balasan, dan bid yang perlu ditindaklanjuti.',
+      boundary: 'Baca-saja; tidak pernah mengirim pesan atau menyepakati kontrak, milestone, maupun komitmen finansial.',
+      metric: inboxWaiting === undefined ? 'Status kotak masuk tidak tersedia' : `${inboxWaiting} pesan menunggu balasan`,
     },
     {
       id: 'operations-analyst',
       name: 'Operations Analyst',
       dept: 'Operations',
       role: 'Analis Pipeline & Jadwal',
-      task: 'Mengawasi pergerakan siklus proyek di papan tugas, memantau tenggat waktu, dan memastikan integritas status.',
+      task: 'Mengawasi pipeline, tenggat proyek klien, dan pembayaran yang belum diterima.',
       boundary: 'Aksi internal yang dapat dibatalkan; tidak memanggil API tulis platform eksternal.',
       metric: `Kebijakan versi ${dashboard.data.policy.version}: ${dashboard.data.policy.state === 'active' ? 'aktif' : dashboard.data.policy.state === 'paused' ? 'dijeda' : 'belum aktif'}`,
     },
@@ -538,6 +556,7 @@ function CalendarPage() {
   const policyQuery = useQuery({ queryKey: ['policy'], queryFn: () => api<Policy>('/policy') });
   const projectsQuery = useQuery({ queryKey: ['projects', 'calendar'], queryFn: () => api<Opportunity[]>('/projects') });
   const dashboardQuery = useQuery({ queryKey: ['dashboard'], queryFn: () => api<{ counts: { openProjects: number; drafts: number; policySkips: number }; bidUsage: { today: number; week: number } }>('/dashboard') });
+  const workQuery = useQuery({ queryKey: ['work'], queryFn: () => api<Work>('/work') });
 
   if (policyQuery.isPending || projectsQuery.isPending || dashboardQuery.isPending) return <LoadingPanel label="Menyiapkan kalender dan jadwal operasi..." />;
   if (policyQuery.isError || projectsQuery.isError || dashboardQuery.isError) return <ErrorNotice message="Gagal memuat data kalender." />;
@@ -616,6 +635,22 @@ function CalendarPage() {
         <Link to="/policy" className="button button-secondary" style={{ width: '100%' }}>
           Kelola Batas & Perpanjang Kebijakan
         </Link>
+      </section>
+
+      <section className="calendar-card" style={{ gridColumn: '1 / -1' }}>
+        {(() => {
+          const clientDeadlines = (workQuery.data?.projects ?? []).filter((item) => item.status === 'active' && item.daysToDeadline !== null);
+          return <>
+            <h3>Tenggat Proyek Klien ({workQuery.isError ? '–' : clientDeadlines.length})</h3>
+            {workQuery.isError ? <p style={{ color: 'var(--muted)', fontSize: 12 }}>Data proyek klien tidak dapat dimuat.</p>
+              : workQuery.isPending ? <p style={{ color: 'var(--muted)', fontSize: 12 }}>Memuat tenggat proyek klien...</p>
+                : clientDeadlines.length === 0 ? <p style={{ color: 'var(--muted)', fontSize: 12 }}>Belum ada tenggat proyek klien. <Link to="/work">Tambahkan proyek</Link></p>
+                  : <ul className="deadlines-list">{clientDeadlines.map((item) => <li className="deadline-item" key={item.id}>
+                    <div><Link to="/work" style={{ fontWeight: 600, textDecoration: 'none' }}>{item.title}</Link><div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 2 }}>Klien: {item.client} · {item.deadline}</div></div>
+                    <div style={{ textAlign: 'right' }}><strong style={{ color: (item.daysToDeadline ?? 0) <= 2 ? 'var(--danger)' : 'var(--pine)' }}>{deadlineLabel(item.daysToDeadline)}</strong></div>
+                  </li>)}</ul>}
+          </>;
+        })()}
       </section>
 
       <section className="calendar-card" style={{ gridColumn: '1 / -1' }}>
@@ -1000,13 +1035,17 @@ function OfficePage() {
   const phase = dayPhase(now.getHours());
 
   const autopilot = useQuery({ queryKey: ['autopilot', 'office'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 1000 }); // cycles last ~4s; slower polling misses them
-  const sync = useQuery({ queryKey: ['business-sync', 'office'], queryFn: () => api<BusinessSyncStatus | 'unavailable'>('/business-sync'), refetchInterval: 1000 });
+  const sync = useQuery({ queryKey: ['business-sync', 'office'], queryFn: () => api<BusinessSyncStatus | null>('/business-sync'), refetchInterval: 1000 });
+  const inbox = useQuery({ queryKey: ['inbox'], queryFn: () => api<Inbox>('/inbox'), refetchInterval: 60_000 });
+  const work = useQuery({ queryKey: ['work'], queryFn: () => api<Work>('/work'), refetchInterval: 60_000 });
   const activity = useQuery({ queryKey: ['activity', 'office'], queryFn: () => api<AuditEvent[]>('/activity?limit=50'), refetchInterval: 10000 });
   // react-query keeps the last good data on error; stale state must not look live.
   const autopilotData = autopilot.isError ? undefined : autopilot.data;
   const activityData = activity.isError ? undefined : activity.data;
-  const syncData = sync.isError || sync.data === 'unavailable' || typeof sync.data === 'string' ? undefined : sync.data;
-  const agents = useMemo(() => deriveOfficeAgents(autopilotData, activityData, syncData), [autopilotData, activityData, syncData]);
+  const syncData = sync.isError ? undefined : sync.data;
+  const inboxWaiting = inbox.isError ? undefined : inbox.data?.needsReply.length;
+  const dueSoon = work.isError ? undefined : work.data?.dueSoon;
+  const agents = useMemo(() => deriveOfficeAgents(autopilotData, activityData, { sync: syncData, inboxWaiting, dueSoon }), [autopilotData, activityData, syncData, inboxWaiting, dueSoon]);
   const spots = useMemo(() => spotsFor(agents), [agents]);
   const counts = summarize(agents);
   const selected = agents.find((agent) => agent.id === selectedId);
@@ -1146,6 +1185,149 @@ function OfficePage() {
   </div>;
 }
 
+function waitingLabel(hours: number) {
+  return hours >= 48 ? `menunggu ${Math.floor(hours / 24)} hari` : `menunggu ${hours} jam`;
+}
+
+function syncLine(sync: Inbox['sync'], label: string) {
+  if (!sync) return `Sinkronisasi ${label} tidak tersedia di server ini.`;
+  if (sync.ok === false) return `Sinkronisasi ${label} gagal: ${sync.error ?? 'tidak diketahui'}.`;
+  return sync.lastRunAt ? `Terakhir disinkronkan ${formatDate(sync.lastRunAt)}.` : `${label[0]!.toUpperCase()}${label.slice(1)} belum pernah disinkronkan.`;
+}
+
+function InboxPage() {
+  const inbox = useQuery({ queryKey: ['inbox'], queryFn: () => api<Inbox>('/inbox'), refetchInterval: 60_000 });
+  if (inbox.isPending) return <LoadingPanel label="Memuat kotak masuk..." />;
+  if (inbox.isError) return <ErrorNotice message="Kotak masuk belum dapat dimuat." onRetry={() => inbox.refetch()} />;
+  const { sync, needsReply, followUps } = inbox.data;
+  return <>
+    <PageIntro eyebrow="Klien" title="Pesan yang menunggu Anda." description="Dibaca dari Freelancer setiap 10 menit. Aplikasi tidak pernah mengirim pesan otomatis." />
+    {sync?.ok === false ? <ErrorNotice message={syncLine(sync, 'pesan')} /> : <p className="form-help">{syncLine(sync, 'pesan')}</p>}
+    <section className="activity-preview" aria-labelledby="needs-reply-title">
+      <div className="section-heading"><div><p className="eyebrow">Pesan terakhir dari klien</p><h2 id="needs-reply-title">Menunggu balasan ({needsReply.length})</h2></div><a className="text-link" href="https://www.freelancer.com/messages" target="_blank" rel="noreferrer">Buka Freelancer</a></div>
+      {needsReply.length ? <ul className="deadlines-list">{needsReply.map((thread) => <li className="deadline-item" key={thread.threadId}>
+        <div><strong>{thread.projectTitle ?? 'Percakapan tanpa proyek tersinkron'}</strong><div style={{ color: 'var(--muted)', fontSize: 12, marginTop: 2 }}>{thread.preview}</div></div>
+        <div style={{ textAlign: 'right' }}><strong style={{ color: thread.waitingHours >= 24 ? 'var(--danger)' : 'var(--pine)' }}>{waitingLabel(thread.waitingHours)}</strong><div style={{ color: 'var(--muted)', fontSize: 10 }}>{formatDate(thread.lastMessageAt)}</div></div>
+      </li>)}</ul> : <p className="form-help">{sync?.lastRunAt ? 'Tidak ada pesan yang menunggu balasan.' : 'Belum ada data pesan.'}</p>}
+    </section>
+    <section className="activity-preview" aria-labelledby="follow-up-title">
+      <div className="section-heading"><div><p className="eyebrow">Bid tanpa percakapan klien ≥ 3 hari</p><h2 id="follow-up-title">Perlu follow-up ({followUps.length})</h2></div></div>
+      {followUps.length ? <ul className="deadlines-list">{followUps.map((bid) => <li className="deadline-item" key={bid.projectId}>
+        <div><Link to={`/opportunities?project=${encodeURIComponent(bid.projectId)}`} style={{ fontWeight: 600, textDecoration: 'none' }}>{bid.title}</Link><div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 2 }}>Bid dikirim {formatDate(bid.submittedAt)}</div></div>
+        <div style={{ textAlign: 'right' }}><strong>{bid.daysSinceBid} hari</strong><div style={{ color: 'var(--muted)', fontSize: 10 }}>sejak bid</div></div>
+      </li>)}</ul> : <p className="form-help">Tidak ada bid yang perlu ditindaklanjuti.</p>}
+    </section>
+  </>;
+}
+
+const SOURCE_LABELS: Record<ClientProject['source'], string> = { freelancer: 'Freelancer', direct: 'Langsung', linkedin: 'LinkedIn', other: 'Lainnya' };
+
+function deadlineLabel(days: number | null) {
+  if (days === null) return 'Tanpa tenggat';
+  if (days === 0) return 'Hari ini';
+  return days > 0 ? `${days} hari lagi` : `lewat ${-days} hari`;
+}
+
+function WorkPage() {
+  const queryClient = useQueryClient();
+  const work = useQuery({ queryKey: ['work'], queryFn: () => api<Work>('/work'), refetchInterval: 60_000 });
+  const profile = useQuery({ queryKey: ['profile'], queryFn: () => api<Profile>('/profile') });
+  const currency = profile.data?.currency ?? 'USD';
+  const [project, setProject] = useState({ title: '', client: '', source: 'direct' as ClientProject['source'], deadline: '', value: '', currency: '' });
+  const [payment, setPayment] = useState({ projectId: '', amount: '', currency: '', status: 'expected' as 'expected' | 'received', dueDate: '', note: '' });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['work'] });
+  const createProject = useMutation({
+    mutationFn: () => api<ClientProject>('/work/projects', jsonRequest('POST', {
+      title: project.title, client: project.client, source: project.source, deadline: project.deadline || null,
+      value: project.value === '' ? null : Number(project.value), currency: project.currency || currency,
+    })),
+    onSuccess: async () => { setProject({ title: '', client: '', source: 'direct', deadline: '', value: '', currency: '' }); await refresh(); },
+  });
+  const updateProject = useMutation({ mutationFn: ({ id, status }: { id: string; status: ClientProject['status'] }) => api(`/work/projects/${encodeURIComponent(id)}`, jsonRequest('PUT', { status })), onSuccess: refresh });
+  const recordPayment = useMutation({
+    mutationFn: () => api('/work/payments', jsonRequest('POST', {
+      projectId: payment.projectId, amount: Number(payment.amount), currency: payment.currency || currency,
+      status: payment.status, dueDate: payment.dueDate || null, note: payment.note,
+    })),
+    onSuccess: async () => { setPayment({ projectId: '', amount: '', currency: '', status: 'expected', dueDate: '', note: '' }); await refresh(); },
+  });
+  const markReceived = useMutation({ mutationFn: (id: string) => api(`/work/payments/${encodeURIComponent(id)}/received`, jsonRequest('POST')), onSuccess: refresh });
+
+  if (work.isPending) return <LoadingPanel label="Memuat proyek dan pendapatan..." />;
+  if (work.isError) return <ErrorNotice message="Data proyek belum dapat dimuat." onRetry={() => work.refetch()} />;
+  const { projects, payments, income, dueSoon } = work.data;
+  const active = projects.filter((item) => item.status === 'active');
+  const finished = projects.filter((item) => item.status !== 'active');
+  const titles = new Map(projects.map((item) => [item.id, item.title]));
+  const pendingPayments = payments.filter((item) => item.status === 'expected');
+  const money = (rows: Array<{ currency: string; total: number }>) => rows.length ? rows.map((row) => formatMoney(row.total, row.currency)).join(' · ') : '–';
+  const mutationError = [createProject, updateProject, recordPayment, markReceived].find((mutation) => mutation.isError)?.error;
+
+  return <>
+    <PageIntro eyebrow="Proyek berjalan" title="Proyek aktif dan pendapatan." description="Proyek Freelancer yang menang ditambahkan otomatis. Klien langsung atau LinkedIn dicatat manual di sini." />
+    {mutationError && <ErrorNotice message={mutationError.message} />}
+    <section className="metrics-row" aria-label="Ringkasan proyek dan pendapatan">
+      <Metric label="Proyek aktif" value={active.length} note={`${finished.length} selesai atau ditutup`} tone="primary" />
+      <Metric label="Tenggat ≤ 2 hari" value={dueSoon} note="Proyek aktif dengan tenggat dekat" />
+      <Metric label={`Diterima ${income.month}`} value={money(income.received)} note="Per mata uang, tidak dijumlahkan lintas kurs" />
+      <Metric label="Menunggu pembayaran" value={money(income.expected)} note={`${pendingPayments.length} pembayaran tercatat`} />
+    </section>
+
+    <section className="activity-preview" aria-labelledby="active-projects-title">
+      <div className="section-heading"><div><p className="eyebrow">Diurutkan dari tenggat terdekat</p><h2 id="active-projects-title">Proyek aktif ({active.length})</h2></div></div>
+      {active.length ? <ul className="deadlines-list">{active.map((item) => <li className="deadline-item" key={item.id}>
+        <div><strong>{item.title}</strong><div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 2 }}>{item.client} · {SOURCE_LABELS[item.source]}{item.value !== null ? ` · ${formatMoney(item.value, item.currency)}` : ''}</div></div>
+        <div style={{ textAlign: 'right', display: 'grid', gap: 6, justifyItems: 'end' }}>
+          <strong style={{ color: item.daysToDeadline !== null && item.daysToDeadline <= 2 ? 'var(--danger)' : 'var(--pine)' }}>{deadlineLabel(item.daysToDeadline)}</strong>
+          <span style={{ display: 'flex', gap: 6 }}>
+            <button type="button" className="button button-secondary" disabled={updateProject.isPending} onClick={() => updateProject.mutate({ id: item.id, status: 'delivered' })}>Tandai terkirim</button>
+            <button type="button" className="button button-text" disabled={updateProject.isPending} onClick={() => updateProject.mutate({ id: item.id, status: 'closed' })}>Tutup</button>
+          </span>
+        </div>
+      </li>)}</ul> : <p className="form-help">Belum ada proyek aktif.</p>}
+      {finished.length > 0 && <details><summary>Selesai ({finished.length})</summary><ul className="deadlines-list">{finished.map((item) => <li className="deadline-item" key={item.id}><div>{item.title}<div style={{ color: 'var(--muted)', fontSize: 11 }}>{item.client} · {item.status === 'delivered' ? 'Terkirim' : 'Ditutup'}</div></div></li>)}</ul></details>}
+    </section>
+
+    <section className="activity-preview" aria-labelledby="payments-title">
+      <div className="section-heading"><div><p className="eyebrow">Belum diterima</p><h2 id="payments-title">Pembayaran tertunda ({pendingPayments.length})</h2></div></div>
+      {pendingPayments.length ? <ul className="deadlines-list">{pendingPayments.map((item) => <li className="deadline-item" key={item.id}>
+        <div><strong>{formatMoney(item.amount, item.currency)}</strong><div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 2 }}>{titles.get(item.projectId) ?? 'Proyek'}{item.dueDate ? ` · jatuh tempo ${item.dueDate}` : ''}{item.note ? ` · ${item.note}` : ''}</div></div>
+        <button type="button" className="button button-secondary" disabled={markReceived.isPending} onClick={() => markReceived.mutate(item.id)}>Tandai diterima</button>
+      </li>)}</ul> : <p className="form-help">Belum ada pembayaran tertunda.</p>}
+    </section>
+
+    <div className="form-section">
+      <form className="form-card" onSubmit={(event) => { event.preventDefault(); createProject.mutate(); }}>
+        <div className="section-heading"><div><p className="eyebrow">Klien langsung, LinkedIn, atau lainnya</p><h2>Tambah proyek</h2></div></div>
+        <div className="form-grid">
+          <label className="form-field"><span>Judul proyek</span><input required maxLength={150} value={project.title} onChange={(event) => setProject({ ...project, title: event.target.value })} /></label>
+          <label className="form-field"><span>Klien</span><input required maxLength={120} value={project.client} onChange={(event) => setProject({ ...project, client: event.target.value })} /></label>
+          <label className="form-field"><span>Sumber</span><select value={project.source} onChange={(event) => setProject({ ...project, source: event.target.value as ClientProject['source'] })}>{Object.entries(SOURCE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label className="form-field"><span>Tenggat</span><input type="date" value={project.deadline} onChange={(event) => setProject({ ...project, deadline: event.target.value })} /></label>
+          <label className="form-field"><span>Nilai proyek</span><input type="number" min="0" step="any" value={project.value} onChange={(event) => setProject({ ...project, value: event.target.value })} /></label>
+          <label className="form-field"><span>Mata uang</span><input maxLength={3} placeholder={currency} value={project.currency} onChange={(event) => setProject({ ...project, currency: event.target.value.toUpperCase() })} /></label>
+        </div>
+        <div className="form-actions"><button type="submit" className="button button-primary" disabled={createProject.isPending}>Simpan proyek</button></div>
+      </form>
+
+      <form className="form-card" onSubmit={(event) => { event.preventDefault(); recordPayment.mutate(); }}>
+        <div className="section-heading"><div><p className="eyebrow">Pemasukan</p><h2>Catat pembayaran</h2></div></div>
+        {projects.length ? <>
+          <div className="form-grid">
+            <label className="form-field"><span>Proyek</span><select required value={payment.projectId} onChange={(event) => setPayment({ ...payment, projectId: event.target.value, currency: projects.find((item) => item.id === event.target.value)?.currency ?? payment.currency })}><option value="">Pilih proyek</option>{projects.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
+            <label className="form-field"><span>Jumlah</span><input required type="number" min="0" step="any" value={payment.amount} onChange={(event) => setPayment({ ...payment, amount: event.target.value })} /></label>
+            <label className="form-field"><span>Mata uang</span><input maxLength={3} placeholder={currency} value={payment.currency} onChange={(event) => setPayment({ ...payment, currency: event.target.value.toUpperCase() })} /></label>
+            <label className="form-field"><span>Status</span><select value={payment.status} onChange={(event) => setPayment({ ...payment, status: event.target.value as 'expected' | 'received' })}><option value="expected">Menunggu</option><option value="received">Sudah diterima</option></select></label>
+            <label className="form-field"><span>Jatuh tempo</span><input type="date" value={payment.dueDate} onChange={(event) => setPayment({ ...payment, dueDate: event.target.value })} /></label>
+            <label className="form-field"><span>Catatan</span><input maxLength={200} value={payment.note} onChange={(event) => setPayment({ ...payment, note: event.target.value })} /></label>
+          </div>
+          <div className="form-actions"><button type="submit" className="button button-primary" disabled={recordPayment.isPending}>Simpan pembayaran</button></div>
+        </> : <p className="form-help">Tambahkan proyek terlebih dahulu.</p>}
+      </form>
+    </div>
+  </>;
+}
+
 function NotFoundPage() {
   return <div className="not-found"><p className="eyebrow">Lokasi tidak dikenal</p><h1>Ruang ini belum ada.</h1><p>Tautan kembali ke ruang kerja yang tersedia.</p><Link className="button button-primary" to="/">Kembali ke ringkasan</Link></div>;
 }
@@ -1159,6 +1341,8 @@ export default function App() {
       <Route path="calendar" element={<CalendarPage />} />
       <Route path="opportunities" element={<OpportunitiesPage />} />
       <Route path="pipeline" element={<PipelinePage />} />
+      <Route path="inbox" element={<InboxPage />} />
+      <Route path="work" element={<WorkPage />} />
       <Route path="profile" element={<ProfilePage />} />
       <Route path="policy" element={<PolicyPage />} />
       <Route path="knowledge" element={<KnowledgePage />} />

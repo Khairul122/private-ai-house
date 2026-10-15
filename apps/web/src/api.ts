@@ -131,13 +131,39 @@ export type DashboardResponse = {
 
 export type PipelineItem = Opportunity & { latestDraft: BidDraft | null };
 
+type SyncRun = { lastRunAt: string | null; ok: boolean | null; error: string | null };
+
 export type BusinessSyncStatus = {
   step: 'outcomes' | 'messages' | null;
-  outcomes: { lastRunAt: string | null; ok: boolean | null; error: string | null; checked: number };
+  outcomes: SyncRun & { checked: number };
+  messages: SyncRun & { threads: number; selfId: string | null };
+};
+
+export type Inbox = {
+  sync: SyncRun | null;
+  needsReply: Array<{ threadId: string; projectId: string | null; projectTitle: string | null; preview: string; lastMessageAt: string; waitingHours: number }>;
+  followUps: Array<{ projectId: string; title: string; submittedAt: string; daysSinceBid: number }>;
+};
+
+export type ClientProject = {
+  id: string; title: string; client: string; source: 'freelancer' | 'direct' | 'linkedin' | 'other'; externalProjectId: string | null;
+  status: 'active' | 'delivered' | 'closed'; deadline: string | null; value: number | null; currency: string; createdAt: string; daysToDeadline: number | null;
+};
+
+export type Payment = {
+  id: string; projectId: string; amount: number; currency: string; status: 'expected' | 'received';
+  dueDate: string | null; receivedAt: string | null; note: string; createdAt: string;
+};
+
+export type Work = {
+  projects: ClientProject[];
+  payments: Payment[];
+  income: { month: string; received: Array<{ currency: string; total: number; bySource: Record<string, number> }>; expected: Array<{ currency: string; total: number }> };
+  dueSoon: number;
 };
 
 export type Insights = {
-  outcomes: { submitted: number; won: number; lost: number; pending: number; winRate: number | null };
+  outcomes: { submitted: number; won: number; lost: number; pending: number; withConversation: number; winRate: number | null };
   recent: Array<{ projectId: string; title: string | null; submittedAt: string; outcome: string; awardStatus: string | null; checkedAt: string | null }>;
   skips: { total: number; recent7d: number; reasons: Array<{ reason: string; total: number; recent: number }> };
   lastCheck: { at: string | null; ok: boolean | null; error: string | null };

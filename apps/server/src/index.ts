@@ -58,7 +58,12 @@ const linkedinOAuth = new LinkedInOAuthService({
 
 const repository = new WorkspaceRepository(createDatabase(databaseFile));
 const createFreelancerReader = async () => new FreelancerReadAdapter({ token: await getFreelancerToken() });
-const businessSync = new BusinessSync({ repository, readOwnBids: async (bidIds) => (await createFreelancerReader()).readOwnBids(bidIds) });
+const businessSync = new BusinessSync({
+  repository,
+  readOwnBids: async (bidIds) => (await createFreelancerReader()).readOwnBids(bidIds),
+  readSelfId: async () => (await (await createFreelancerReader()).readOwnProfile()).id,
+  readThreads: async (selfId) => (await createFreelancerReader()).readLatestThreadMessages(selfId, 30),
+});
 const autopilot = new FreelancerAutopilot({
   repository,
   readProfile: async () => (await createFreelancerReader()).readOwnProfile(),

@@ -3,7 +3,7 @@ import { eq, desc } from 'drizzle-orm';
 import type { AuditEvent, AutonomyPolicy, BidDraft, PipelineStatus, ProjectOpportunity } from '@fvh/domain';
 import { safeFtsQuery, type KnowledgeChunk, type KnowledgeProvider } from '@fvh/knowledge';
 import { createDatabase, type WorkspaceDatabase } from './database.js';
-import { auditEvents, autonomyPolicies, bidDrafts, bidOutcomes, knowledgeSources, projects, serviceProfiles, workspaces } from './schema.js';
+import { auditEvents, autonomyPolicies, bidDrafts, knowledgeSources, projects, serviceProfiles, workspaces } from './schema.js';
 
 export type ServiceProfile = {
   primaryField: string;

@@ -46,6 +46,34 @@ export const proposalDraftOutputSchema = z.object({
   assumptions: z.array(z.string().trim().min(1).max(300)).max(20),
 });
 
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Gunakan format tanggal YYYY-MM-DD.');
+const currencyCode = z.string().trim().length(3).toUpperCase();
+
+export const createClientProjectSchema = z.object({
+  title: z.string().trim().min(1).max(150),
+  client: z.string().trim().min(1).max(120),
+  source: z.enum(['freelancer', 'direct', 'linkedin', 'other']),
+  status: z.enum(['active', 'delivered', 'closed']).default('active'),
+  deadline: isoDate.nullable(),
+  value: z.number().finite().min(0).nullable(),
+  currency: currencyCode,
+});
+
+export const updateClientProjectSchema = z.object({
+  status: z.enum(['active', 'delivered', 'closed']).optional(),
+  deadline: isoDate.nullable().optional(),
+  value: z.number().finite().min(0).nullable().optional(),
+}).refine((patch) => Object.keys(patch).length > 0, 'Tidak ada perubahan.');
+
+export const createPaymentSchema = z.object({
+  projectId: z.string().min(1).max(100),
+  amount: z.number().finite().positive(),
+  currency: currencyCode,
+  status: z.enum(['expected', 'received']),
+  dueDate: isoDate.nullable(),
+  note: z.string().trim().max(200).default(''),
+});
+
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 export type UpdatePolicyInput = z.infer<typeof updatePolicySchema>;
 export type KnowledgeImportInput = z.infer<typeof knowledgeImportSchema>;
