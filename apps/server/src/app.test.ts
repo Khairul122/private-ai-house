@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FixtureDraftingAdapter } from '@fvh/application';
-import { FreelancerReadError, FreelancerSandboxWriteError } from '@fvh/adapter-freelancer';
+import { FreelancerReadError, FreelancerSandboxWriteError, FreelancerWriteError } from '@fvh/adapter-freelancer';
 import { WorkspaceRepository } from '@fvh/persistence';
 import { createApp } from './app.js';
 import { insertTestOpportunity, testOpportunity } from './test-fixtures.js';
@@ -143,6 +143,21 @@ describe('local API', () => {
     await sandboxApp.close();
   });
 
+  it('refreshes production write capability from automatic bid audit records', async () => {
+    repository.appendAudit({
+      type: 'marketplace.production.submit_bid', resourceId: 'freelancer:71', status: 'recorded',
+      reason: 'Bid otomatis menghasilkan HTTP 200. ID hasil: 9001. Isi proposal tidak disimpan pada audit.',
+      policyVersion: 2, payloadHash: 'a'.repeat(64),
+    });
+
+    const capabilities = await app.inject({ method: 'GET', url: '/api/capabilities' });
+    const settings = await app.inject({ method: 'GET', url: '/api/settings' });
+    const bid = capabilities.json().marketplace.find((item: { operation: string }) => item.operation === 'submit_bid');
+
+    expect(bid).toMatchObject({ status: 'supported', productionVerification: { statusCode: 200, resultId: '9001' } });
+    expect(settings.json().capabilities.freelancer).toMatchObject({ writes: 'partial', writeOperations: { submit_bid: 'supported', edit_profile: 'unknown', send_message: 'unknown' } });
+  });
+
   it('requires the dedicated sandbox token and exposes provider failures without promoting the capability', async () => {
     const verifySandboxWrite = vi.fn(async () => { throw new FreelancerSandboxWriteError(403, 'denied'); });
     const noTokenApp = createApp({ verifyFreelancerSandboxWrite: verifySandboxWrite });
@@ -160,6 +175,79 @@ describe('local API', () => {
     expect(failedCheck.json()).toMatchObject({ providerStatusCode: 403 });
     expect(messageCapability).toMatchObject({ status: 'unknown', sandboxVerification: { statusCode: 403 } });
     await sandboxApp.close();
+  });
+
+  it('records production HTTP 200 only after an explicitly confirmed live operation', async () => {
+    const runWrite = vi.fn(async (input: { operation: string }) => ({ statusCode: 200, resultId: input.operation === 'edit_profile' ? undefined : '9001', resultStatus: input.operation === 'edit_profile' ? 'success' : undefined }));
+    const productionApp = createApp({
+      credentialStatus: { freelancerAccessTokenConfigured: true, linkedinClientConfigured: false, linkedinAccessTokenConfigured: false, linkedinAccessTokenExpiresAt: null },
+      runFreelancerProductionWrite: runWrite,
+    });
+    const cases = [
+      { operation: 'submit_bid', projectId: 71, amount: 200, period: 5, milestonePercentage: 100, description: 'Reviewed live proposal.', confirmLive: true },
+      { operation: 'edit_profile', jobIds: [17, 23], confirmLive: true },
+      { operation: 'send_message', threadId: 81, message: 'Reviewed live message.', confirmLive: true },
+    ] as const;
+
+    for (const input of cases) {
+      const response = await productionApp.inject({ method: 'POST', url: '/api/freelancer/production-write', payload: input });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ operation: input.operation, statusCode: 200, environment: 'production' });
+    }
+    const capabilities = await productionApp.inject({ method: 'GET', url: '/api/capabilities' });
+    const writeRows = capabilities.json().marketplace.filter((item: { operation: string }) => ['submit_bid', 'edit_profile', 'send_message'].includes(item.operation));
+
+    expect(runWrite).toHaveBeenCalledTimes(3);
+    expect(writeRows.every((item: { status: string; productionVerification?: { statusCode: number } }) => item.status === 'supported' && item.productionVerification?.statusCode === 200)).toBe(true);
+    expect(capabilities.json().freelancerCredentials.productionWriteConfigured).toBe(true);
+    await productionApp.close();
+  });
+
+  it('requires a production token and explicit live confirmation, and preserves provider failures', async () => {
+    const runWrite = vi.fn(async () => { throw new FreelancerWriteError(403, 'denied'); });
+    const input = { operation: 'send_message', threadId: 81, message: 'Live message.' };
+    const noTokenApp = createApp({ runFreelancerProductionWrite: runWrite });
+    const deniedConfig = await noTokenApp.inject({ method: 'POST', url: '/api/freelancer/production-write', payload: { ...input, confirmLive: true } });
+    expect(deniedConfig.statusCode).toBe(409);
+    expect(runWrite).not.toHaveBeenCalled();
+    await noTokenApp.close();
+
+    const productionApp = createApp({
+      credentialStatus: { freelancerAccessTokenConfigured: true, linkedinClientConfigured: false, linkedinAccessTokenConfigured: false, linkedinAccessTokenExpiresAt: null },
+      runFreelancerProductionWrite: runWrite,
+    });
+    const unconfirmed = await productionApp.inject({ method: 'POST', url: '/api/freelancer/production-write', payload: input });
+    expect(unconfirmed.statusCode).toBe(400);
+    expect(runWrite).not.toHaveBeenCalled();
+    const failed = await productionApp.inject({ method: 'POST', url: '/api/freelancer/production-write', payload: { ...input, confirmLive: true } });
+    const capabilities = await productionApp.inject({ method: 'GET', url: '/api/capabilities' });
+    const messageCapability = capabilities.json().marketplace.find((item: { operation: string }) => item.operation === 'send_message');
+
+    expect(failed.statusCode).toBe(502);
+    expect(failed.json()).toMatchObject({ providerStatusCode: 403 });
+    expect(messageCapability).toMatchObject({ status: 'unknown', productionVerification: { statusCode: 403 } });
+    await productionApp.close();
+  });
+
+  it('restores the latest production write status from the local audit after a server restart', async () => {
+    const durableRepository = new WorkspaceRepository();
+    const credentialStatus = { freelancerAccessTokenConfigured: true, linkedinClientConfigured: false, linkedinAccessTokenConfigured: false, linkedinAccessTokenExpiresAt: null };
+    const firstApp = createApp({
+      repository: durableRepository,
+      credentialStatus,
+      runFreelancerProductionWrite: async () => ({ statusCode: 200, resultId: '9001' }),
+    });
+    await firstApp.ready();
+    const submitted = await firstApp.inject({ method: 'POST', url: '/api/freelancer/production-write', payload: { operation: 'submit_bid', projectId: 71, amount: 200, period: 5, milestonePercentage: 100, description: 'Reviewed live proposal.', confirmLive: true } });
+    expect(submitted.statusCode).toBe(200);
+    await firstApp.close();
+
+    const restartedApp = createApp({ repository: durableRepository, credentialStatus });
+    const capabilities = await restartedApp.inject({ method: 'GET', url: '/api/capabilities' });
+    const bidCapability = capabilities.json().marketplace.find((item: { operation: string }) => item.operation === 'submit_bid');
+    expect(bidCapability).toMatchObject({ status: 'supported', productionVerification: { statusCode: 200, resultId: '9001' } });
+    await restartedApp.close();
+    durableRepository.close();
   });
 
   it('syncs only provider results and updates read capability after a successful API response', async () => {

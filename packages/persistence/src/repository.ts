@@ -204,6 +204,14 @@ export class WorkspaceRepository {
     return this.db.select().from(auditEvents).orderBy(desc(auditEvents.createdAt)).limit(limit).all() as AuditEvent[];
   }
 
+  hasAudit(type: string, resourceId: string): boolean {
+    return Boolean(this.sqlite.prepare('SELECT 1 AS found FROM audit_events WHERE type = ? AND resource_id = ? LIMIT 1').get(type, resourceId));
+  }
+
+  hasAuditForPolicy(type: string, resourceId: string, policyVersion: number): boolean {
+    return Boolean(this.sqlite.prepare('SELECT 1 AS found FROM audit_events WHERE type = ? AND resource_id = ? AND policy_version = ? LIMIT 1').get(type, resourceId, policyVersion));
+  }
+
   createKnowledgeSource(source: { id: string; provider: KnowledgeProvider; label: string; referenceUrl: string; updatedAt: string }, chunks: KnowledgeChunk[]) {
     const insertChunk = this.sqlite.prepare('INSERT INTO knowledge_chunks (id, source_id, path, source_ref, url, content_hash, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
     const insertFts = this.sqlite.prepare('INSERT INTO knowledge_search (chunk_id, source_id, content) VALUES (?, ?, ?)');

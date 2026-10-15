@@ -71,6 +71,18 @@ describe('evaluatePolicy', () => {
     expect(result.reason).toContain('belum dicantumkan');
   });
 
+  it('allows the autopilot to bid with an explicit delivery period when the client deadline is unpublished', () => {
+    const result = evaluatePolicy({
+      ...context,
+      capability: 'supported',
+      policy: { ...policy, allowUnknownDeadline: true, simulationOnly: false },
+      executionMode: 'external',
+      project: { ...project, deadlineDays: null },
+    });
+
+    expect(result).toMatchObject({ allowed: true, reasonCode: 'allowed', simulationOnly: false });
+  });
+
   it('fails closed when paused, expired, over budget, or outside active hours', () => {
     expect(evaluatePolicy({ ...context, capability: 'supported', policy: { ...policy, state: 'paused' } }).reasonCode).toBe('policy_paused');
     expect(evaluatePolicy({ ...context, capability: 'supported', policy: { ...policy, expiresAt: '2026-10-13T00:00:00.000Z' } }).reasonCode).toBe('policy_expired');

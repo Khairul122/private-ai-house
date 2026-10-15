@@ -55,7 +55,7 @@ export type Policy = {
   timezone: string;
   activeHours: { start: number; end: number };
   noNegotiationTerms: string[];
-  simulationOnly: true;
+  simulationOnly: boolean;
 };
 
 export type Opportunity = {
@@ -66,6 +66,7 @@ export type Opportunity = {
   budgetMin: number;
   budgetMax: number;
   currency: string;
+  projectType?: 'fixed' | 'hourly' | 'unknown';
   skills: string[];
   deadlineDays: number | null;
   briefQuality: number;
@@ -78,8 +79,8 @@ export type Opportunity = {
 };
 
 export type Capabilities = {
-  marketplace: Array<{ operation: string; status: string; evidence: string; sandboxVerification?: { statusCode: number | null; checkedAt: string } }>;
-  freelancerCredentials: { accessTokenConfigured: boolean; sandboxWriteTestConfigured: boolean; verificationStatus: string; readProfile: boolean; readProjects: boolean; readPortfolio: boolean; readMessages: boolean };
+  marketplace: Array<{ operation: string; status: string; evidence: string; productionVerification?: { statusCode: number | null; checkedAt: string; resultId?: string; resultStatus?: string }; sandboxVerification?: { statusCode: number | null; checkedAt: string; resultId?: string; resultStatus?: string } }>;
+  freelancerCredentials: { accessTokenConfigured: boolean; productionWriteConfigured: boolean; sandboxWriteTestConfigured: boolean; verificationStatus: string; readProfile: boolean; readProjects: boolean; readPortfolio: boolean; readMessages: boolean };
   github: { read: string; verificationStatus: string; scope: string; tokenConfigured: boolean };
   linkedin: { read: string; reason: string; redirectUri: string | null; clientConfigured: boolean; authorized: boolean; verificationStatus: string; accessTokenExpiresAt: string | null };
   hermes: { draft: string; active: boolean; reason: string };
@@ -89,6 +90,8 @@ export type FreelancerSandboxWriteInput =
   | { operation: 'submit_bid'; projectId: number; amount: number; period: number; milestonePercentage: number; description: string }
   | { operation: 'edit_profile'; jobIds: number[] }
   | { operation: 'send_message'; threadId: number; message: string };
+
+export type FreelancerProductionWriteInput = FreelancerSandboxWriteInput & { confirmLive: true };
 
 export type BidDraft = {
   id: string;
@@ -113,4 +116,14 @@ export type AuditEvent = {
   policyVersion: number | null;
   payloadHash: string | null;
   createdAt: string;
+};
+
+export type Autopilot = {
+  state: 'starting' | 'running' | 'paused' | 'blocked' | 'error';
+  lastRunAt: string | null;
+  nextRunAt: string | null;
+  lastMessage: string;
+  lastImported: number;
+  lastSubmitted: number;
+  specializations: string[];
 };

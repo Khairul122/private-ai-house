@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { FreelancerReadAdapter, FreelancerSandboxWriteAdapter } from './index.js';
+import { FreelancerProductionWriteAdapter, FreelancerReadAdapter, FreelancerSandboxWriteAdapter } from './index.js';
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -10,7 +10,7 @@ describe('FreelancerReadAdapter', () => {
     const requests: Array<[string | URL | Request, RequestInit | undefined]> = [];
     const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       requests.push([input, init]);
-      return jsonResponse({ result: { id: 42, username: 'sample-user', display_name: 'Sample User', country: { name: 'Indonesia' } } });
+      return jsonResponse({ result: { id: 42, username: 'sample-user', display_name: 'Sample User', country: { name: 'Indonesia' }, profile_description: 'Python engineer', hourly_rate: 18, primary_currency: { code: 'USD' }, jobs: [{ id: 15, name: 'Python' }] } });
     });
     const adapter = new FreelancerReadAdapter({ token: 'test-token-value-1234', fetcher });
 
@@ -18,7 +18,9 @@ describe('FreelancerReadAdapter', () => {
     const [url, init] = requests[0] ?? [];
 
     expect(profile).toMatchObject({ id: '42', username: 'sample-user', displayName: 'Sample User', country: 'Indonesia', profileUrl: 'https://www.freelancer.com/u/sample-user' });
-    expect(String(url)).toBe('https://www.freelancer.com/api/users/0.1/self/');
+    expect(profile).toMatchObject({ description: 'Python engineer', hourlyRate: 18, currency: 'USD', jobs: [{ id: 15, name: 'Python' }] });
+    expect(new URL(String(url)).pathname).toBe('/api/users/0.1/self/');
+    expect(new URL(String(url)).searchParams.toString()).toBe(new URLSearchParams({ compact: 'true', details: 'true', profile_description: 'true', jobs: 'true' }).toString());
     expect(init).toMatchObject({ method: 'GET', headers: { 'Freelancer-OAuth-V1': 'test-token-value-1234' } });
   });
 
@@ -96,7 +98,7 @@ describe('FreelancerSandboxWriteAdapter', () => {
     });
     const adapter = new FreelancerSandboxWriteAdapter({ token: 'sandbox-token-value-1234', fetcher });
 
-    await expect(adapter.run({ operation: 'submit_bid', projectId: 77, amount: 25, period: 3, milestonePercentage: 100, description: 'Sandbox integration check.' })).resolves.toEqual({ statusCode: 200 });
+    await expect(adapter.run({ operation: 'submit_bid', projectId: 77, amount: 25, period: 3, milestonePercentage: 100, description: 'Sandbox integration check.' })).resolves.toEqual({ statusCode: 200, resultId: '9001' });
     const [profileUrl, profileInit] = requests[0] ?? [];
     const [bidUrl, bidInit] = requests[1] ?? [];
 
@@ -115,7 +117,7 @@ describe('FreelancerSandboxWriteAdapter', () => {
     });
     const adapter = new FreelancerSandboxWriteAdapter({ token: 'sandbox-token-value-1234', fetcher });
 
-    await expect(adapter.run({ operation: 'edit_profile', jobIds: [17, 23] })).resolves.toEqual({ statusCode: 200 });
+    await expect(adapter.run({ operation: 'edit_profile', jobIds: [17, 23] })).resolves.toEqual({ statusCode: 200, resultStatus: 'success' });
     const [url, init] = requests[0] ?? [];
 
     expect(String(url)).toBe('https://www.freelancer-sandbox.com/api/users/0.1/self/jobs/');
@@ -131,7 +133,7 @@ describe('FreelancerSandboxWriteAdapter', () => {
     });
     const adapter = new FreelancerSandboxWriteAdapter({ token: 'sandbox-token-value-1234', fetcher });
 
-    await expect(adapter.run({ operation: 'send_message', threadId: 55, message: 'FVH sandbox verification.' })).resolves.toEqual({ statusCode: 200 });
+    await expect(adapter.run({ operation: 'send_message', threadId: 55, message: 'FVH sandbox verification.' })).resolves.toEqual({ statusCode: 200, resultId: '11' });
     const [url, init] = requests[0] ?? [];
 
     expect(String(url)).toBe('https://www.freelancer-sandbox.com/api/messages/0.1/threads/55/messages/');
@@ -142,5 +144,41 @@ describe('FreelancerSandboxWriteAdapter', () => {
   it('surfaces the provider HTTP status and never falls back to production', async () => {
     const adapter = new FreelancerSandboxWriteAdapter({ token: 'sandbox-token-value-1234', fetcher: async () => jsonResponse({}, 403) });
     await expect(adapter.run({ operation: 'edit_profile', jobIds: [17] })).rejects.toMatchObject({ statusCode: 403 });
+  });
+});
+
+describe('FreelancerProductionWriteAdapter', () => {
+  it('targets production for a confirmed bid and uses the authenticated production account ID', async () => {
+    const requests: Array<[string | URL | Request, RequestInit | undefined]> = [];
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push([input, init]);
+      return requests.length === 1 ? jsonResponse({ result: { id: 42 } }) : jsonResponse({ result: { id: 9001 } });
+    });
+    const adapter = new FreelancerProductionWriteAdapter({ token: 'production-token-value-1234', fetcher });
+
+    await expect(adapter.run({ operation: 'submit_bid', projectId: 77, amount: 25, period: 3, milestonePercentage: 100, description: 'Live proposal.' })).resolves.toEqual({ statusCode: 200, resultId: '9001' });
+    expect(String(requests[0]?.[0])).toBe('https://www.freelancer.com/api/users/0.1/self/');
+    expect(String(requests[1]?.[0])).toBe('https://www.freelancer.com/api/projects/0.1/bids/');
+    expect(requests[1]?.[1]).toMatchObject({ method: 'POST', headers: { 'Freelancer-OAuth-V1': 'production-token-value-1234' } });
+    expect(JSON.parse(String(requests[1]?.[1]?.body))).toMatchObject({ project_id: 77, bidder_id: 42, amount: 25, period: 3, description: 'Live proposal.' });
+    expect(requests.every(([url]) => !String(url).includes('freelancer-sandbox.com'))).toBe(true);
+  });
+
+  it('updates profile jobs and posts a message only to the production host', async () => {
+    const requests: Array<[string | URL | Request, RequestInit | undefined]> = [];
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push([input, init]);
+      return jsonResponse({ result: { id: 81 }, status: 'success' });
+    });
+    const adapter = new FreelancerProductionWriteAdapter({ token: 'production-token-value-1234', fetcher });
+
+    await expect(adapter.run({ operation: 'edit_profile', jobIds: [17, 23] })).resolves.toMatchObject({ statusCode: 200 });
+    await expect(adapter.run({ operation: 'send_message', threadId: 55, message: 'Live message.' })).resolves.toMatchObject({ statusCode: 200, resultId: '81', resultStatus: 'success' });
+    expect(String(requests[0]?.[0])).toBe('https://www.freelancer.com/api/users/0.1/self/jobs/');
+    expect(requests[0]?.[1]).toMatchObject({ method: 'PUT' });
+    expect(JSON.parse(String(requests[0]?.[1]?.body))).toEqual({ 'jobs[]': [17, 23] });
+    expect(String(requests[1]?.[0])).toBe('https://www.freelancer.com/api/messages/0.1/threads/55/messages/');
+    expect(requests[1]?.[1]).toMatchObject({ method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+    expect(String(requests[1]?.[1]?.body)).toBe('message=Live+message.');
   });
 });

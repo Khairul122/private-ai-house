@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import fastifyStatic from '@fastify/static';
-import { FreelancerReadAdapter, FreelancerReadError, FreelancerSandboxWriteAdapter } from '@fvh/adapter-freelancer';
+import { FreelancerProductionWriteAdapter, FreelancerReadAdapter, FreelancerReadError, FreelancerSandboxWriteAdapter } from '@fvh/adapter-freelancer';
 import { HermesCliDraftingAdapter } from '@fvh/adapter-hermes';
 import { createDatabase, WorkspaceRepository } from '@fvh/persistence';
 import { deleteLinkedInAccessToken, getFreelancerAccessToken, getLinkedInClientCredentials, readCredentialStatus, storeLinkedInAccessToken } from './credential-store.js';
@@ -10,6 +10,7 @@ import { readLinkedInEnvironment } from './linkedin-env.js';
 import { readFreelancerEnvironment } from './freelancer-env.js';
 import { readDraftingEnvironment } from './ai-env.js';
 import { createApp } from './app.js';
+import { FreelancerAutopilot } from './autopilot.js';
 
 function findProjectRoot(start: string): string {
   let directory = resolve(start);
@@ -54,6 +55,13 @@ const linkedinOAuth = new LinkedInOAuthService({
 });
 
 const repository = new WorkspaceRepository(createDatabase(databaseFile));
+const createFreelancerReader = async () => new FreelancerReadAdapter({ token: await getFreelancerToken() });
+const autopilot = new FreelancerAutopilot({
+  repository,
+  readProfile: async () => (await createFreelancerReader()).readOwnProfile(),
+  readProjects: async (query, limit) => (await createFreelancerReader()).searchActiveProjects(query, limit),
+  submitBid: async (input) => new FreelancerProductionWriteAdapter({ token: await getFreelancerToken() }).run(input),
+});
 const draftingConfig = readDraftingEnvironment(projectRoot);
 const hermesEnabled = draftingConfig.valid && draftingConfig.mode === 'hermes' && draftingConfig.consent;
 const drafting = hermesEnabled ? new HermesCliDraftingAdapter({
@@ -82,6 +90,8 @@ const app = createApp({
     };
   },
   freelancerSandboxTokenConfigured: Boolean(freelancerEnvironment.sandboxToken),
+  autopilot,
+  runFreelancerProductionWrite: async (input) => new FreelancerProductionWriteAdapter({ token: await getFreelancerToken() }).run(input),
   verifyFreelancerSandboxWrite: async (input) => {
     const token = freelancerEnvironment.sandboxToken;
     if (!token) throw new Error('Freelancer sandbox token is not configured.');
@@ -152,3 +162,7 @@ if (hasWebBuild) {
 if (!['127.0.0.1', 'localhost', '::1'].includes(host)) throw new Error('FVH_HOST must stay on loopback for the local single-user app.');
 await app.listen({ host, port });
 app.log.info({ host, port, databaseFile }, 'Freelancer Virtual House API is ready');
+void (async () => {
+  await app.inject({ method: 'POST', url: '/api/freelancer/verify' });
+  await autopilot.start();
+})();

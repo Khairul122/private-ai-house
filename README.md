@@ -1,8 +1,8 @@
 # Freelancer Virtual House
 
-Local-first operations workspace for a solo freelancer. The current MVP includes an API-backed 2D dashboard, opportunity scoring, evidence-based proposal drafts, deterministic policy checks, simulated bid records, an append-only activity feed, local SQLite storage, a private text knowledge index, read-only selected-repository GitHub sync, and an optional 3D room.
+Local-first operations workspace for a solo freelancer. The app reads the connected Freelancer profile, derives the supported skill set, scans matching opportunities every 15 minutes, creates a factual proposal, and sends a live bid only when the stored policy passes its price, deadline, risk, confidence, quota, currency, and active-hour checks. Activity and status are visible in the dashboard; project-by-project forms are not part of the workflow.
 
-The application starts with an empty opportunities list. Freelancer.com reads are available through an explicit, read-only verification and sync action. Production marketplace writes remain disabled. The capability page provides explicit write checks for a dedicated Freelancer sandbox token (`FVH_FREELANCER_SANDBOX_ACCESS_TOKEN`); each test creates a real sandbox bid, replaces the sandbox profile job list, or sends a sandbox message. A sandbox HTTP 200 is recorded separately and does not imply production authorization. LinkedIn content can be added as a user-provided export or manual fact; optional OIDC access is limited to the approved lightweight profile scope.
+The server verifies Freelancer read access at startup and bootstraps its local profile and bid policy from the public account profile. It stores no project message or portfolio content. Only fixed-price USD projects with matching skills are eligible for autonomous bidding. The `submit_bid` capability becomes supported after Freelancer returns HTTP 200. `edit_profile` and `send_message` remain available as API operations, but the agent does not alter profile jobs or send messages without a contextual event rule. LinkedIn content can be added as a user-provided export or manual fact; optional OIDC access is limited to the approved lightweight profile scope.
 
 ## Run locally
 
@@ -17,10 +17,10 @@ Open `http://127.0.0.1:5174`. SQLite data is kept in the ignored `.local` direct
 
 ## Configure optional sources
 
-- Freelancer.com read-only access accepts `FVH_FREELANCER_ACCESS_TOKEN` in the ignored server `.env`; the Windows DPAPI secure store remains the fallback when the environment key is absent. The token is never returned to the browser or written to logs.
+- Freelancer.com access accepts `FVH_FREELANCER_ACCESS_TOKEN` in the ignored server `.env`; the Windows DPAPI secure store remains the fallback when the environment key is absent. The server uses this token for reads and policy-bounded autonomous bids. It is never returned to the browser or written to logs.
 - Public GitHub repositories can be read by owner/name. For a private repository, set `GITHUB_TOKEN` in the server environment with access only to the selected repository and `Contents: read` permission. The token is never returned to the browser or written to the database.
 - LinkedIn OIDC is optional and requires the app product and exact redirect URL to be approved. Import a text or CSV export that belongs to you, or enter profile facts manually.
-- Hermes drafting is disabled until the CLI/profile are configured and `FVH_AI_DATA_CONSENT=true` is explicitly set. The current profile is `private-ai-house`; see [the local profile and cron setup](docs/hermes-agent-setup.md). If enabled, only the selected project, supplied profile facts, and up to four relevant local evidence chunks are passed to the CLI. Marketplace credentials are excluded, and drafting never submits marketplace actions.
+- Hermes drafting is disabled until the CLI/profile are configured and `FVH_AI_DATA_CONSENT=true` is explicitly set. Automatic bid proposals use a local factual template and do not require sending project data to an AI provider. Hermes is optional; see [the local profile and cron setup](docs/hermes-agent-setup.md).
 
 ## Checks
 

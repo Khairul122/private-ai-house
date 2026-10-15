@@ -1,12 +1,15 @@
-import { lazy, Suspense, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, NavLink, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router';
-import { api, jsonRequest, type AuditEvent, type BidDraft, type Capabilities, type FreelancerSandboxWriteInput, type Opportunity, type Policy, type Profile } from './api.js';
+import { Link, NavLink, Outlet, Route, Routes, useLocation } from 'react-router';
+import { api, jsonRequest, type AuditEvent, type Autopilot, type BidDraft, type Capabilities, type Opportunity, type Policy, type Profile } from './api.js';
 
 const ThreeOffice = lazy(() => import('./ThreeOffice.js'));
 
 const navigation = [
   { to: '/', label: 'Ringkasan', end: true },
+  { to: '/agents', label: 'Karyawan AI' },
+  { to: '/tasks', label: 'Papan Tugas' },
+  { to: '/calendar', label: 'Kalender' },
   { to: '/opportunities', label: 'Peluang' },
   { to: '/pipeline', label: 'Pipeline' },
   { to: '/profile', label: 'Profil' },
@@ -32,7 +35,7 @@ function formatDate(value: string) {
 
 function StateLabel({ state }: { state: string }) {
   const labels: Record<string, string> = {
-    active: 'Aktif', connected: 'Terhubung', supported: 'Didukung API', unknown: 'Belum diverifikasi', unverified: 'Belum diuji', invalid: 'Token tidak valid', unavailable: 'Tidak dapat diperiksa', expired: 'Kedaluwarsa', paused: 'Dijeda', draft: 'Belum aktif', recorded: 'Tercatat', blocked: 'Dilewati', failed: 'Gagal',
+    active: 'Aktif', running: 'Berjalan', starting: 'Menyiapkan', connected: 'Terhubung', supported: 'Didukung API', unknown: 'Belum diverifikasi', unverified: 'Belum diuji', invalid: 'Token tidak valid', unavailable: 'Tidak dapat diperiksa', expired: 'Kedaluwarsa', paused: 'Dijeda', draft: 'Belum aktif', recorded: 'Tercatat', blocked: 'Dilewati', failed: 'Gagal',
     new: 'Baru', scored: 'Dinilai', draft_ready: 'Draf siap', policy_check: 'Pemeriksaan kebijakan', submitted: 'Terkirim',
     in_conversation: 'Percakapan', won: 'Berhasil', lost: 'Tidak lanjut', skipped: 'Dilewati',
     reconciliation_required: 'Perlu rekonsiliasi', error: 'Kesalahan',
@@ -86,7 +89,7 @@ function Layout() {
           ))}
         </nav>
         <div className="side-foot">
-          <p>Data provider hanya masuk setelah Anda memulai sinkronisasi. Tidak ada bid yang dikirim.</p>
+          <p>Autopilot membaca proyek dan mengirim bid yang lolos kebijakan secara otomatis.</p>
           <Link to="/capabilities" className="capability-link">Status integrasi</Link>
         </div>
       </aside>
@@ -132,7 +135,12 @@ function ActivityRows({ events }: { events: AuditEvent[] }) {
     {events.map((event) => (
       <li key={event.id} className="activity-row">
         <span className={`activity-mark activity-mark-${event.status}`} aria-hidden="true" />
-        <div className="activity-copy"><strong>{activityTitle(event.type)}</strong><p>{event.reason}</p><small>{formatDate(event.createdAt)}</small></div>
+        <div className="activity-copy">
+          <strong>{activityTitle(event.type)}</strong>
+          <p>{event.reason}</p>
+          <small>{formatDate(event.createdAt)}</small>
+          {event.payloadHash && <small className="local-reference" style={{ display: 'block', marginTop: 2 }}>Hash payload: {event.payloadHash.slice(0, 16)}...</small>}
+        </div>
         <StateLabel state={event.status} />
       </li>
     ))}
@@ -153,24 +161,37 @@ function activityTitle(type: string) {
 function OverviewPage() {
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ['dashboard'], queryFn: () => api<{
-    mode: string; counts: { openProjects: number; drafts: number; policySkips: number; knowledgeSources: number };
+    mode: string; counts: { openProjects: number; drafts: number; submittedBids: number; policySkips: number; knowledgeSources: number };
     policy: { state: Policy['state']; version: number; simulationOnly: boolean }; profileComplete: boolean;
     projects: Opportunity[]; activity: AuditEvent[]; externalWrites: boolean;
   }>('/dashboard') });
   const projects = useQuery({ queryKey: ['projects', 'overview'], queryFn: () => api<Opportunity[]>('/projects') });
+  const pipeline = useQuery({ queryKey: ['pipeline'], queryFn: () => api<Array<Opportunity & { latestDraft: BidDraft | null }>>('/pipeline') });
 
   if (query.isPending || projects.isPending) return <LoadingPanel />;
   if (query.isError || projects.isError) return <ErrorNotice message="Ringkasan belum dapat dimuat." onRetry={() => { queryClient.invalidateQueries({ queryKey: ['dashboard'] }); queryClient.invalidateQueries({ queryKey: ['projects'] }); }} />;
   const data = query.data;
 
   return <>
-    <PageIntro eyebrow="14 Oktober 2026 / ruang operasi" title="Kerja yang baik dimulai dari konteks yang jelas." description="Tinjau peluang, siapkan draf berbasis fakta, dan biarkan kebijakan menjaga batas operasi." action={<Link to="/opportunities" className="button button-primary">Buka antrean peluang</Link>} />
+    <PageIntro eyebrow="15 Oktober 2026 / ruang operasi" title="Kerja yang baik dimulai dari konteks yang jelas." description="Autopilot memantau peluang Freelancer, menyusun penawaran, dan menjalankan batas operasi tersimpan." action={<Link to="/opportunities" className="button button-primary">Buka antrean peluang</Link>} />
     <section className="metrics-row" aria-label="Ringkasan ruang kerja">
-      <Metric label="Peluang terbuka" value={data.counts.openProjects} note="Data tersinkron dari provider" tone="primary" />
-      <Metric label="Draf lokal" value={data.counts.drafts} note="Belum pernah dikirim ke luar" />
+      <Metric label="Peluang terbuka" value={data.counts.openProjects} note="Dipindai otomatis" tone="primary" />
+      <Metric label="Bid terkirim" value={data.counts.submittedBids} note="Dikonfirmasi Freelancer" />
       <Metric label="Sumber knowledge" value={data.counts.knowledgeSources} note="Fakta lokal yang bisa ditelusuri" />
       <Metric label="Keputusan dilewati" value={data.counts.policySkips} note="Alasan tersimpan di aktivitas" />
     </section>
+    {pipeline.data && (
+      <div className="pipeline-overview-bar" aria-label="Ringkasan status pipeline">
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', alignSelf: 'center', marginRight: 4 }}>DISTRIBUSI PIPELINE:</span>
+        <div className="pipeline-chip"><span>Baru:</span><strong>{pipeline.data.filter((p) => p.pipelineStatus === 'new').length}</strong></div>
+        <div className="pipeline-chip"><span>Dinilai:</span><strong>{pipeline.data.filter((p) => p.pipelineStatus === 'scored').length}</strong></div>
+        <div className="pipeline-chip"><span>Draf Siap:</span><strong>{pipeline.data.filter((p) => p.pipelineStatus === 'draft_ready').length}</strong></div>
+        <div className="pipeline-chip"><span>Pemeriksaan:</span><strong>{pipeline.data.filter((p) => p.pipelineStatus === 'policy_check').length}</strong></div>
+        <div className="pipeline-chip"><span>Terkirim:</span><strong>{pipeline.data.filter((p) => p.pipelineStatus === 'submitted').length}</strong></div>
+        <div className="pipeline-chip"><span>Percakapan:</span><strong>{pipeline.data.filter((p) => p.pipelineStatus === 'in_conversation').length}</strong></div>
+        <div className="pipeline-chip"><span>Dilewati:</span><strong>{pipeline.data.filter((p) => p.pipelineStatus === 'skipped').length}</strong></div>
+      </div>
+    )}
     <div className="overview-grid">
       <section className="queue-section" aria-labelledby="queue-title">
         <div className="section-heading"><div><p className="eyebrow">Antrean berikutnya</p><h2 id="queue-title">Peluang yang layak ditinjau</h2></div><Link to="/opportunities" className="text-link">Semua peluang</Link></div>
@@ -187,8 +208,8 @@ function OverviewPage() {
       </section>
       <aside className="policy-card" aria-labelledby="policy-overview-title">
         <div className="section-heading"><div><p className="eyebrow">Batas operasi</p><h2 id="policy-overview-title">Kebijakan kerja</h2></div><StateLabel state={data.policy.state} /></div>
-        <p className="policy-copy">{data.policy.state === 'active' ? 'Simulasi lokal berjalan di bawah batas yang Anda tentukan. Tidak ada API marketplace yang dipanggil.' : data.policy.state === 'paused' ? 'Jeda darurat aktif. Simulasi dan tindakan berikutnya akan ditolak.' : 'Kebijakan masih berupa draf. Lengkapi profil dan pilih batas sebelum mengaktifkan simulasi.'}</p>
-        <div className="policy-details"><span>Versi</span><strong>{data.policy.version}</strong><span>Profil</span><strong>{data.profileComplete ? 'Terisi' : 'Belum diatur'}</strong><span>Mode tulis</span><strong>Simulasi saja</strong></div>
+        <p className="policy-copy">{data.policy.state === 'active' && !data.policy.simulationOnly ? 'Autopilot live berjalan di bawah batas lokal dan mengirim bid yang lolos pemeriksaan.' : data.policy.state === 'paused' ? 'Jeda darurat aktif; tindakan berikutnya dihentikan.' : 'Autopilot sedang menyiapkan profil Freelancer dan kebijakan otomatis.'}</p>
+        <div className="policy-details"><span>Versi</span><strong>{data.policy.version}</strong><span>Profil</span><strong>{data.profileComplete ? 'Tersinkron' : 'Menunggu sinkronisasi'}</strong><span>Mode tulis</span><strong>{data.policy.simulationOnly ? 'Simulasi' : 'Live'}</strong></div>
         <Link className="button button-secondary button-wide" to="/policy">Tinjau batas kebijakan</Link>
       </aside>
     </div>
@@ -200,127 +221,45 @@ function OverviewPage() {
 }
 
 function OpportunitiesPage() {
-  const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const location = useLocation();
-  const initialProject = new URLSearchParams(location.search).get('project');
   const [search, setSearch] = useState('');
-  const [selectedDraft, setSelectedDraft] = useState<BidDraft | null>(null);
-  const [notice, setNotice] = useState('');
-  const [noticeError, setNoticeError] = useState(false);
-  const [freelancerSearch, setFreelancerSearch] = useState('');
-  const query = useQuery({ queryKey: ['projects', 'opportunities', search], queryFn: () => api<Opportunity[]>(`/projects?search=${encodeURIComponent(search)}`) });
-  const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: () => api<Capabilities>('/capabilities') });
-  const syncFreelancer = useMutation({
-    mutationFn: () => api<{ imported: number; skipped: number }>('/freelancer/projects/sync', jsonRequest('POST', { query: freelancerSearch, limit: 25 })),
-    onSuccess: async (result) => {
-      setNoticeError(false);
-      setNotice(`${result.imported} proyek Freelancer disinkronkan. ${result.skipped} hasil tidak valid dilewati.`);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['projects'] }),
-        queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
-        queryClient.invalidateQueries({ queryKey: ['capabilities'] }),
-        queryClient.invalidateQueries({ queryKey: ['activity'] }),
-      ]);
-    },
-    onError: (error: Error) => { setNoticeError(true); setNotice(error.message); },
-  });
-  const draftMutation = useMutation({
-    mutationFn: (id: string) => api<BidDraft>(`/projects/${encodeURIComponent(id)}/draft`, jsonRequest('POST')),
-    onSuccess: (draft) => { setSelectedDraft(draft); queryClient.invalidateQueries({ queryKey: ['pipeline'] }); queryClient.invalidateQueries({ queryKey: ['dashboard'] }); setNoticeError(false); setNotice('Draf Hermes dibuat secara lokal. Periksa fakta dan harga sebelum simulasi.'); },
-    onError: (error: Error) => { setNoticeError(true); setNotice(error.message); },
-  });
-  const updateDraft = useMutation({
-    mutationFn: (input: { id: string; proposal: string; proposedPrice: number }) => api<BidDraft>(`/drafts/${encodeURIComponent(input.id)}`, jsonRequest('PUT', { proposal: input.proposal, proposedPrice: input.proposedPrice })),
-    onSuccess: (draft) => { setSelectedDraft(draft); queryClient.invalidateQueries({ queryKey: ['pipeline'] }); setNoticeError(false); setNotice('Draf tersimpan di ruang kerja lokal.'); },
-  });
-
+  const query = useQuery({ queryKey: ['projects', 'opportunities', search], queryFn: () => api<Opportunity[]>('/projects?search=' + encodeURIComponent(search)), refetchInterval: 30_000 });
+  const autopilot = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 30_000 });
   useEffect(() => {
-    if (!initialProject || !query.data) return;
-    const project = query.data.find((item) => item.id === initialProject);
-    if (project && !selectedDraft) {
-      if (capabilities.data?.hermes.active) draftMutation.mutate(project.id);
-      else { setNoticeError(true); setNotice(capabilities.data?.hermes.reason ?? 'Hermes belum siap membuat draf.'); }
-    }
-    navigate('/opportunities', { replace: true });
-  }, [initialProject, query.data, capabilities.data]);
-
+    const projectId = new URLSearchParams(location.search).get('project');
+    if (!projectId || !query.data) return;
+    const project = query.data.find((item) => item.id === projectId);
+    if (project) document.getElementById('opportunity-' + project.id)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [location.search, query.data]);
   if (query.isPending) return <LoadingPanel />;
   if (query.isError) return <ErrorNotice message="Peluang belum dapat dimuat." onRetry={() => query.refetch()} />;
+  const status = autopilot.data;
   return <>
-    <PageIntro eyebrow="Antrean peluang" title="Pilih pekerjaan dengan alasan yang bisa dijelaskan." description="Skor hanya memberi konteks. Setiap sumber, batas, dan ketidakpastian tetap terlihat sebelum draf disiapkan." />
-    <section className="filter-bar" aria-label="Filter peluang">
-      <label className="search-field"><span>Cari judul, teknologi, atau brief</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Contoh: TypeScript" /></label>
-      <div className="filter-note"><strong>{query.data.length}</strong> peluang tersimpan <span>Data masuk melalui sinkronisasi yang Anda mulai</span></div>
+    <PageIntro eyebrow="Antrean peluang" title="Peluang dipindai otomatis." description="Autopilot membaca pencarian yang cocok dengan profil Freelancer dan membuat bid tanpa form per proyek. Daftar ini diperbarui berkala." />
+    <section className="filter-bar" aria-label="Filter peluang tersimpan">
+      <label className="search-field"><span>Filter daftar lokal</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Judul atau teknologi" /></label>
+      <div className="filter-note"><strong>{query.data.length}</strong> peluang tersimpan <span>{status?.lastRunAt ? 'Siklus terakhir ' + formatDate(status.lastRunAt) : 'Autopilot sedang menyiapkan siklus'}</span></div>
     </section>
-    <section className="sync-panel form-card" aria-label="Sinkronisasi peluang Freelancer">
-      <div className="section-heading"><div><p className="eyebrow">Sumber peluang</p><h2>Freelancer.com</h2></div><StateLabel state={capabilities.data?.freelancerCredentials.verificationStatus ?? 'unverified'} /></div>
-      <p className="form-help">Pencarian ini hanya membaca proyek aktif. Token {capabilities.data?.freelancerCredentials.accessTokenConfigured ? 'tersedia di konfigurasi server lokal' : 'belum dikonfigurasi di server lokal'}; tidak ada bid atau pesan yang dikirim.</p>
-      <form className="sync-form" onSubmit={(event) => { event.preventDefault(); syncFreelancer.mutate(); }}>
-        <label className="form-field"><span>Kata kunci proyek</span><input value={freelancerSearch} onChange={(event) => setFreelancerSearch(event.target.value)} minLength={2} maxLength={120} placeholder="misalnya TypeScript" /></label>
-        <button className="button button-secondary" type="submit" disabled={!capabilities.data?.freelancerCredentials.accessTokenConfigured || freelancerSearch.trim().length < 2 || syncFreelancer.isPending}>{syncFreelancer.isPending ? 'Menyinkronkan…' : 'Sinkronkan proyek'}</button>
-      </form>
-      {capabilities.data && <p className="form-help">Drafting Hermes: {capabilities.data.hermes.active ? 'siap' : 'nonaktif'} — {capabilities.data.hermes.reason}</p>}
+    <section className="sync-panel form-card" aria-label="Status pemindaian otomatis Freelancer">
+      <div className="section-heading"><div><p className="eyebrow">Freelancer.com</p><h2>Pemindaian otomatis</h2></div><StateLabel state={status?.state ?? 'starting'} /></div>
+      <p className="form-help">{status?.lastMessage ?? 'Menghubungkan profil Freelancer dan memulai siklus.'}</p>
+      {status?.specializations.length ? <div className="tag-row">{status.specializations.map((skill) => <span className="skill-tag" key={skill}>{skill}</span>)}</div> : null}
+      <div className="autopilot-metrics"><span>{status?.lastImported ?? 0} proyek terakhir dipindai</span><span>{status?.lastSubmitted ?? 0} bid dikirim pada siklus terakhir</span><span>{status?.nextRunAt ? 'Pindai lagi ' + formatDate(status.nextRunAt) : 'Jadwal berikutnya belum tersedia'}</span></div>
     </section>
-    {notice && <div className={`notice ${noticeError ? 'notice-error' : 'notice-success'}`} role={noticeError ? 'alert' : 'status'}>{notice}</div>}
     <div className="opportunity-list">
-      {query.data.length === 0 && <div className="empty-state"><h3>Belum ada peluang tersinkron</h3><p>Masukkan kata kunci dan jalankan sinkronisasi Freelancer, atau ubah filter pencarian lokal.</p></div>}
+      {query.data.length === 0 && <div className="empty-state"><h3>Belum ada peluang tersimpan</h3><p>Autopilot akan mengisi daftar ini pada pemindaian berikutnya sesuai keahlian di profil Freelancer.</p></div>}
       {query.data.map((project) => (
-        <article className="opportunity-row" key={project.id}>
+        <article className="opportunity-row" id={'opportunity-' + project.id} key={project.id}>
           <div className="opportunity-topline"><span className="eyebrow">{project.clientName} / {project.source === 'freelancer' ? 'FREELANCER.COM' : 'FIXTURE PENGUJIAN'}</span><span className="score-mark"><strong>{project.score}</strong><small>skor kecocokan</small></span></div>
           <h2>{project.title}</h2>
           <p className="opportunity-description">{project.description}</p>
           <div className="tag-row">{project.skills.map((skill) => <span className="skill-tag" key={skill}>{skill}</span>)}</div>
-          <div className="factor-list" aria-label="Alasan skor">
-            {project.factors.map((factor) => <span key={factor.key}><small>{factor.label}</small><strong>{factor.value}</strong></span>)}
-          </div>
-          <div className="opportunity-footer"><div><strong>{formatMoney(project.budgetMin, project.currency)} - {formatMoney(project.budgetMax, project.currency)}</strong><span>{project.deadlineDays === null ? 'Tenggat belum dicantumkan' : `Tenggat ${project.deadlineDays} hari`} / brief {Math.round(project.briefQuality * 100)}%</span></div><button className="button button-primary" type="button" disabled={draftMutation.isPending || !capabilities.data?.hermes.active} onClick={() => draftMutation.mutate(project.id)}>Buat draf dengan Hermes</button></div>
+          <div className="factor-list" aria-label="Alasan skor">{project.factors.map((factor) => <span key={factor.key}><small>{factor.label}</small><strong>{factor.value}</strong></span>)}</div>
+          <div className="opportunity-footer"><div><strong>{formatMoney(project.budgetMin, project.currency)} - {formatMoney(project.budgetMax, project.currency)}</strong><span>{project.deadlineDays === null ? 'Deadline tidak diberikan; proposal menetapkan durasi 14 hari' : 'Sisa ' + project.deadlineDays + ' hari'} / brief {Math.round(project.briefQuality * 100)}%</span></div><StateLabel state={project.pipelineStatus} /></div>
         </article>
       ))}
     </div>
-    {selectedDraft && <DraftDialog
-      draft={selectedDraft}
-      saving={updateDraft.isPending}
-      onClose={() => setSelectedDraft(null)}
-      onSave={(proposal, proposedPrice) => updateDraft.mutate({ id: selectedDraft.id, proposal, proposedPrice })}
-      onSimulate={async (proposal, proposedPrice) => {
-        try {
-          const saved = await api<BidDraft>(`/drafts/${encodeURIComponent(selectedDraft.id)}`, jsonRequest('PUT', { proposal, proposedPrice }));
-          setSelectedDraft(saved);
-          const result = await api<{ decision: { allowed: boolean; reason: string }; externalWrites: false }>('/projects/' + encodeURIComponent(saved.projectId) + '/simulate-submit', jsonRequest('POST'));
-          setNoticeError(false);
-          setNotice(result.externalWrites ? 'Aksi eksternal tidak diizinkan.' : `${result.decision.allowed ? 'Simulasi dicatat' : 'Simulasi dilewati'}: ${result.decision.reason}`);
-          queryClient.invalidateQueries({ queryKey: ['dashboard'] }); queryClient.invalidateQueries({ queryKey: ['activity'] });
-        } catch (error) { setNoticeError(true); setNotice(error instanceof Error ? error.message : 'Simulasi tidak berhasil.'); }
-      }}
-    />}
   </>;
-}
-
-function DraftDialog({ draft, saving, onClose, onSave, onSimulate }: {
-  draft: BidDraft; saving: boolean; onClose: () => void;
-  onSave: (proposal: string, proposedPrice: number) => void;
-  onSimulate: (proposal: string, proposedPrice: number) => void;
-}) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  const [proposal, setProposal] = useState(draft.proposal);
-  const [price, setPrice] = useState(String(draft.proposedPrice));
-  useEffect(() => { setProposal(draft.proposal); setPrice(String(draft.proposedPrice)); }, [draft.id]);
-  useEffect(() => { if (dialog.current && !dialog.current.open) dialog.current.showModal(); }, []);
-  const parsedPrice = Number(price);
-  const dirty = proposal !== draft.proposal || parsedPrice !== draft.proposedPrice;
-  return <dialog className="draft-dialog" ref={dialog} onCancel={(event) => { event.preventDefault(); onClose(); }} onClose={onClose} aria-labelledby="draft-title">
-    <div className="dialog-heading"><div><p className="eyebrow">Proposal draft / lokal</p><h2 id="draft-title">Periksa sebelum simulasi</h2></div><button className="close-button" type="button" onClick={onClose} aria-label="Tutup draf">Tutup</button></div>
-    <p className="dialog-caution">Draf ini belum dikirim. Simulasi hanya menguji policy dan menulis jejak audit lokal.</p>
-    <label className="form-field"><span>Isi proposal</span><textarea rows={9} value={proposal} onChange={(event) => setProposal(event.target.value)} /></label>
-    <div className="draft-meta">
-      <label className="form-field"><span>Harga usulan ({draft.currency})</span><input type="number" min="1" step="1" value={price} onChange={(event) => setPrice(event.target.value)} /></label>
-      <div><span>Keyakinan</span><strong>{Math.round(draft.confidence * 100)}%</strong></div>
-      <div><span>Durasi awal</span><strong>{draft.durationDays} hari</strong></div>
-    </div>
-    <div className="evidence-note"><strong>Sumber fakta</strong>{draft.evidence.length ? <ul>{draft.evidence.map((item) => <li key={`${item.label}-${item.source}`}>{item.label} / {item.source}</li>)}</ul> : <p>Belum ada fakta profil. Draf tidak membuat klaim pengalaman.</p>}</div>
-    <div className="dialog-actions"><button className="button button-secondary" type="button" onClick={onClose}>Tutup</button><button className="button button-secondary" type="button" disabled={saving || !dirty || proposal.trim().length < 40 || !Number.isFinite(parsedPrice) || parsedPrice <= 0} onClick={() => onSave(proposal, parsedPrice)}>Simpan perubahan</button><button className="button button-primary" type="button" disabled={saving || proposal.trim().length < 40 || !Number.isFinite(parsedPrice) || parsedPrice <= 0} onClick={() => onSimulate(proposal, parsedPrice)}>Uji keputusan policy</button></div>
-  </dialog>;
 }
 
 function PipelinePage() {
@@ -329,7 +268,7 @@ function PipelinePage() {
   if (query.isError) return <ErrorNotice message="Pipeline belum dapat dimuat." onRetry={() => query.refetch()} />;
   const projects = query.data;
   return <>
-    <PageIntro eyebrow="Pipeline bid" title="Status yang tersimpan, bukan dugaan." description="Simulasi tidak mengubah status menjadi terkirim. Status itu hanya dibuat setelah adapter marketplace mengonfirmasi hasil." />
+    <PageIntro eyebrow="Pipeline bid" title="Status dari respons marketplace." description="Bid live masuk ke status terkirim hanya setelah Freelancer mengembalikan HTTP 200. Draft dan alasan kebijakan tersimpan di sini." />
     <div className="pipeline-summary"><strong>{projects.filter((project) => project.latestDraft).length}</strong><span>draf lokal</span><span className="pipeline-divider" /><strong>{projects.filter((project) => project.pipelineStatus === 'submitted').length}</strong><span>terkonfirmasi dari marketplace</span></div>
     <div className="pipeline-list">{projects.map((project) => (
       <article className="pipeline-row" key={project.id}>
@@ -338,6 +277,366 @@ function PipelinePage() {
         <Link to={project.latestDraft ? `/opportunities?project=${encodeURIComponent(project.id)}` : '/opportunities'} className="button button-secondary">{project.latestDraft ? 'Buka draf' : 'Lihat peluang'}</Link>
       </article>
     ))}</div>
+  </>;
+}
+
+function AgentsPage() {
+  const dashboard = useQuery({ queryKey: ['dashboard'], queryFn: () => api<{
+    policy: { state: Policy['state']; version: number };
+    counts: { openProjects: number; drafts: number; policySkips: number; knowledgeSources: number };
+    activity: AuditEvent[];
+  }>('/dashboard') });
+  const profile = useQuery({ queryKey: ['profile'], queryFn: () => api<Profile>('/profile') });
+  const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: () => api<Capabilities>('/capabilities') });
+
+  if (dashboard.isPending || profile.isPending || capabilities.isPending) return <LoadingPanel label="Menyiapkan data karyawan virtual..." />;
+  if (dashboard.isError || profile.isError || capabilities.isError) return <ErrorNotice message="Gagal memuat status karyawan virtual." />;
+
+  const policyState = dashboard.data.policy.state;
+  const isPaused = policyState === 'paused';
+  const isDraft = policyState === 'draft';
+
+  const agents = [
+    {
+      id: 'chief-of-staff',
+      name: 'Chief of Staff',
+      dept: 'Executive / Operasi',
+      role: 'Orchestrator Ruang Kerja',
+      task: 'Merangkum status antrean peluang, memonitor kepatuhan ritme automasi, dan mengarahkan fokus peran virtual.',
+      boundary: 'Akses baca data lokal workspace; hanya membuat usulan tugas internal tanpa aksi eksternal.',
+      metric: `${dashboard.data.counts.openProjects} peluang aktif dalam pantauan`,
+      status: isPaused ? 'paused' : isDraft ? 'draft' : 'active',
+    },
+    {
+      id: 'market-scout',
+      name: 'Market Scout',
+      dept: 'Sales & Bids',
+      role: 'Pencari & Penilai Pasar',
+      task: 'Menyaring peluang proyek dari provider Freelancer resmi dan menghitung skor kecocokan berdasarkan profil keahlian.',
+      boundary: 'Hanya membaca proyek tersinkron resmi; tidak melakukan scraping mandiri atau bypass rate limit.',
+      metric: `${dashboard.data.counts.openProjects} peluang telah dipindai & dinilai`,
+      status: isPaused ? 'paused' : isDraft ? 'draft' : 'active',
+    },
+    {
+      id: 'bid-strategist',
+      name: 'Bid Strategist',
+      dept: 'Sales & Bids',
+      role: 'Perumus Proposal & Harga',
+      task: 'Menyusun draf proposal dengan Hermes AI berbasis fakta portofolio terverifikasi, merekomendasikan harga dan durasi.',
+      boundary: 'Menghasilkan draf terstruktur; setiap eksekusi wajib lolos persetujuan deterministik policy engine.',
+      metric: `${dashboard.data.counts.drafts} draf proposal lokal disiapkan`,
+      status: isPaused ? 'paused' : capabilities.data.hermes.active ? 'active' : 'draft',
+    },
+    {
+      id: 'profile-editor',
+      name: 'Profile Editor',
+      dept: 'Profile Studio',
+      role: 'Kurator Profil & Bukti',
+      task: 'Memelihara fakta profil, ringkasan spesialisasi, dan mengusulkan pembaruan berbasis bukti nyata repositori/portofolio.',
+      boundary: 'Hanya menghasilkan diff berversi; tanpa modifikasi langsung pada akun platform eksternal.',
+      metric: `${profile.data.facts.length} fakta terverifikasi tersimpan`,
+      status: isPaused ? 'paused' : isDraft ? 'draft' : 'active',
+    },
+    {
+      id: 'client-relations',
+      name: 'Client Relations',
+      dept: 'Client Relations',
+      role: 'Manajer Komunikasi Klien',
+      task: 'Membaca thread pesan dari adapter resmi, mengidentifikasi pertanyaan kunci, dan menyiapkan draf balasan rutin.',
+      boundary: 'Draf rutin informatif saja; dilarang menyepakati kontrak legal, milestone, atau komitmen finansial.',
+      metric: '0 thread aktif (menunggu aturan respons otomatis)',
+      status: isPaused ? 'paused' : 'draft',
+    },
+    {
+      id: 'operations-analyst',
+      name: 'Operations Analyst',
+      dept: 'Operations',
+      role: 'Analis Pipeline & Jadwal',
+      task: 'Mengawasi pergerakan siklus proyek di papan tugas, memantau tenggat waktu, dan memastikan integritas status.',
+      boundary: 'Aksi internal yang dapat dibatalkan; tidak memanggil API tulis platform eksternal.',
+      metric: `Policy versi ${dashboard.data.policy.version} aktif`,
+      status: isPaused ? 'paused' : isDraft ? 'draft' : 'active',
+    },
+    {
+      id: 'knowledge-curator',
+      name: 'Knowledge Curator',
+      dept: 'Knowledge Hub',
+      role: 'Kurator Pengetahuan & Kode',
+      task: 'Menyinkronkan repositori GitHub dan catatan lokal ke SQLite FTS5 untuk dijadikan bukti klaim proposal.',
+      boundary: 'Read-only lokal; memindai & mengecualikan token/kredensial sebelum pengindeksan.',
+      metric: `${dashboard.data.counts.knowledgeSources} sumber pengetahuan diindeks`,
+      status: isPaused ? 'paused' : 'active',
+    },
+    {
+      id: 'compliance-auditor',
+      name: 'Compliance Auditor',
+      dept: 'Compliance & Audit',
+      role: 'Auditor Kebijakan & Keamanan',
+      task: 'Memverifikasi setiap draf terhadap batas harga, kata kunci dilarang, dan ketersediaan bukti sumber.',
+      boundary: 'Read-only deterministik; otomatis memblokir draf tanpa bukti sumber yang sah.',
+      metric: `${dashboard.data.counts.policySkips} keputusan skip tercatat di audit`,
+      status: isPaused ? 'paused' : 'active',
+    },
+    {
+      id: 'qa-engineer',
+      name: 'QA Engineer',
+      dept: 'Quality Assurance',
+      role: 'Verifikator Kontrak & Smoke',
+      task: 'Menjalankan skenario smoke test, validasi skema DTO, serta memverifikasi alur simulasi fail-closed.',
+      boundary: 'Beroperasi di lingkungan lokal & sandbox; tanpa kredensial live produksi.',
+      metric: `${dashboard.data.activity.length} jejak audit tervalidasi`,
+      status: 'active',
+    },
+  ];
+
+  return <>
+    <PageIntro
+      eyebrow="Organisasi virtual"
+      title="Sembilan peran spesialis, satu kendali pemilik."
+      description="Setiap karyawan AI memiliki batas akses yang terisolasi dan bekerja di bawah kebijakan hands-off yang telah Anda setujui."
+    />
+    <div className="agent-grid">
+      {agents.map((agent) => (
+        <article className="agent-card" key={agent.id}>
+          <div>
+            <div className="agent-card-header">
+              <div>
+                <span className="agent-dept">{agent.dept}</span>
+                <h3>{agent.name}</h3>
+                <small style={{ color: 'var(--muted)', display: 'block', marginTop: 2 }}>{agent.role}</small>
+              </div>
+              <StateLabel state={agent.status} />
+            </div>
+            <p className="agent-task">{agent.task}</p>
+            <div className="agent-boundary">
+              <strong>Batas akses:</strong> {agent.boundary}
+            </div>
+          </div>
+          <div className="agent-foot">
+            <span>{agent.metric}</span>
+          </div>
+        </article>
+      ))}
+    </div>
+  </>;
+}
+
+function TaskBoardPage() {
+  const [filter, setFilter] = useState('');
+  const pipeline = useQuery({ queryKey: ['pipeline'], queryFn: () => api<Array<Opportunity & { latestDraft: BidDraft | null }>>('/pipeline') });
+
+  if (pipeline.isPending) return <LoadingPanel label="Memuat papan tugas..." />;
+  if (pipeline.isError) return <ErrorNotice message="Gagal memuat data papan tugas." onRetry={() => pipeline.refetch()} />;
+
+  const projects = pipeline.data.filter((p) => {
+    if (!filter.trim()) return true;
+    const q = filter.toLowerCase();
+    return p.title.toLowerCase().includes(q) || p.clientName.toLowerCase().includes(q) || p.skills.some((s) => s.toLowerCase().includes(q));
+  });
+
+  const columns = [
+    {
+      id: 'queue',
+      title: 'Antrean Peluang',
+      filter: (p: Opportunity) => p.pipelineStatus === 'new' || p.pipelineStatus === 'scored',
+      hint: 'Peluang baru tersinkron siap dinilai atau dibuatkan draf',
+    },
+    {
+      id: 'drafting',
+      title: 'Draf & Review',
+      filter: (p: Opportunity) => p.pipelineStatus === 'draft_ready' || p.pipelineStatus === 'policy_check',
+      hint: 'Draf lokal yang siap diperiksa atau disimulasikan',
+    },
+    {
+      id: 'active',
+      title: 'Terkirim & Diskusi',
+      filter: (p: Opportunity) => p.pipelineStatus === 'submitted' || p.pipelineStatus === 'in_conversation' || p.pipelineStatus === 'won',
+      hint: 'Bid terkirim atau dalam tahap komunikasi dengan klien',
+    },
+    {
+      id: 'archived',
+      title: 'Selesai / Dilewati',
+      filter: (p: Opportunity) => p.pipelineStatus === 'skipped' || p.pipelineStatus === 'lost' || p.pipelineStatus === 'expired' || p.pipelineStatus === 'reconciliation_required' || p.pipelineStatus === 'error',
+      hint: 'Peluang di luar batas kebijakan atau telah diarsipkan',
+    },
+  ];
+
+  return <>
+    <PageIntro
+      eyebrow="Manajemen kerja"
+      title="Papan tugas seluruh siklus proyek."
+      description="Pantau alur kerja dari deteksi peluang, penyusunan draf, simulasi kebijakan, hingga status akhir."
+    />
+    <section className="filter-bar" aria-label="Filter papan tugas">
+      <label className="search-field">
+        <span>Cari proyek, klien, atau skill di papan tugas</span>
+        <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Contoh: React, Backend, API" />
+      </label>
+      <div className="filter-note">
+        <strong>{projects.length}</strong> kartu ditampilkan
+      </div>
+    </section>
+
+    <div className="kanban-board">
+      {columns.map((col) => {
+        const colProjects = projects.filter(col.filter);
+        return (
+          <div className="kanban-column" key={col.id}>
+            <div className="kanban-col-head">
+              <h3>{col.title}</h3>
+              <span className="kanban-count">{colProjects.length}</span>
+            </div>
+            <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)' }}>{col.hint}</p>
+            {colProjects.length === 0 ? (
+              <div style={{ padding: '24px 8px', textAlign: 'center', color: 'var(--muted)', fontSize: 12 }}>
+                Tidak ada kartu
+              </div>
+            ) : (
+              colProjects.map((p) => (
+                <article className="kanban-card" key={p.id}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 6 }}>
+                    <span className="kanban-card-client">{p.clientName}</span>
+                    <StateLabel state={p.pipelineStatus} />
+                  </div>
+                  <h4>{p.title}</h4>
+                  <div className="tag-row" style={{ marginTop: 2 }}>
+                    {p.skills.slice(0, 3).map((s) => (
+                      <span className="skill-tag" key={s}>{s}</span>
+                    ))}
+                  </div>
+                  <div className="kanban-card-foot">
+                    <span className="kanban-card-budget">{formatMoney(p.budgetMin, p.currency)} - {formatMoney(p.budgetMax, p.currency)}</span>
+                    <span className="kanban-card-score">Skor: {p.score}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+                    <Link
+                      to={`/opportunities?project=${encodeURIComponent(p.id)}`}
+                      className="button button-secondary"
+                      style={{ minHeight: 30, padding: '4px 8px', fontSize: 11 }}
+                    >
+                      {p.latestDraft ? 'Buka draf' : 'Buat draf'}
+                    </Link>
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
+        );
+      })}
+    </div>
+  </>;
+}
+
+function CalendarPage() {
+  const policyQuery = useQuery({ queryKey: ['policy'], queryFn: () => api<Policy>('/policy') });
+  const projectsQuery = useQuery({ queryKey: ['projects', 'calendar'], queryFn: () => api<Opportunity[]>('/projects') });
+  const dashboardQuery = useQuery({ queryKey: ['dashboard'], queryFn: () => api<{ counts: { openProjects: number; drafts: number; policySkips: number } }>('/dashboard') });
+
+  if (policyQuery.isPending || projectsQuery.isPending || dashboardQuery.isPending) return <LoadingPanel label="Menyiapkan kalender dan jadwal operasi..." />;
+  if (policyQuery.isError || projectsQuery.isError || dashboardQuery.isError) return <ErrorNotice message="Gagal memuat data kalender." />;
+
+  const policy = policyQuery.data;
+  const projects = projectsQuery.data;
+  const dashboard = dashboardQuery.data;
+
+  const now = new Date();
+  const currentHour = now.getHours();
+  const isWithinHours = currentHour >= policy.activeHours.start && currentHour < policy.activeHours.end;
+  const deadlineProjects = projects.filter((p) => p.deadlineDays !== null).sort((a, b) => (a.deadlineDays ?? 0) - (b.deadlineDays ?? 0));
+  const expiryDate = new Date(policy.expiresAt);
+  const daysUntilExpiry = Math.max(0, Math.ceil((expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+
+  return <>
+    <PageIntro
+      eyebrow="Jadwal & Waktu"
+      title="Kalender kerja dan batas waktu automasi."
+      description="Pantau jam aktif automasi, batas frekuensi penawaran harian dan mingguan, serta tenggat waktu proyek."
+    />
+
+    <div className="calendar-grid">
+      <section className="calendar-card">
+        <h3>Jam Kerja & Status Operasi</h3>
+        <div className={`hours-status-badge ${isWithinHours && policy.state === 'active' ? 'hours-active' : 'hours-inactive'}`}>
+          <span className="mode-indicator" style={{ background: isWithinHours && policy.state === 'active' ? 'var(--success)' : 'var(--danger)' }} />
+          {policy.state === 'paused'
+            ? 'Kebijakan Dijeda (Kill Switch Aktif)'
+            : isWithinHours
+            ? `Dalam Jam Operasi Aktif (${policy.activeHours.start}:00 - ${policy.activeHours.end}:00)`
+            : `Di Luar Jam Operasi (${policy.activeHours.start}:00 - ${policy.activeHours.end}:00)`}
+        </div>
+        <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 14px' }}>
+          Zona waktu kerja: <strong>{policy.timezone}</strong>. Tindakan automasi mematuhi rentang jam ini untuk membatasi aktivitas pada jam operasional pemilik.
+        </p>
+
+        <div className="meter-row">
+          <div className="meter-label">
+            <span>Batas Penawaran Harian</span>
+            <strong>{dashboard.counts.drafts} / {policy.dailyBidLimit}</strong>
+          </div>
+          <div className="meter-track">
+            <div className="meter-fill" style={{ width: `${Math.min(100, Math.round((dashboard.counts.drafts / (policy.dailyBidLimit || 1)) * 100))}%` }} />
+          </div>
+        </div>
+
+        <div className="meter-row">
+          <div className="meter-label">
+            <span>Batas Penawaran Mingguan</span>
+            <strong>{dashboard.counts.drafts} / {policy.weeklyBidLimit}</strong>
+          </div>
+          <div className="meter-track">
+            <div className="meter-fill" style={{ width: `${Math.min(100, Math.round((dashboard.counts.drafts / (policy.weeklyBidLimit || 1)) * 100))}%` }} />
+          </div>
+        </div>
+      </section>
+
+      <section className="calendar-card">
+        <h3>Masa Berlaku Kebijakan</h3>
+        <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 12px' }}>
+          Kebijakan automasi berlaku terbatas dan membutuhkan konfirmasi berkala untuk memastikan kontrol tetap di tangan pemilik.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10, padding: 12, background: 'var(--surface-muted)', borderRadius: 3, marginBottom: 14 }}>
+          <div>
+            <span style={{ fontSize: 10, color: 'var(--muted)', display: 'block' }}>KEDALUWARSA PADA</span>
+            <strong>{formatDate(policy.expiresAt)}</strong>
+          </div>
+          <div>
+            <span style={{ fontSize: 10, color: 'var(--muted)', display: 'block' }}>SISA WAKTU</span>
+            <strong style={{ color: daysUntilExpiry <= 3 ? 'var(--danger)' : 'var(--success)' }}>{daysUntilExpiry} hari lagi</strong>
+          </div>
+        </div>
+        <Link to="/policy" className="button button-secondary" style={{ width: '100%' }}>
+          Kelola Batas & Perpanjang Kebijakan
+        </Link>
+      </section>
+
+      <section className="calendar-card" style={{ gridColumn: '1 / -1' }}>
+        <h3>Tenggat Waktu Proyek ({deadlineProjects.length})</h3>
+        {deadlineProjects.length === 0 ? (
+          <p style={{ color: 'var(--muted)', fontSize: 12 }}>Belum ada proyek dengan tenggat tercatat.</p>
+        ) : (
+          <ul className="deadlines-list">
+            {deadlineProjects.map((p) => (
+              <li className="deadline-item" key={p.id}>
+                <div>
+                  <Link to={`/opportunities?project=${encodeURIComponent(p.id)}`} style={{ fontWeight: 600, textDecoration: 'none' }}>
+                    {p.title}
+                  </Link>
+                  <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 2 }}>
+                    Klien: {p.clientName} · {formatMoney(p.budgetMin, p.currency)} - {formatMoney(p.budgetMax, p.currency)}
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <strong style={{ color: (p.deadlineDays ?? 0) <= 3 ? 'var(--danger)' : 'var(--pine)' }}>
+                    {p.deadlineDays} hari
+                  </strong>
+                  <div style={{ color: 'var(--muted)', fontSize: 10 }}>Estimasi sisa waktu</div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
   </>;
 }
 
@@ -396,54 +695,46 @@ function ProfilePage() {
 }
 
 function PolicyPage() {
-  const client = useQueryClient();
+  const queryClient = useQueryClient();
   const policyQuery = useQuery({ queryKey: ['policy'], queryFn: () => api<Policy>('/policy') });
-  const profileQuery = useQuery({ queryKey: ['profile'], queryFn: () => api<Profile>('/profile') });
-  const [policy, setPolicy] = useState<Policy | null>(null);
-  const [consent, setConsent] = useState(false);
-  const [notice, setNotice] = useState('');
-  useEffect(() => { if (policyQuery.data && !policy) setPolicy(policyQuery.data); }, [policyQuery.data]);
-  const save = useMutation({
-    mutationFn: (value: Policy) => api<Policy>('/policy', jsonRequest('PUT', {
-      allowedActions: value.allowedActions, keywords: value.keywords, minimumConfidence: value.minimumConfidence,
-      minPrice: value.minPrice, maxPrice: value.maxPrice, dailyBidLimit: value.dailyBidLimit, weeklyBidLimit: value.weeklyBidLimit,
-      timezone: value.timezone, activeHours: value.activeHours, noNegotiationTerms: value.noNegotiationTerms,
-    })),
-    onSuccess: (value) => { setPolicy(value); client.setQueryData(['policy'], value); setConsent(false); setNotice('Batas tersimpan sebagai draf. Aktifkan satu kali untuk menjalankan simulasi lokal.'); client.invalidateQueries({ queryKey: ['dashboard'] }); },
-    onError: (error: Error) => setNotice(error.message),
+  const autopilotQuery = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 30_000 });
+  const control = useMutation({
+    mutationFn: (action: 'pause' | 'resume') => api<Policy>('/policy/' + action, jsonRequest('POST')),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['policy'] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+        queryClient.invalidateQueries({ queryKey: ['autopilot'] }),
+      ]);
+    },
   });
-  const activate = useMutation({
-    mutationFn: () => api<{ policy: Policy }>('/policy/activate', jsonRequest('POST', { confirmSimulation: true })),
-    onSuccess: (value) => { setPolicy(value.policy); client.setQueryData(['policy'], value.policy); setConsent(false); setNotice('Kebijakan simulasi lokal aktif. Tidak ada tindakan marketplace yang diaktifkan.'); client.invalidateQueries({ queryKey: ['dashboard'] }); },
-    onError: (error: Error) => setNotice(error.message),
-  });
-  if (policyQuery.isPending || profileQuery.isPending || !policy) return <LoadingPanel label="Memuat batas operasi..." />;
-  if (policyQuery.isError || profileQuery.isError) return <ErrorNotice message="Kebijakan belum dapat dimuat." onRetry={() => { policyQuery.refetch(); profileQuery.refetch(); }} />;
-
-  const updateList = (key: 'keywords' | 'noNegotiationTerms', value: string) => setPolicy({ ...policy, [key]: value.split(',').map((item) => item.trim()).filter(Boolean) });
-  const savePolicy = (event: FormEvent) => { event.preventDefault(); save.mutate(policy); };
-  const policyHasUnsavedChanges = JSON.stringify(policy) !== JSON.stringify(policyQuery.data);
-
+  if (policyQuery.isPending) return <LoadingPanel label="Membaca kebijakan autopilot..." />;
+  if (policyQuery.isError) return <ErrorNotice message="Kebijakan belum dapat dimuat." onRetry={() => policyQuery.refetch()} />;
+  const policy = policyQuery.data;
+  const autopilot = autopilotQuery.data;
   return <>
-    <PageIntro eyebrow="Policy engine" title="Aturan berjalan sebelum setiap simulasi." description="Satu persetujuan kebijakan mengatur harga, bidang, keyakinan, frekuensi, jam kerja, dan kill switch. Aplikasi ini hanya menjalankan simulasi lokal." action={<StateLabel state={policy.state} />} />
-    {notice && <div className="notice notice-success" role="status">{notice}</div>}
-    <div className="capability-warning"><strong>Marketplace write: unknown</strong><p>Endpoint dan sandbox Freelancer belum dapat diverifikasi. Bid, pesan, dan perubahan profil eksternal tetap nonaktif meskipun kebijakan simulasi diaktifkan.</p></div>
-    <form className="policy-form" onSubmit={savePolicy}>
-      <section className="form-card"><div className="section-heading"><div><p className="eyebrow">Cakupan tindakan</p><h2>Yang boleh diuji</h2></div></div>
-        <label className="check-row check-row-emphasis"><input type="checkbox" checked={policy.allowedActions.includes('bid.submit')} onChange={(event) => setPolicy({ ...policy, allowedActions: event.target.checked ? ['bid.submit'] : [] })} /><span>Memeriksa bid simulasi berdasarkan policy</span></label>
-        <p className="form-help">Ini tidak mengirim bid. Aksi eksternal tetap manual-only sampai capability resmi berubah menjadi supported.</p>
-        <div className="form-grid"><label className="form-field"><span>Kata kunci peluang, pisahkan dengan koma</span><input value={policy.keywords.join(', ')} onChange={(event) => updateList('keywords', event.target.value)} placeholder="TypeScript, API" /></label><label className="form-field"><span>Topik yang tidak dinegosiasikan</span><input value={policy.noNegotiationTerms.join(', ')} onChange={(event) => updateList('noNegotiationTerms', event.target.value)} placeholder="Topik yang harus dilewati" /></label></div>
+    <PageIntro eyebrow="Policy engine" title="Aturan otomatis dari profil yang tersambung." description="Autopilot memakai batas lokal secara otomatis. Tidak perlu mengisi form untuk menilai atau mengirim setiap peluang." action={<StateLabel state={policy.state} />} />
+    {control.isError && <ErrorNotice message={(control.error as Error).message} />}
+    <div className="policy-summary-grid">
+      <section className="form-card">
+        <div className="section-heading"><div><p className="eyebrow">Operasi berjalan</p><h2>{autopilot?.lastMessage ?? 'Autopilot sedang menyiapkan akun.'}</h2></div><StateLabel state={autopilot?.state ?? 'starting'} /></div>
+        <div className="policy-facts">
+          <div><span>Spesialisasi</span><strong>{policy.specializations.join(', ') || 'Menunggu profil Freelancer'}</strong></div>
+          <div><span>Rentang penawaran</span><strong>{formatMoney(policy.minPrice, 'USD')}?{formatMoney(policy.maxPrice, 'USD')}</strong></div>
+          <div><span>Batas harian / mingguan</span><strong>{policy.dailyBidLimit} / {policy.weeklyBidLimit}</strong></div>
+          <div><span>Confidence minimum</span><strong>{Math.round(policy.minimumConfidence * 100)}%</strong></div>
+          <div><span>Jam operasi</span><strong>{policy.activeHours.start}:00?{policy.activeHours.end}:00 ? {policy.timezone}</strong></div>
+          <div><span>Berlaku sampai</span><strong>{formatDate(policy.expiresAt)}</strong></div>
+        </div>
+        <p className="form-help">Kebijakan melewati proyek di luar bidang profil, anggaran USD, batas risiko, confidence, jam kerja, dan kuota. Jika deadline klien tidak tersedia, proposal mencantumkan estimasi pengiriman 14 hari dan meminta konfirmasi tenggat sebelum mulai. Hanya proyek fixed price yang diproses otomatis.</p>
+        <div className="form-actions">
+          {policy.state === 'paused'
+            ? <button className="button button-primary" type="button" disabled={control.isPending || policy.simulationOnly} onClick={() => control.mutate('resume')}>{control.isPending ? 'Melanjutkan?' : 'Lanjutkan autopilot'}</button>
+            : <button className="button button-secondary" type="button" disabled={control.isPending || policy.state !== 'active'} onClick={() => control.mutate('pause')}>{control.isPending ? 'Menjeda?' : 'Jeda darurat'}</button>}
+          <span>{policy.simulationOnly ? 'Mode live belum aktif.' : 'Bid live berjalan sesuai kebijakan tersimpan.'}</span>
+        </div>
       </section>
-      <section className="form-card"><div className="section-heading"><div><p className="eyebrow">Batas angka</p><h2>Harga, keyakinan, dan frekuensi</h2></div></div>
-        <div className="form-grid form-grid-three"><label className="form-field"><span>Harga minimum (USD)</span><input type="number" min="0" value={policy.minPrice} onChange={(event) => setPolicy({ ...policy, minPrice: Number(event.target.value) })} /></label><label className="form-field"><span>Harga maksimum (USD)</span><input type="number" min="0" value={policy.maxPrice} onChange={(event) => setPolicy({ ...policy, maxPrice: Number(event.target.value) })} /></label><label className="form-field"><span>Confidence minimum (%)</span><input type="number" min="50" max="100" value={Math.round(policy.minimumConfidence * 100)} onChange={(event) => setPolicy({ ...policy, minimumConfidence: Number(event.target.value) / 100 })} /></label><label className="form-field"><span>Batas per hari</span><input type="number" min="0" max="50" value={policy.dailyBidLimit} onChange={(event) => setPolicy({ ...policy, dailyBidLimit: Number(event.target.value) })} /></label><label className="form-field"><span>Batas per minggu</span><input type="number" min="0" max="200" value={policy.weeklyBidLimit} onChange={(event) => setPolicy({ ...policy, weeklyBidLimit: Number(event.target.value) })} /></label><label className="form-field"><span>Zona waktu</span><input value={policy.timezone} onChange={(event) => setPolicy({ ...policy, timezone: event.target.value })} /></label><label className="form-field"><span>Jam mulai</span><input type="number" min="0" max="23" value={policy.activeHours.start} onChange={(event) => setPolicy({ ...policy, activeHours: { ...policy.activeHours, start: Number(event.target.value) } })} /></label><label className="form-field"><span>Jam selesai</span><input type="number" min="1" max="24" value={policy.activeHours.end} onChange={(event) => setPolicy({ ...policy, activeHours: { ...policy.activeHours, end: Number(event.target.value) } })} /></label></div>
-        <p className="form-help">Harga mata uang mengikuti profil layanan. Bid di luar bidang dan spesialisasi aktif akan dilewati.</p>
-      </section>
-      <section className="form-card confirmation-card"><div className="section-heading"><div><p className="eyebrow">Persetujuan sekali</p><h2>Aktifkan simulasi lokal</h2></div><StateLabel state={policy.state} /></div>
-        <p className="form-help">Bidang utama: <strong>{profileQuery.data?.primaryField || 'belum diatur'}</strong>. Spesialisasi aktif: <strong>{profileQuery.data?.specializations.join(', ') || 'belum diatur'}</strong>.</p>
-        <label className="check-row"><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} /><span>Saya mengaktifkan policy ini untuk simulasi lokal dan memahami bahwa tidak ada tindakan marketplace yang dikirim.</span></label>
-        <div className="form-actions"><button className="button button-secondary" type="submit" disabled={save.isPending}>{save.isPending ? 'Menyimpan...' : 'Simpan batas'}</button><button className="button button-primary" type="button" disabled={!consent || policyHasUnsavedChanges || activate.isPending} onClick={() => activate.mutate()}>{activate.isPending ? 'Mengaktifkan...' : 'Aktifkan policy simulasi'}</button><span>{policyHasUnsavedChanges ? 'Simpan perubahan sebelum aktivasi.' : `Versi ${policy.version} / berlaku sampai ${new Date(policy.expiresAt).toLocaleDateString('id-ID')}`}</span></div>
-      </section>
-    </form>
+    </div>
   </>;
 }
 
@@ -531,10 +822,40 @@ function KnowledgePage() {
 }
 
 function ActivityPage() {
+  const [filter, setFilter] = useState<'all' | 'allowed' | 'blocked' | 'recorded' | 'failed'>('all');
+  const [search, setSearch] = useState('');
   const query = useQuery({ queryKey: ['activity'], queryFn: () => api<AuditEvent[]>('/activity?limit=100') });
   if (query.isPending) return <LoadingPanel label="Membaca jejak aktivitas..." />;
   if (query.isError) return <ErrorNotice message="Log aktivitas belum dapat dimuat." onRetry={() => query.refetch()} />;
-  return <><PageIntro eyebrow="Audit log" title="Setiap keputusan meninggalkan jejak yang dapat dibaca." description="Log menyimpan waktu, versi policy, alasan allow/skip, serta hash payload. Isi rahasia dan token tidak dicatat." /><section className="activity-section"><ActivityRows events={query.data} /></section></>;
+
+  const filteredEvents = query.data.filter((e) => {
+    if (filter !== 'all' && e.status !== filter) return false;
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return e.type.toLowerCase().includes(q) || e.reason.toLowerCase().includes(q) || e.resourceId.toLowerCase().includes(q);
+  });
+
+  return <>
+    <PageIntro eyebrow="Audit log" title="Setiap keputusan meninggalkan jejak yang dapat dibaca." description="Log menyimpan waktu, versi policy, alasan allow/skip, serta hash payload. Kredensial rahasia dan token tidak dicatat." />
+    <div className="filter-tabs" role="tablist" aria-label="Filter status audit">
+      <button type="button" className={`filter-tab ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>Semua ({query.data.length})</button>
+      <button type="button" className={`filter-tab ${filter === 'allowed' ? 'active' : ''}`} onClick={() => setFilter('allowed')}>Diizinkan ({query.data.filter((e) => e.status === 'allowed').length})</button>
+      <button type="button" className={`filter-tab ${filter === 'blocked' ? 'active' : ''}`} onClick={() => setFilter('blocked')}>Dilewati ({query.data.filter((e) => e.status === 'blocked').length})</button>
+      <button type="button" className={`filter-tab ${filter === 'recorded' ? 'active' : ''}`} onClick={() => setFilter('recorded')}>Tercatat ({query.data.filter((e) => e.status === 'recorded').length})</button>
+      <button type="button" className={`filter-tab ${filter === 'failed' ? 'active' : ''}`} onClick={() => setFilter('failed')}>Gagal ({query.data.filter((e) => e.status === 'failed').length})</button>
+    </div>
+    <div style={{ marginBottom: 16 }}>
+      <input
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Cari jejak aktivitas berdasarkan alasan, tipe, atau resource ID..."
+        style={{ width: '100%', padding: '8px 12px', border: '1px solid var(--line)', background: 'var(--surface)', color: 'var(--ink)' }}
+      />
+    </div>
+    <section className="activity-section">
+      <ActivityRows events={filteredEvents} />
+    </section>
+  </>;
 }
 
 function CapabilitiesPage() {
@@ -550,19 +871,15 @@ function CapabilitiesPage() {
     const url = new URL(window.location.href);
     if (url.searchParams.has('linkedin')) {
       url.searchParams.delete('linkedin');
-      window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+      window.history.replaceState({}, '', url.pathname + url.search + url.hash);
     }
   }, []);
   const query = useQuery({ queryKey: ['capabilities'], queryFn: () => api<Capabilities>('/capabilities') });
+  const autopilot = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 30_000 });
   const verifyFreelancer = useMutation({
     mutationFn: () => api<{ message: string }>('/freelancer/verify', jsonRequest('POST')),
     onSuccess: async (result) => { setNoticeError(false); setNotice(result.message); await queryClient.invalidateQueries({ queryKey: ['capabilities'] }); },
     onError: (error: Error) => { setNoticeError(true); setNotice(error.message); },
-  });
-  const sandboxWriteTest = useMutation({
-    mutationFn: (input: FreelancerSandboxWriteInput) => api<{ message: string }>('/freelancer/sandbox-write-test', jsonRequest('POST', input)),
-    onSuccess: async (result) => { setNoticeError(false); setNotice(result.message); await queryClient.invalidateQueries({ queryKey: ['capabilities'] }); },
-    onError: (error: Error) => { setNoticeError(true); setNotice(error.message); void queryClient.invalidateQueries({ queryKey: ['capabilities'] }); },
   });
   const connectLinkedIn = useMutation({
     mutationFn: () => api<{ authorizationUrl: string }>('/linkedin/connect', jsonRequest('POST')),
@@ -583,62 +900,34 @@ function CapabilitiesPage() {
   });
   if (query.isPending) return <LoadingPanel />;
   if (query.isError) return <ErrorNotice message="Status integrasi belum dapat dimuat." onRetry={() => query.refetch()} />;
+  const status = autopilot.data;
   return <>
-    <PageIntro eyebrow="Koneksi dan capability" title="Status provider sesuai bukti yang tersedia." description="Penulisan ke akun produksi tetap nonaktif. Pemeriksaan operasi tulis tersedia khusus untuk akun sandbox Freelancer." />
-    {notice && <div className={`notice ${noticeError ? 'notice-error' : 'notice-success'}`} role={noticeError ? 'alert' : 'status'}>{notice}</div>}
+    <PageIntro eyebrow="Koneksi dan capability" title="Autopilot bekerja dari profil Freelancer." description="Proyek dipindai otomatis. Bid hanya dikirim saat aturan profil, anggaran, tenggat, risiko, confidence, kuota, dan jam aktif terpenuhi." />
+    {notice && <div className={'notice ' + (noticeError ? 'notice-error' : 'notice-success')} role={noticeError ? 'alert' : 'status'}>{notice}</div>}
+    <section className="form-card autopilot-card">
+      <div className="section-heading"><div><p className="eyebrow">Freelancer Auto-Pilot</p><h2>Siklus operasi</h2></div><StateLabel state={status?.state ?? 'starting'} /></div>
+      <p className="form-help">{status?.lastMessage ?? 'Menghubungkan autopilot ke profil Freelancer...'}</p>
+      {status?.specializations.length ? <div className="tag-row">{status.specializations.map((item) => <span className="skill-tag" key={item}>{item}</span>)}</div> : null}
+      <div className="autopilot-metrics"><span>{status?.lastImported ?? 0} proyek terakhir dipindai</span><span>{status?.lastSubmitted ?? 0} bid terkirim pada siklus terakhir</span><span>{status?.nextRunAt ? 'Pindai lagi ' + formatDate(status.nextRunAt) : 'Jadwal berikutnya belum tersedia'}</span></div>
+      <p className="provider-limit">Autopilot mengirim bid pada proyek fixed price USD yang cocok dengan keahlian di ringkasan profil publik. Batas lokal tetap berlaku: USD 100?800, maksimal 4 bid per hari dan 12 per minggu, risiko, tenggat, confidence, serta jam kerja. Endpoint edit profil dan pesan siap dipakai lewat event yang relevan; agen tidak mengubah profil atau mengirim pesan tanpa perubahan dan percakapan yang menjadi konteksnya.</p>
+    </section>
     <div className="capability-grid">
       <section className="form-card">
         <div className="section-heading"><div><p className="eyebrow">Freelancer.com</p><h2>Capability marketplace</h2></div><StateLabel state={query.data.freelancerCredentials.verificationStatus} /></div>
-        {query.data.marketplace.map((item) => <div className="capability-row" key={item.operation}><div><strong>{item.operation.replaceAll('_', ' ')}</strong><p>{item.evidence}</p></div><div className="capability-status">{item.sandboxVerification ? <span title={`Diperiksa ${formatDate(item.sandboxVerification.checkedAt)}`} className={`sandbox-http-status ${item.sandboxVerification.statusCode === 200 ? 'sandbox-http-ok' : ''}`}>{item.sandboxVerification.statusCode === null ? 'Hasil tidak diketahui · Sandbox' : `HTTP ${item.sandboxVerification.statusCode} · Sandbox`}</span> : <StateLabel state={item.status} />}</div></div>)}
-        <p className="provider-limit">Token API {query.data.freelancerCredentials.accessTokenConfigured ? 'dikonfigurasi pada server lokal dan tidak dikirim ke browser' : 'belum diatur'}. Pemeriksaan membaca profil, satu hasil pencarian proyek, maksimal satu data portofolio, dan satu pesan dari thread akun. Isi portofolio maupun pesan tidak disimpan.</p>
-        <button type="button" className="button button-secondary" disabled={!query.data.freelancerCredentials.accessTokenConfigured || verifyFreelancer.isPending} onClick={() => verifyFreelancer.mutate()}>{verifyFreelancer.isPending ? 'Memeriksa koneksi…' : 'Periksa semua akses baca'}</button>
-        <div className="sandbox-write-tests">
-          <h3>Uji operasi tulis di sandbox</h3>
-          <p className="form-help">Form ini membuat perubahan pada sandbox saja dan memakai token terpisah. Token sandbox {query.data.freelancerCredentials.sandboxWriteTestConfigured ? 'tersedia di konfigurasi server' : 'belum diatur di .env; restart server setelah mengisinya'}. HTTP 200 dari sandbox menguji endpoint dan token sandbox; status produksi tetap terpisah.</p>
-          <form className="stack-form sandbox-test-form" onSubmit={(event) => {
-            event.preventDefault();
-            const values = new FormData(event.currentTarget);
-            sandboxWriteTest.mutate({ operation: 'submit_bid', projectId: Number(values.get('projectId')), amount: Number(values.get('amount')), period: Number(values.get('period')), milestonePercentage: 100, description: String(values.get('description') ?? '') });
-          }}>
-            <strong>Submit bid</strong>
-            <label className="form-field"><span>ID proyek sandbox milik Anda</span><input name="projectId" type="number" min="1" step="1" required /></label>
-            <div className="form-grid"><label className="form-field"><span>Nilai bid</span><input name="amount" type="number" min="0.01" step="0.01" defaultValue="1" required /></label><label className="form-field"><span>Durasi (hari)</span><input name="period" type="number" min="1" step="1" defaultValue="1" required /></label></div>
-            <label className="form-field"><span>Deskripsi bid uji</span><textarea name="description" maxLength={4000} defaultValue="FVH sandbox integration check." required /></label>
-            <button className="button button-secondary" type="submit" disabled={!query.data.freelancerCredentials.sandboxWriteTestConfigured || sandboxWriteTest.isPending}>Kirim bid uji ke sandbox</button>
-          </form>
-          <form className="stack-form sandbox-test-form" onSubmit={(event) => {
-            event.preventDefault();
-            const values = new FormData(event.currentTarget);
-            const jobIds = String(values.get('jobIds') ?? '').split(',').map((value) => Number(value.trim()));
-            if (jobIds.some((id) => !Number.isSafeInteger(id) || id < 1) || new Set(jobIds).size !== jobIds.length) {
-              setNoticeError(true); setNotice('Masukkan ID job sandbox yang valid dan tidak duplikat.'); return;
-            }
-            sandboxWriteTest.mutate({ operation: 'edit_profile', jobIds });
-          }}>
-            <strong>Edit profile</strong>
-            <label className="form-field"><span>Daftar ID job yang tetap ingin dipasang</span><input name="jobIds" inputMode="numeric" placeholder="contoh: 17, 23" pattern="[0-9, ]+" required /></label>
-            <p className="form-help">Endpoint ini mengganti daftar job pada profil sandbox. Masukkan daftar yang sama dengan profil sandbox bila tujuannya menguji endpoint tanpa mengubah data.</p>
-            <button className="button button-secondary" type="submit" disabled={!query.data.freelancerCredentials.sandboxWriteTestConfigured || sandboxWriteTest.isPending}>Uji perubahan profil sandbox</button>
-          </form>
-          <form className="stack-form sandbox-test-form" onSubmit={(event) => {
-            event.preventDefault();
-            const values = new FormData(event.currentTarget);
-            sandboxWriteTest.mutate({ operation: 'send_message', threadId: Number(values.get('threadId')), message: String(values.get('message') ?? '') });
-          }}>
-            <strong>Send message</strong>
-            <label className="form-field"><span>ID thread sandbox milik Anda</span><input name="threadId" type="number" min="1" step="1" required /></label>
-            <label className="form-field"><span>Isi pesan uji</span><textarea name="message" maxLength={4000} placeholder="Pesan ini akan dikirim ke thread sandbox." required /></label>
-            <button className="button button-secondary" type="submit" disabled={!query.data.freelancerCredentials.sandboxWriteTestConfigured || sandboxWriteTest.isPending}>Kirim pesan uji ke sandbox</button>
-          </form>
+        {query.data.marketplace.map((item) => <div className="capability-row" key={item.operation}><div><strong>{item.operation.replaceAll('_', ' ')}</strong><p>{item.evidence}</p></div><div className="capability-status">{item.sandboxVerification ? <span title={'Diperiksa ' + formatDate(item.sandboxVerification.checkedAt)} className={'sandbox-http-status ' + (item.sandboxVerification.statusCode === 200 ? 'sandbox-http-ok' : '')}>{item.sandboxVerification.statusCode === null ? 'Hasil tidak diketahui ? Sandbox' : 'HTTP ' + item.sandboxVerification.statusCode + ' ? Sandbox'}</span> : <StateLabel state={item.status} />}</div></div>)}
+        <div className="production-capability-status">
+          {query.data.marketplace.filter((item) => ['submit_bid', 'edit_profile', 'send_message'].includes(item.operation)).map((item) => <div key={item.operation}><strong>{item.operation.replaceAll('_', ' ')}</strong><StateLabel state={item.status} /><span>{item.productionVerification ? item.productionVerification.statusCode === null ? 'Hasil tidak diketahui ? Production' : 'HTTP ' + item.productionVerification.statusCode + ' ? Production' : 'Belum ada hasil live production'}</span></div>)}
         </div>
+        <p className="provider-limit">Token Freelancer {query.data.freelancerCredentials.accessTokenConfigured ? 'tersimpan pada server lokal dan tidak dikirim ke browser' : 'belum diatur'}. Pemeriksaan baca-saja mencakup profil, proyek, portofolio, dan pesan. Isi pesan dan portofolio tidak disimpan.</p>
+        <button type="button" className="button button-secondary" disabled={!query.data.freelancerCredentials.accessTokenConfigured || verifyFreelancer.isPending} onClick={() => verifyFreelancer.mutate()}>{verifyFreelancer.isPending ? 'Memeriksa koneksi?' : 'Periksa akses baca'}</button>
       </section>
       <section className="form-card">
         <div className="section-heading"><div><p className="eyebrow">Sumber lain</p><h2>Knowledge dan drafting</h2></div></div>
         <div className="capability-row"><div><strong>GitHub</strong><p>{query.data.github.scope}; mode read-only. Repositori publik dapat dibaca tanpa token, privat memerlukan token server.</p></div><StateLabel state={query.data.github.verificationStatus} /></div>
-        <div className="capability-row"><div><strong>LinkedIn</strong><p>{query.data.linkedin.reason} Kredensial aplikasi {query.data.linkedin.clientConfigured ? 'sudah diatur untuk server ini' : 'belum diatur'}; {query.data.linkedin.authorized ? 'izin anggota tersimpan' : query.data.linkedin.verificationStatus === 'expired' ? 'token sudah kedaluwarsa' : 'consent anggota belum terverifikasi'}{query.data.linkedin.authorized && query.data.linkedin.accessTokenExpiresAt ? `; token berlaku hingga ${formatDate(query.data.linkedin.accessTokenExpiresAt)}` : ''}.</p>{query.data.linkedin.redirectUri && <p>URL callback yang harus terdaftar di LinkedIn Developer Portal: <code>{query.data.linkedin.redirectUri}</code></p>}</div><StateLabel state={query.data.linkedin.verificationStatus} /></div>
+        <div className="capability-row"><div><strong>LinkedIn</strong><p>{query.data.linkedin.reason} Kredensial aplikasi {query.data.linkedin.clientConfigured ? 'sudah diatur untuk server ini' : 'belum diatur'}; {query.data.linkedin.authorized ? 'izin anggota tersimpan' : query.data.linkedin.verificationStatus === 'expired' ? 'token sudah kedaluwarsa' : 'consent anggota belum terverifikasi'}{query.data.linkedin.authorized && query.data.linkedin.accessTokenExpiresAt ? '; token berlaku hingga ' + formatDate(query.data.linkedin.accessTokenExpiresAt) : ''}.</p>{query.data.linkedin.redirectUri && <p>URL callback yang harus terdaftar di LinkedIn Developer Portal: <code>{query.data.linkedin.redirectUri}</code></p>}</div><StateLabel state={query.data.linkedin.verificationStatus} /></div>
         {query.data.linkedin.authorized
-          ? <button type="button" className="button button-secondary" disabled={disconnectLinkedIn.isPending} onClick={() => disconnectLinkedIn.mutate()}>{disconnectLinkedIn.isPending ? 'Menghapus…' : 'Hapus token LinkedIn lokal'}</button>
-          : <button type="button" className="button button-secondary" disabled={!query.data.linkedin.clientConfigured || connectLinkedIn.isPending} onClick={() => connectLinkedIn.mutate()}>{connectLinkedIn.isPending ? 'Menyiapkan OAuth…' : 'Hubungkan LinkedIn'}</button>}
+          ? <button type="button" className="button button-secondary" disabled={disconnectLinkedIn.isPending} onClick={() => disconnectLinkedIn.mutate()}>{disconnectLinkedIn.isPending ? 'Menghapus?' : 'Hapus token LinkedIn lokal'}</button>
+          : <button type="button" className="button button-secondary" disabled={!query.data.linkedin.clientConfigured || connectLinkedIn.isPending} onClick={() => connectLinkedIn.mutate()}>{connectLinkedIn.isPending ? 'Menyiapkan OAuth?' : 'Hubungkan LinkedIn'}</button>}
         <div className="capability-row"><div><strong>Hermes Agent</strong><p>{query.data.hermes.reason}</p></div><StateLabel state={query.data.hermes.active ? 'active' : 'draft'} /></div>
       </section>
     </div>
@@ -661,7 +950,7 @@ function OfficePage() {
     { name: 'Lobby', to: '/', role: 'Chief of staff', note: `${query.data.counts.openProjects} peluang aktif / ringkasan ruang kerja` },
     { name: 'Sales & Bids', to: '/opportunities', role: 'Market scout / bid strategist', note: `${query.data.counts.openProjects} peluang / ${query.data.counts.drafts} draf lokal` },
     { name: 'Profile Studio', to: '/profile', role: 'Profile editor', note: query.data.profileComplete ? 'Bidang dan spesialisasi sudah diisi' : 'Profil layanan belum diatur' },
-    { name: 'Client Relations', to: '/pipeline', role: 'Client relations', note: 'Pipeline lokal / akses pesan marketplace manual-only' },
+    { name: 'Client Relations', to: '/pipeline', role: 'Client relations', note: 'Pipeline lokal / pesan menunggu aturan event percakapan' },
     { name: 'Operations', to: '/activity', role: 'Operations analyst / compliance auditor', note: `Policy ${query.data.policy.state} / ${query.data.activity.length} aktivitas terbaru` },
   ];
   return <>
@@ -682,6 +971,9 @@ export default function App() {
   return <Routes>
     <Route element={<Layout />}>
       <Route index element={<OverviewPage />} />
+      <Route path="agents" element={<AgentsPage />} />
+      <Route path="tasks" element={<TaskBoardPage />} />
+      <Route path="calendar" element={<CalendarPage />} />
       <Route path="opportunities" element={<OpportunitiesPage />} />
       <Route path="pipeline" element={<PipelinePage />} />
       <Route path="profile" element={<ProfilePage />} />

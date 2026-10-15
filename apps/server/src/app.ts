@@ -2,8 +2,8 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import type {} from '@fastify/static';
 import { z } from 'zod';
-import { FreelancerReadError, FreelancerSandboxWriteError, getFreelancerCapabilities } from '@fvh/adapter-freelancer';
-import type { FreelancerSandboxWriteInput, FreelancerSandboxWriteOperation } from '@fvh/adapter-freelancer';
+import { FreelancerReadError, FreelancerSandboxWriteError, FreelancerWriteError, getFreelancerCapabilities } from '@fvh/adapter-freelancer';
+import type { FreelancerSandboxWriteInput, FreelancerSandboxWriteOperation, FreelancerSandboxWriteResult, FreelancerWriteInput, FreelancerWriteOperation, FreelancerWriteResult } from '@fvh/adapter-freelancer';
 import { GitHubReadAdapter, GitHubReadError } from '@fvh/adapter-github';
 import { assessProject, createId, decideBid, hashPayload, UnavailableDraftingAdapter } from '@fvh/application';
 import type { AiDraftingPort } from '@fvh/application';
@@ -14,12 +14,18 @@ import { prepareKnowledgeFile } from '@fvh/knowledge';
 import { WorkspaceRepository } from '@fvh/persistence';
 import type { CredentialStatus, FreelancerVerification } from './credential-store.js';
 import type { LinkedInOAuthService } from './linkedin-oauth.js';
+import type { FreelancerAutopilot } from './autopilot.js';
 
 const paramsSchema = z.object({ id: z.string().min(1).max(150) });
 const draftUpdateSchema = z.object({ proposal: z.string().trim().min(40).max(4_000), proposedPrice: z.number().finite().positive() });
 const githubSyncSchema = z.object({ repository: z.string().trim().min(3).max(200) });
 const freelancerSyncSchema = z.object({ query: z.string().trim().min(2).max(120), limit: z.number().int().min(1).max(50).default(25) });
 const safeFreelancerIdSchema = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
+const freelancerProductionWriteSchema = z.discriminatedUnion('operation', [
+  z.object({ operation: z.literal('submit_bid'), projectId: safeFreelancerIdSchema, amount: z.number().finite().positive(), period: z.number().int().positive(), milestonePercentage: z.number().int().min(1).max(100), description: z.string().trim().min(1).max(4_000), confirmLive: z.literal(true) }),
+  z.object({ operation: z.literal('edit_profile'), jobIds: z.array(safeFreelancerIdSchema).min(1).max(20).refine((ids) => new Set(ids).size === ids.length, 'ID job tidak boleh duplikat.'), confirmLive: z.literal(true) }),
+  z.object({ operation: z.literal('send_message'), threadId: safeFreelancerIdSchema, message: z.string().trim().min(1).max(4_000), confirmLive: z.literal(true) }),
+]);
 const freelancerSandboxWriteSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('submit_bid'), projectId: safeFreelancerIdSchema, amount: z.number().finite().positive(), period: z.number().int().positive(), milestonePercentage: z.number().int().min(1).max(100), description: z.string().trim().min(1).max(4_000) }),
   z.object({ operation: z.literal('edit_profile'), jobIds: z.array(safeFreelancerIdSchema).min(1).max(20).refine((ids) => new Set(ids).size === ids.length, 'ID job tidak boleh duplikat.') }),
@@ -27,8 +33,8 @@ const freelancerSandboxWriteSchema = z.discriminatedUnion('operation', [
 ]);
 const allowedDevOrigins = new Set(['http://127.0.0.1:5173', 'http://localhost:5173', 'http://127.0.0.1:5174', 'http://localhost:5174']);
 
-type FreelancerSandboxWriteResult = { statusCode: number };
-type FreelancerSandboxWriteCheck = { statusCode: number | null; checkedAt: string };
+type FreelancerSandboxWriteCheck = { statusCode: number | null; checkedAt: string; resultId?: string; resultStatus?: string };
+type FreelancerProductionWriteCheck = FreelancerSandboxWriteCheck;
 
 export type AppOptions = {
   repository?: WorkspaceRepository;
@@ -37,8 +43,10 @@ export type AppOptions = {
   getCredentialStatus?: () => CredentialStatus;
   freelancerSandboxTokenConfigured?: boolean;
   verifyFreelancer?: () => Promise<FreelancerVerification>;
+  runFreelancerProductionWrite?: (input: FreelancerWriteInput) => Promise<FreelancerWriteResult>;
   verifyFreelancerSandboxWrite?: (input: FreelancerSandboxWriteInput) => Promise<FreelancerSandboxWriteResult>;
   readFreelancerProjects?: (query: string, limit: number) => Promise<{ projects: ProjectOpportunity[]; skipped: number }>;
+  autopilot?: FreelancerAutopilot;
   linkedinOAuth?: Pick<LinkedInOAuthService, 'redirectUri' | 'start' | 'handleCallback' | 'close'>;
   disconnectLinkedIn?: () => Promise<void>;
   fetcher?: typeof fetch;
@@ -78,6 +86,25 @@ function isSameOrigin(origin: string, protocol: string, host: string | undefined
   }
 }
 
+function readProductionWriteChecks(repository: WorkspaceRepository): Map<FreelancerWriteOperation, FreelancerProductionWriteCheck> {
+  const checks = new Map<FreelancerWriteOperation, FreelancerProductionWriteCheck>();
+  const operations = new Set<FreelancerWriteOperation>(['submit_bid', 'edit_profile', 'send_message']);
+  for (const event of repository.listAudit(500)) {
+    const prefix = 'marketplace.production.';
+    if (!event.type.startsWith(prefix)) continue;
+    const operation = event.type.slice(prefix.length) as FreelancerWriteOperation;
+    if (!operations.has(operation) || checks.has(operation)) continue;
+    const statusCode = event.reason.match(/HTTP (\d{3})/)?.[1];
+    const resultId = event.reason.match(/ID hasil: (\d{1,30})/)?.[1];
+    checks.set(operation, {
+      statusCode: statusCode ? Number(statusCode) : null,
+      checkedAt: event.createdAt,
+      ...(resultId ? { resultId } : {}),
+    });
+  }
+  return checks;
+}
+
 function linkedinVerification(credentialStatus: CredentialStatus | undefined, now: Date) {
   if (!credentialStatus?.linkedinAccessTokenConfigured) return { authorized: false, verificationStatus: 'unverified' as const };
   const expiresAt = credentialStatus.linkedinAccessTokenExpiresAt;
@@ -96,6 +123,10 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   const app = Fastify({ logger: false, bodyLimit: 2_500_000, trustProxy: false });
   let freelancerVerification: FreelancerVerification | null = null;
   const freelancerSandboxWriteChecks = new Map<FreelancerSandboxWriteOperation, FreelancerSandboxWriteCheck>();
+  const freelancerProductionWriteChecks = readProductionWriteChecks(repository);
+  const refreshProductionWriteChecks = () => {
+    for (const [operation, check] of readProductionWriteChecks(repository)) freelancerProductionWriteChecks.set(operation, check);
+  };
 
   app.addHook('onRequest', async (request, reply) => {
     const origin = request.headers.origin;
@@ -111,19 +142,38 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     return payload;
   });
 
-  app.get('/api/health', async () => ({ ok: true, mode: 'local', database: 'sqlite', ai: draftingMode, liveWrites: false }));
+  app.get('/api/health', async () => ({
+    ok: true, mode: 'local', database: 'sqlite', ai: draftingMode, liveWrites: options.autopilot?.getStatus().state === 'running',
+    manualProductionWritesConfigured: (options.getCredentialStatus?.() ?? options.credentialStatus)?.freelancerAccessTokenConfigured ?? false,
+    autopilot: options.autopilot?.getStatus().state ?? 'unavailable',
+  }));
+  app.get('/api/autopilot', async () => options.autopilot?.getStatus() ?? {
+    state: 'blocked', lastRunAt: null, nextRunAt: null, lastMessage: 'Autopilot belum tersedia pada server ini.', lastImported: 0, lastSubmitted: 0, specializations: [],
+  });
   app.get('/api/capabilities', async () => {
+    refreshProductionWriteChecks();
     const credentialStatus = options.getCredentialStatus?.() ?? options.credentialStatus;
     const linkedin = linkedinVerification(credentialStatus, now());
     return {
-    marketplace: getFreelancerCapabilities(freelancerVerification).map((capability) => ({
-      ...capability,
-      ...(freelancerSandboxWriteChecks.has(capability.operation as FreelancerSandboxWriteOperation)
-        ? { sandboxVerification: freelancerSandboxWriteChecks.get(capability.operation as FreelancerSandboxWriteOperation) }
-        : {}),
-    })),
+    marketplace: getFreelancerCapabilities(freelancerVerification).map((capability) => {
+      const productionVerification = freelancerProductionWriteChecks.get(capability.operation as FreelancerWriteOperation);
+      return {
+        ...capability,
+        ...(productionVerification ? {
+          status: productionVerification.statusCode === 200 ? 'supported' : 'unknown',
+          evidence: productionVerification.statusCode === 200
+            ? `Permintaan live Freelancer berhasil dengan HTTP 200 pada ${productionVerification.checkedAt}.${productionVerification.resultId ? ` ID hasil: ${productionVerification.resultId}.` : ''}`
+            : `Permintaan live terakhir belum terkonfirmasi${productionVerification.statusCode ? ` (HTTP ${productionVerification.statusCode})` : ''}; capability tetap belum terverifikasi.`,
+          productionVerification,
+        } : {}),
+        ...(freelancerSandboxWriteChecks.has(capability.operation as FreelancerSandboxWriteOperation)
+          ? { sandboxVerification: freelancerSandboxWriteChecks.get(capability.operation as FreelancerSandboxWriteOperation) }
+          : {}),
+      };
+    }),
     freelancerCredentials: {
       accessTokenConfigured: credentialStatus?.freelancerAccessTokenConfigured ?? false,
+      productionWriteConfigured: credentialStatus?.freelancerAccessTokenConfigured ?? false,
       sandboxWriteTestConfigured: options.freelancerSandboxTokenConfigured ?? false,
       verificationStatus: freelancerVerification?.connected ? 'connected' : freelancerVerification?.reason === 'invalid_token' ? 'invalid' : freelancerVerification ? 'unavailable' : 'unverified',
       readProfile: freelancerVerification?.readProfile ?? false,
@@ -186,16 +236,26 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     try {
       const result = await options.verifyFreelancerSandboxWrite(input);
       const checkedAt = now().toISOString();
-      freelancerSandboxWriteChecks.set(input.operation, { statusCode: result.statusCode, checkedAt });
+      freelancerSandboxWriteChecks.set(input.operation, {
+        statusCode: result.statusCode, checkedAt,
+        ...(result.resultId ? { resultId: result.resultId } : {}),
+        ...(result.resultStatus ? { resultStatus: result.resultStatus } : {}),
+      });
       const success = result.statusCode === 200;
+      const resultDescription = result.resultId ? `ID hasil: ${result.resultId}.` : result.resultStatus ? `Status hasil: ${result.resultStatus}.` : 'Freelancer tidak memberikan ID hasil.';
       repository.appendAudit({
-        type: `marketplace.sandbox.${input.operation}_test`, resourceId: 'freelancer-sandbox',
+        type: `marketplace.sandbox.${input.operation}_test`, resourceId: result.resultId ?? 'freelancer-sandbox',
         status: success ? 'recorded' : 'failed',
-        reason: `Uji tulis sandbox ${input.operation} menghasilkan HTTP ${result.statusCode}. Isi payload tidak disimpan.`,
+        reason: `Uji tulis sandbox ${input.operation} menghasilkan HTTP ${result.statusCode}. ${resultDescription} Isi payload tidak disimpan.`,
         policyVersion: repository.getPolicy().version, payloadHash: hashPayload(input),
       });
       if (!success) return reply.code(502).send({ error: `Freelancer sandbox merespons HTTP ${result.statusCode}; status bukan 200.`, providerStatusCode: result.statusCode });
-      return { operation: input.operation, statusCode: result.statusCode, environment: 'sandbox', checkedAt, message: `Uji ${input.operation} menerima HTTP 200 dari Freelancer sandbox.` };
+      return {
+        operation: input.operation, statusCode: result.statusCode, environment: 'sandbox', checkedAt,
+        ...(result.resultId ? { resultId: result.resultId } : {}),
+        ...(result.resultStatus ? { resultStatus: result.resultStatus } : {}),
+        message: `Uji ${input.operation} menerima HTTP 200 dari Freelancer sandbox. ${resultDescription}`,
+      };
     } catch (error) {
       const checkedAt = now().toISOString();
       const providerStatusCode = error instanceof FreelancerSandboxWriteError ? error.statusCode ?? null : null;
@@ -210,6 +270,62 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       const message = providerStatusCode === null
         ? 'Uji sandbox tidak memperoleh respons yang dapat dipastikan. Periksa thread/proyek sandbox sebelum mengulang.'
         : `Freelancer sandbox merespons HTTP ${providerStatusCode}; status bukan 200.`;
+      return reply.code(502).send({ error: message, providerStatusCode });
+    }
+  });
+
+  app.post('/api/freelancer/production-write', async (request, reply) => {
+    const credentialStatus = options.getCredentialStatus?.() ?? options.credentialStatus;
+    if (!credentialStatus?.freelancerAccessTokenConfigured) {
+      return reply.code(409).send({ error: 'Token produksi Freelancer belum dikonfigurasi di .env atau secure store Windows.' });
+    }
+    if (!options.runFreelancerProductionWrite) {
+      return reply.code(503).send({ error: 'Adapter operasi live Freelancer belum tersedia di server ini.' });
+    }
+    const parsed = parseBody(freelancerProductionWriteSchema, request.body);
+    if ('issues' in parsed) return reply.code(400).send({ error: 'Data operasi live tidak valid.', issues: parsed.issues });
+
+    const { confirmLive, ...input } = parsed.value;
+    if (!confirmLive) return reply.code(400).send({ error: 'Konfirmasi operasi live wajib diberikan.' });
+    const liveInput = input as FreelancerWriteInput;
+    try {
+      const result = await options.runFreelancerProductionWrite(liveInput);
+      const checkedAt = now().toISOString();
+      const check = {
+        statusCode: result.statusCode, checkedAt,
+        ...(result.resultId ? { resultId: result.resultId } : {}),
+        ...(result.resultStatus ? { resultStatus: result.resultStatus } : {}),
+      };
+      freelancerProductionWriteChecks.set(liveInput.operation, check);
+      const resultDescription = result.resultId ? `ID hasil: ${result.resultId}.` : result.resultStatus ? `Status hasil: ${result.resultStatus}.` : 'Freelancer tidak memberikan ID hasil.';
+      const success = result.statusCode === 200;
+      repository.appendAudit({
+        type: `marketplace.production.${liveInput.operation}`, resourceId: result.resultId ?? 'freelancer-production',
+        status: success ? 'recorded' : 'failed',
+        reason: `Operasi live ${liveInput.operation} menghasilkan HTTP ${result.statusCode}. ${resultDescription} Isi payload tidak disimpan.`,
+        policyVersion: repository.getPolicy().version, payloadHash: hashPayload(liveInput),
+      });
+      if (!success) return reply.code(502).send({ error: `Freelancer merespons HTTP ${result.statusCode}; operasi tidak dinyatakan berhasil.`, providerStatusCode: result.statusCode });
+      return {
+        operation: liveInput.operation, statusCode: result.statusCode, environment: 'production', checkedAt,
+        ...(result.resultId ? { resultId: result.resultId } : {}),
+        ...(result.resultStatus ? { resultStatus: result.resultStatus } : {}),
+        message: `Freelancer production menerima ${liveInput.operation} dengan HTTP 200. ${resultDescription}`,
+      };
+    } catch (error) {
+      const checkedAt = now().toISOString();
+      const providerStatusCode = error instanceof FreelancerWriteError ? error.statusCode ?? null : null;
+      freelancerProductionWriteChecks.set(liveInput.operation, { statusCode: providerStatusCode, checkedAt });
+      repository.appendAudit({
+        type: `marketplace.production.${liveInput.operation}`, resourceId: 'freelancer-production', status: 'failed',
+        reason: providerStatusCode === null
+          ? `Hasil operasi live ${liveInput.operation} tidak dapat dipastikan; periksa akun Freelancer sebelum mengulang.`
+          : `Operasi live ${liveInput.operation} menghasilkan HTTP ${providerStatusCode}.`,
+        policyVersion: repository.getPolicy().version, payloadHash: hashPayload(liveInput),
+      });
+      const message = providerStatusCode === null
+        ? 'Hasil operasi live tidak dapat dipastikan. Periksa akun Freelancer sebelum mencoba lagi agar tidak membuat duplikasi.'
+        : `Freelancer merespons HTTP ${providerStatusCode}; operasi tidak dinyatakan berhasil.`;
       return reply.code(502).send({ error: message, providerStatusCode });
     }
   });
@@ -347,7 +463,8 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     if (Date.parse(policy.expiresAt) <= now().getTime()) return reply.code(409).send({ error: 'Kebijakan kedaluwarsa dan perlu dikonfigurasi ulang.' });
     const resumed = { ...policy, state: 'active' as const };
     repository.savePolicy(resumed);
-    repository.appendAudit({ type: 'policy.resumed', resourceId: 'policy', status: 'recorded', reason: 'Kebijakan simulasi dilanjutkan oleh pemilik.', policyVersion: resumed.version, payloadHash: null });
+    repository.appendAudit({ type: 'policy.resumed', resourceId: 'policy', status: 'recorded', reason: 'Kebijakan dilanjutkan oleh pemilik.', policyVersion: resumed.version, payloadHash: null });
+    void options.autopilot?.start();
     return resumed;
   });
 
@@ -456,14 +573,15 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       counts: {
         openProjects: projects.filter((project) => project.status === 'open').length,
         drafts: projects.filter((project) => repository.getLatestDraft(project.id)).length,
+        submittedBids: projects.filter((project) => project.pipelineStatus === 'submitted').length,
         policySkips: repository.listAudit(200).filter((event) => event.status === 'blocked').length,
         knowledgeSources: sources.length,
       },
-      policy: { state: policy.state, version: policy.version, simulationOnly: true },
+      policy: { state: policy.state, version: policy.version, simulationOnly: policy.simulationOnly },
       profileComplete: Boolean(profile.primaryField && profile.specializations.length),
       projects: projects.slice(0, 4),
       activity,
-      externalWrites: false,
+      externalWrites: policy.state === 'active' && !policy.simulationOnly,
     };
   });
   app.get('/api/activity', async (request) => {
@@ -535,8 +653,15 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   });
 
   app.get('/api/settings', async () => {
+    refreshProductionWriteChecks();
     const credentialStatus = options.getCredentialStatus?.() ?? options.credentialStatus;
     const linkedinStatus = linkedinVerification(credentialStatus, now());
+    const writeOperations = Object.fromEntries((['submit_bid', 'edit_profile', 'send_message'] as const).map((operation) => [
+      operation,
+      freelancerProductionWriteChecks.get(operation)?.statusCode === 200 ? 'supported' : 'unknown',
+    ]));
+    const writeValues = Object.values(writeOperations);
+    const writes = writeValues.every((status) => status === 'supported') ? 'supported' : writeValues.some((status) => status === 'supported') ? 'partial' : 'unknown';
     return {
       workspace: { id: 'workspace_local', name: 'Freelancer Virtual House', accountMode: 'single-user lokal' },
       fields: ['Fullstack Engineer', 'Backend Engineer', 'Android Engineer', 'iOS Engineer', 'Frontend Engineer', 'DevOps Engineer', 'QA Engineer', 'UI/UX Designer', 'Data Engineer', 'Technical Writer'],
@@ -548,13 +673,14 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
           readProfile: freelancerVerification?.readProfile ? 'supported' : 'unknown',
           readPortfolio: freelancerVerification?.readPortfolio ? 'supported' : freelancerVerification?.portfolioError === 'scope_denied' ? 'unsupported' : 'unknown',
           readMessages: freelancerVerification?.readMessages ? 'supported' : freelancerVerification?.messagesError === 'scope_denied' ? 'unsupported' : 'unknown',
-          writes: 'unknown',
+          writes,
+          writeOperations,
         },
         github: 'read-only',
         linkedin: { read: linkedinStatus.authorized ? 'oidc-lite' : 'manual-only', clientConfigured: credentialStatus?.linkedinClientConfigured ?? false, authorized: linkedinStatus.authorized, verificationStatus: linkedinStatus.verificationStatus },
         hermes: 'optional',
       },
-      externalWrites: false,
+      externalWrites: repository.getPolicy().state === 'active' && !repository.getPolicy().simulationOnly,
     };
   });
 
@@ -567,6 +693,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     return reply.code(404).send({ error: 'Endpoint tidak ditemukan.' });
   });
   app.addHook('onClose', async () => {
+    options.autopilot?.stop();
     options.linkedinOAuth?.close();
     if (!options.repository) repository.close();
   });

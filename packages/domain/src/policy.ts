@@ -38,8 +38,11 @@ export function evaluatePolicy(input: PolicyInput): PolicyDecision {
     return decision(input, false, 'capability_unverified', 'Kemampuan API belum terverifikasi; tindakan eksternal dinonaktifkan.');
   }
   if (project.status !== 'open') return decision(input, false, 'project_not_open', 'Peluang tidak lagi terbuka.');
-  if (project.deadlineDays === null) return decision(input, false, 'deadline_unknown', 'Deadline proyek belum dicantumkan; tindakan diblokir sampai waktunya dikonfirmasi.');
-  if (project.deadlineDays < 1) return decision(input, false, 'deadline_too_close', 'Deadline proyek sudah lewat atau kurang dari satu hari.');
+  if (project.deadlineDays === null) {
+    if (policy.allowUnknownDeadline !== true) return decision(input, false, 'deadline_unknown', 'Deadline proyek belum dicantumkan; tindakan diblokir sampai waktunya dikonfirmasi.');
+  } else if (project.deadlineDays < 1) {
+    return decision(input, false, 'deadline_too_close', 'Deadline proyek sudah lewat atau kurang dari satu hari.');
+  }
   if (input.confidence < policy.minimumConfidence) return decision(input, false, 'confidence_too_low', 'Keyakinan penilaian di bawah batas kebijakan.');
   if (input.proposedPrice < policy.minPrice || input.proposedPrice > policy.maxPrice) {
     return decision(input, false, 'price_out_of_range', 'Harga usulan berada di luar rentang kebijakan.');

@@ -23,6 +23,10 @@ export type FreelancerProfile = {
   displayName: string | null;
   country: string | null;
   profileUrl: string | null;
+  description: string | null;
+  hourlyRate: number | null;
+  currency: string | null;
+  jobs: Array<{ id: number; name: string }>;
 };
 
 export type FreelancerProjectsResult = { projects: ProjectOpportunity[]; skipped: number };
@@ -34,19 +38,43 @@ const API_ROOT = 'https://www.freelancer.com/api';
 const SANDBOX_API_ROOT = 'https://www.freelancer-sandbox.com/api';
 const dayMilliseconds = 24 * 60 * 60 * 1000;
 
-export type FreelancerSandboxWriteInput =
+export type FreelancerWriteInput =
   | { operation: 'submit_bid'; projectId: number; amount: number; period: number; milestonePercentage: number; description: string }
   | { operation: 'edit_profile'; jobIds: number[] }
   | { operation: 'send_message'; threadId: number; message: string };
 
-export type FreelancerSandboxWriteOperation = FreelancerSandboxWriteInput['operation'];
+export type FreelancerWriteOperation = FreelancerWriteInput['operation'];
+export type FreelancerSandboxWriteInput = FreelancerWriteInput;
+export type FreelancerSandboxWriteOperation = FreelancerWriteOperation;
 
-export class FreelancerSandboxWriteError extends Error {
+export class FreelancerWriteError extends Error {
   constructor(public readonly statusCode: number | undefined, message: string) {
     super(message);
+    this.name = 'FreelancerWriteError';
+  }
+}
+
+export class FreelancerSandboxWriteError extends FreelancerWriteError {
+  constructor(statusCode: number | undefined, message: string) {
+    super(statusCode, message);
     this.name = 'FreelancerSandboxWriteError';
   }
 }
+
+export class FreelancerProductionWriteError extends FreelancerWriteError {
+  constructor(statusCode: number | undefined, message: string) {
+    super(statusCode, message);
+    this.name = 'FreelancerProductionWriteError';
+  }
+}
+
+export type FreelancerSandboxWriteResult = {
+  statusCode: number;
+  resultId?: string;
+  resultStatus?: string;
+};
+
+export type FreelancerWriteResult = FreelancerSandboxWriteResult;
 
 export class FreelancerReadError extends Error {
   constructor(public readonly code: string, message: string, public readonly statusCode?: number) {
@@ -124,6 +152,8 @@ function normalizeProject(project: JsonRecord, now: Date): ProjectOpportunity | 
   const budgetMin = number(project.budget_min ?? project.budget_minimum ?? budget.minimum) ?? 0;
   const budgetMax = number(project.budget_max ?? project.budget_maximum ?? budget.maximum ?? budget.minimum) ?? budgetMin;
   const currencyCode = text(currency.code) ?? text(project.currency_code) ?? text(budget.currency_code) ?? 'USD';
+  const rawProjectType = (text(project.type) ?? text(project.project_type) ?? (isRecord(project.type) ? text(project.type.name) : undefined))?.toLowerCase();
+  const projectType = rawProjectType?.includes('hour') ? 'hourly' : rawProjectType?.includes('fixed') ? 'fixed' : 'unknown';
   const description = text(project.description) ?? text(project.full_description) ?? '';
   const skills = skillNames(project);
   const owner = isRecord(project.owner) ? project.owner : isRecord(project.user_details) ? project.user_details : {};
@@ -142,6 +172,7 @@ function normalizeProject(project: JsonRecord, now: Date): ProjectOpportunity | 
     budgetMin: Math.max(0, budgetMin),
     budgetMax: Math.max(0, budgetMax),
     currency: currencyCode,
+    projectType,
     skills,
     deadlineDays: dueDays,
     briefQuality,
@@ -163,9 +194,9 @@ export const freelancerCapabilities: FreelancerCapability[] = [
   { operation: 'read_profile', status: 'unknown', evidence: 'Endpoint baca-saja telah diimplementasikan; akses token dan respons akun ini belum diuji.' },
   { operation: 'read_portfolio', status: 'unknown', evidence: 'Akses portofolio belum diperiksa pada akun dan scope aplikasi ini.' },
   { operation: 'read_messages', status: 'unknown', evidence: 'Akses pesan belum diperiksa pada akun dan scope aplikasi ini.' },
-  { operation: 'submit_bid', status: 'unknown', evidence: 'Uji bid hanya tersedia pada sandbox dengan proyek milik akun sandbox. Izin dan operasi pada akun produksi belum diverifikasi.' },
-  { operation: 'edit_profile', status: 'unknown', evidence: 'Uji edit profil terbatas pada penggantian daftar job di sandbox; field profil lain dan akun produksi belum diverifikasi.' },
-  { operation: 'send_message', status: 'unknown', evidence: 'Uji pesan hanya tersedia pada thread sandbox milik akun sandbox. Izin dan operasi pada akun produksi belum diverifikasi.' },
+  { operation: 'submit_bid', status: 'unknown', evidence: 'Autopilot mengirim bid live yang lolos kebijakan; status hanya didukung setelah Freelancer mengembalikan HTTP 200.' },
+  { operation: 'edit_profile', status: 'unknown', evidence: 'Endpoint penggantian daftar job tersedia; status hanya didukung setelah perubahan akun production menerima HTTP 200.' },
+  { operation: 'send_message', status: 'unknown', evidence: 'Endpoint pengiriman pesan tersedia; status hanya didukung setelah pesan pada thread production menerima HTTP 200.' },
 ];
 
 function failedCheckEvidence(label: string, error?: string): string {
@@ -219,17 +250,30 @@ export class FreelancerReadAdapter {
   }
 
   async readOwnProfile(): Promise<FreelancerProfile> {
-    const response = await this.request(`${API_ROOT}/users/0.1/self/`);
+    const url = new URL(`${API_ROOT}/users/0.1/self/`);
+    url.search = new URLSearchParams({ compact: 'true', details: 'true', profile_description: 'true', jobs: 'true' }).toString();
+    const response = await this.request(url);
     const result = resultRecord(await response.json());
     const userId = identifier(result.id);
     if (!userId) throw new FreelancerReadError('invalid_response', 'Freelancer tidak mengembalikan ID profil akun.');
     const username = text(result.username);
+    const rawJobs = objectValues(result.jobs);
+    const jobs = rawJobs.flatMap((job) => {
+      const id = number(job.id);
+      const name = text(job.name);
+      return id !== undefined && Number.isSafeInteger(id) && id > 0 && name ? [{ id, name }] : [];
+    }).slice(0, 50);
+    const currency = isRecord(result.primary_currency) ? text(result.primary_currency.code) : text(result.primary_currency);
     return {
       id: userId,
       username: username ?? null,
       displayName: text(result.display_name) ?? text(result.public_name) ?? null,
       country: isRecord(result.country) ? text(result.country.name) ?? null : null,
       profileUrl: username ? `https://www.freelancer.com/u/${encodeURIComponent(username)}` : null,
+      description: text(result.profile_description)?.slice(0, 2_000) ?? null,
+      hourlyRate: number(result.hourly_rate) ?? null,
+      currency: currency && /^[A-Z]{3}$/.test(currency) ? currency : null,
+      jobs,
     };
   }
 
@@ -325,27 +369,30 @@ export class FreelancerReadAdapter {
   }
 }
 
-export class FreelancerSandboxWriteAdapter {
+class FreelancerWriteAdapter {
   private readonly fetcher: Fetcher;
 
-  constructor(private readonly options: { token: string; fetcher?: Fetcher; timeoutMs?: number }) {
+  constructor(
+    private readonly options: { token: string; apiRoot: string; userAgent: string; environment: string; fetcher?: Fetcher; timeoutMs?: number },
+    private readonly makeError: (statusCode: number | undefined, message: string) => FreelancerWriteError,
+  ) {
     this.fetcher = options.fetcher ?? fetch;
     if (!options.token || options.token.length < 16 || /[\0\r\n]/.test(options.token)) {
-      throw new FreelancerSandboxWriteError(undefined, 'Token sandbox Freelancer tidak valid.');
+      throw this.makeError(undefined, `Token ${options.environment} Freelancer tidak valid.`);
     }
   }
 
-  async run(input: FreelancerSandboxWriteInput): Promise<{ statusCode: number }> {
+  async run(input: FreelancerWriteInput): Promise<FreelancerWriteResult> {
     switch (input.operation) {
       case 'submit_bid': {
-        const selfResponse = await this.request(`${SANDBOX_API_ROOT}/users/0.1/self/`, { method: 'GET' });
+        const selfResponse = await this.request(`${this.options.apiRoot}/users/0.1/self/`, { method: 'GET' });
         const selfPayload: unknown = await selfResponse.json().catch(() => null);
         const selfResult = isRecord(selfPayload) && isRecord(selfPayload.result) ? selfPayload.result : undefined;
         const bidderId = selfResult ? identifier(selfResult.id) : undefined;
         if (!bidderId || !/^\d+$/.test(bidderId) || !Number.isSafeInteger(Number(bidderId))) {
-          throw new FreelancerSandboxWriteError(undefined, 'ID akun sandbox tidak ditemukan; bid tidak dikirim.');
+          throw this.makeError(undefined, `ID akun ${this.options.environment} tidak ditemukan; bid tidak dikirim.`);
         }
-        const response = await this.request(`${SANDBOX_API_ROOT}/projects/0.1/bids/`, {
+        const response = await this.request(`${this.options.apiRoot}/projects/0.1/bids/`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -357,28 +404,39 @@ export class FreelancerSandboxWriteAdapter {
             description: input.description,
           }),
         });
-        await response.body?.cancel().catch(() => {});
-        return { statusCode: response.status };
+        return this.summarize(response);
       }
       case 'edit_profile': {
-        const response = await this.request(`${SANDBOX_API_ROOT}/users/0.1/self/jobs/`, {
+        const response = await this.request(`${this.options.apiRoot}/users/0.1/self/jobs/`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 'jobs[]': input.jobIds }),
         });
-        await response.body?.cancel().catch(() => {});
-        return { statusCode: response.status };
+        return this.summarize(response);
       }
       case 'send_message': {
-        const response = await this.request(`${SANDBOX_API_ROOT}/messages/0.1/threads/${input.threadId}/messages/`, {
+        const response = await this.request(`${this.options.apiRoot}/messages/0.1/threads/${input.threadId}/messages/`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: new URLSearchParams({ message: input.message }),
         });
-        await response.body?.cancel().catch(() => {});
-        return { statusCode: response.status };
+        return this.summarize(response);
       }
     }
+  }
+
+  private async summarize(response: Response): Promise<FreelancerWriteResult> {
+    const payload: unknown = await response.json().catch(() => null);
+    const result = isRecord(payload) && isRecord(payload.result) ? payload.result : undefined;
+    const resultIdValue = result ? identifier(result.id) : undefined;
+    const resultId = resultIdValue && /^\d{1,30}$/.test(resultIdValue) ? resultIdValue : undefined;
+    const resultStatusValue = isRecord(payload) ? text(payload.status) : undefined;
+    const resultStatus = resultStatusValue?.slice(0, 80);
+    return {
+      statusCode: response.status,
+      ...(resultId ? { resultId } : {}),
+      ...(resultStatus ? { resultStatus } : {}),
+    };
   }
 
   private async request(url: string, init: RequestInit): Promise<Response> {
@@ -390,18 +448,46 @@ export class FreelancerSandboxWriteAdapter {
         headers: {
           'Freelancer-OAuth-V1': this.options.token,
           Accept: 'application/json',
-          'User-Agent': 'freelancer-virtual-house-sandbox-check',
+          'User-Agent': this.options.userAgent,
           ...init.headers,
         },
         signal: AbortSignal.timeout(this.options.timeoutMs ?? 12_000),
       });
     } catch {
-      throw new FreelancerSandboxWriteError(undefined, 'Sandbox Freelancer tidak dapat dijangkau dari server lokal.');
+      throw this.makeError(undefined, `${this.options.environment} Freelancer tidak dapat dijangkau dari server lokal.`);
     }
     if (!response.ok) {
       await response.body?.cancel().catch(() => {});
-      throw new FreelancerSandboxWriteError(response.status, `Sandbox Freelancer mengembalikan HTTP ${response.status}.`);
+      throw this.makeError(response.status, `${this.options.environment} Freelancer mengembalikan HTTP ${response.status}.`);
     }
     return response;
+  }
+}
+
+export class FreelancerProductionWriteAdapter {
+  private readonly adapter: FreelancerWriteAdapter;
+
+  constructor(options: { token: string; fetcher?: Fetcher; timeoutMs?: number }) {
+    this.adapter = new FreelancerWriteAdapter({
+      ...options, apiRoot: API_ROOT, environment: 'production', userAgent: 'freelancer-virtual-house-live-write',
+    }, (statusCode, message) => new FreelancerProductionWriteError(statusCode, message));
+  }
+
+  run(input: FreelancerWriteInput): Promise<FreelancerWriteResult> {
+    return this.adapter.run(input);
+  }
+}
+
+export class FreelancerSandboxWriteAdapter {
+  private readonly adapter: FreelancerWriteAdapter;
+
+  constructor(options: { token: string; fetcher?: Fetcher; timeoutMs?: number }) {
+    this.adapter = new FreelancerWriteAdapter({
+      ...options, apiRoot: SANDBOX_API_ROOT, environment: 'sandbox', userAgent: 'freelancer-virtual-house-sandbox-check',
+    }, (statusCode, message) => new FreelancerSandboxWriteError(statusCode, message));
+  }
+
+  run(input: FreelancerSandboxWriteInput): Promise<FreelancerSandboxWriteResult> {
+    return this.adapter.run(input);
   }
 }

@@ -8,6 +8,7 @@ export type ProjectOpportunity = {
   budgetMin: number;
   budgetMax: number;
   currency: string;
+  projectType?: 'fixed' | 'hourly' | 'unknown';
   skills: string[];
   deadlineDays: number | null;
   briefQuality: number;
@@ -48,6 +49,7 @@ export type AutonomyPolicy = {
   activeHours: { start: number; end: number };
   noNegotiationTerms: string[];
   simulationOnly: boolean;
+  allowUnknownDeadline?: boolean;
 };
 
 export type BidDraft = {
