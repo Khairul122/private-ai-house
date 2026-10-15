@@ -1,4 +1,4 @@
-import { bidOutcome, type CapabilityStatus, type ProjectOpportunity } from '@fvh/domain';
+import { type CapabilityStatus, type ProjectOpportunity } from '@fvh/domain';
 
 export type FreelancerCapability = {
   operation: 'read_projects' | 'read_profile' | 'read_portfolio' | 'read_messages' | 'submit_bid' | 'edit_profile' | 'send_message';
@@ -32,7 +32,7 @@ export type FreelancerProfile = {
 
 export type FreelancerProjectsResult = { projects: ProjectOpportunity[]; skipped: number };
 export type FreelancerBidStatus = { bidId: string; projectId: string; awardStatus: string | null; retracted: boolean };
-export type FreelancerLatestMessage = { threadId: number; messageId: number; senderId: string; message: string; createdAt: string };
+export type FreelancerLatestMessage = { threadId: number; projectId: string | null; messageId: number; senderId: string; message: string; createdAt: string };
 
 type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 type JsonRecord = Record<string, unknown>;
@@ -299,6 +299,7 @@ export class FreelancerReadAdapter {
     const url = new URL(`${API_ROOT}/projects/0.1/bids/`);
     const params = new URLSearchParams();
     for (const id of bidIds) params.append('bids[]', id);
+    params.set('limit', String(Math.max(bidIds.length, 1)));
     url.search = params.toString();
     const result = resultRecord(await (await this.request(url)).json());
     const rawBids = result.bids;
@@ -306,12 +307,12 @@ export class FreelancerReadAdapter {
       throw new FreelancerReadError('invalid_response', 'Respons bid Freelancer tidak memiliki daftar yang valid.');
     }
     return objectValues(rawBids).flatMap((bid): FreelancerBidStatus[] => {
-      const id = text(bid.id);
-      const projectId = text(bid.project_id);
+      const id = identifier(bid.id);
+      const projectId = identifier(bid.project_id);
       const awardStatus = text(bid.award_status) ?? null;
       const retracted = bid.retracted === true;
       if (!id || !projectId) return [];
-      return [{ id, bidId: id, projectId, awardStatus, retracted, outcome: bidOutcome(awardStatus, retracted) }];
+      return [{ bidId: id, projectId, awardStatus, retracted }];
     });
   }
 
@@ -382,6 +383,8 @@ export class FreelancerReadAdapter {
     for (const thread of objectValues(rawThreads).slice(0, threadLimit)) {
       const threadId = number(thread.id);
       if (threadId === undefined || !Number.isSafeInteger(threadId) || threadId < 1) continue;
+      const context = isRecord(thread.context) ? thread.context : {};
+      const projectId = context.type === 'project' ? identifier(context.id) ?? null : null;
       const messagesUrl = new URL(`${API_ROOT}/messages/0.1/messages/`);
       messagesUrl.search = new URLSearchParams({ 'threads[]': String(threadId), limit: '1', offset: '0' }).toString();
       const result = resultRecord(await (await this.request(messagesUrl)).json());
@@ -398,7 +401,7 @@ export class FreelancerReadAdapter {
         ? new Date(createdEpoch > 1_000_000_000_000 ? createdEpoch : createdEpoch * 1_000).toISOString()
         : text(latest.created_at) ?? '';
       if (messageId === undefined || !Number.isSafeInteger(messageId) || messageId < 1 || !senderId || !content || !createdAt || !Number.isFinite(Date.parse(createdAt))) continue;
-      messages.push({ threadId, messageId, senderId, message: content.slice(0, 4_000), createdAt });
+      messages.push({ threadId, projectId, messageId, senderId, message: content.slice(0, 4_000), createdAt });
     }
     return messages;
   }

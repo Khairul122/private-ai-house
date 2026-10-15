@@ -191,11 +191,11 @@ function OverviewPage() {
     {insights.isError && <ErrorNotice message="Hasil bid belum dapat dimuat." onRetry={() => insights.refetch()} />}
     {insights.data && <section className="form-card" aria-labelledby="bid-results-title">
       <div className="section-heading"><div><p className="eyebrow">Operasi bisnis</p><h2 id="bid-results-title">Hasil bid</h2></div></div>
-      <div className="autopilot-metrics"><span>Terkirim: {insights.data.outcomes.submitted}</span><span>Menang: {insights.data.outcomes.won}</span><span>Kalah: {insights.data.outcomes.lost}</span><span>Menunggu: {insights.data.outcomes.pending}</span><span>Tingkat kemenangan: {Math.round(insights.data.outcomes.winRate * 100)}%</span></div>
-      <p className="form-help">Pemeriksaan terakhir: {insights.data.lastCheck ? formatDate(insights.data.lastCheck) : 'Belum pernah diperiksa'}</p>
-      <h3>Alasan skip (maks. 5)</h3>
-      {insights.data.skips.reasons.slice(0, 5).map(({ reason, total }) => <p key={reason} className="form-help">{reason}: {total}</p>)}
-      {!insights.data.skips.reasons.length && <p className="form-help">Tidak ada alasan skip tercatat.</p>}
+      <div className="metrics-row"><Metric label="Terkirim" value={insights.data.outcomes.submitted} /><Metric label="Menang" value={insights.data.outcomes.won} /><Metric label="Kalah" value={insights.data.outcomes.lost} /><Metric label="Menunggu" value={insights.data.outcomes.pending} /><Metric label="Tingkat kemenangan" value={insights.data.outcomes.winRate === null ? '–' : `${Math.round(insights.data.outcomes.winRate * 100)}%`} /></div>
+      <p className="form-help">{insights.data.lastCheck.ok === false ? `Pengecekan gagal: ${insights.data.lastCheck.error ?? 'Tidak diketahui'}` : insights.data.lastCheck.at ? `Terakhir dicek: ${formatDate(insights.data.lastCheck.at)}` : 'Belum pernah dicek'}</p>
+      <h3>Kenapa peluang dilewati</h3>
+      {insights.data.skips.reasons.slice(0, 5).map(({ reason, total, recent }) => <p key={reason} className="form-help">{reason}: {total} / 7 hari: {recent}</p>)}
+      {!insights.data.skips.reasons.length && <p className="form-help">Belum ada peluang yang dilewati.</p>}
     </section>}
     {pipeline.data && (
       <div className="pipeline-overview-bar" aria-label="Ringkasan status pipeline">
@@ -310,7 +310,8 @@ function AgentsPage() {
   if (dashboard.isPending || profile.isPending || capabilities.isPending) return <LoadingPanel label="Menyiapkan data karyawan virtual..." />;
   if (dashboard.isError || profile.isError || capabilities.isError) return <ErrorNotice message="Gagal memuat status karyawan virtual." />;
 
-  const derived = deriveOfficeAgents(autopilot.isError ? undefined : autopilot.data, dashboard.data.activity);
+  const sync = useQuery({ queryKey: ['business-sync', 'agents'], queryFn: () => api<BusinessSyncStatus | null>('/business-sync'), refetchInterval: 30_000 });
+  const derived = deriveOfficeAgents(autopilot.isError ? undefined : autopilot.data, dashboard.data.activity, sync.isError ? undefined : sync.data);
   const agents = [
     {
       id: 'chief-of-staff',

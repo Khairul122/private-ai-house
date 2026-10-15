@@ -28,12 +28,20 @@ export type BidOutcome = {
 };
 
 export type SkipReasonSummary = { reason: string; total: number; recent: number };
-
-export type BidOutcomeSummary = {
-  total: number;
-  byOutcome: Record<string, number>;
-  byReason: Record<string, number>;
+export type ClientThread = { threadId: string; projectId: string | null; lastSenderId: string; lastMessageAt: string; preview: string; syncedAt: string };
+export type ClientProjectSource = 'freelancer' | 'direct' | 'linkedin' | 'other';
+export type ClientProjectStatus = 'active' | 'delivered' | 'closed';
+export type ClientProject = {
+  id: string; title: string; client: string; source: ClientProjectSource; externalProjectId: string | null;
+  status: ClientProjectStatus; deadline: string | null; value: number | null; currency: string; createdAt: string;
 };
+export type Payment = {
+  id: string; projectId: string; amount: number; currency: string; status: 'expected' | 'received';
+  dueDate: string | null; receivedAt: string | null; note: string; createdAt: string;
+};
+
+const CLIENT_PROJECT_COLUMNS = 'id, title, client, source, external_project_id AS externalProjectId, status, deadline, value, currency, created_at AS createdAt';
+const PAYMENT_COLUMNS = 'id, project_id AS projectId, amount, currency, status, due_date AS dueDate, received_at AS receivedAt, note, created_at AS createdAt';
 
 export type StoredKnowledgeSource = {
   id: string;
@@ -245,7 +253,7 @@ export class WorkspaceRepository {
 
   backfillBidOutcomes(): number {
     const rows = this.sqlite.prepare(`SELECT resource_id AS projectId, reason, created_at AS createdAt FROM audit_events
-      WHERE type = 'submit_bid' AND status = 'recorded' AND reason GLOB '*ID hasil: *' ORDER BY created_at ASC`).all() as Array<{ projectId: string; reason: string; createdAt: string }>;
+      WHERE type = 'marketplace.production.submit_bid' AND status = 'recorded' AND reason GLOB '*ID hasil: *' ORDER BY created_at ASC`).all() as Array<{ projectId: string; reason: string; createdAt: string }>;
     const insert = /ID hasil: (\d+)/;
     for (const row of rows) {
       const bidId = row.reason.match(insert)?.[1];
@@ -254,19 +262,65 @@ export class WorkspaceRepository {
     return rows.length;
   }
 
+  upsertClientThreads(rows: ClientThread[]) {
+    const statement = this.sqlite.prepare(`INSERT INTO client_threads (thread_id, project_id, last_sender_id, last_message_at, preview, synced_at)
+      VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(thread_id) DO UPDATE SET project_id = excluded.project_id, last_sender_id = excluded.last_sender_id,
+      last_message_at = excluded.last_message_at, preview = excluded.preview, synced_at = excluded.synced_at`);
+    const upsert = this.sqlite.transaction((items: ClientThread[]) => {
+      for (const row of items) statement.run(row.threadId, row.projectId, row.lastSenderId, row.lastMessageAt, row.preview, row.syncedAt);
+    });
+    upsert(rows);
+  }
+
+  listClientThreads(): ClientThread[] {
+    return this.sqlite.prepare(`SELECT thread_id AS threadId, project_id AS projectId, last_sender_id AS lastSenderId, last_message_at AS lastMessageAt,
+      preview, synced_at AS syncedAt FROM client_threads ORDER BY last_message_at DESC`).all() as ClientThread[];
+  }
+
+  listClientProjects(): ClientProject[] {
+    return this.sqlite.prepare(`SELECT ${CLIENT_PROJECT_COLUMNS} FROM client_projects ORDER BY created_at DESC`).all() as ClientProject[];
+  }
+
+  getClientProject(id: string): ClientProject | undefined {
+    return this.sqlite.prepare(`SELECT ${CLIENT_PROJECT_COLUMNS} FROM client_projects WHERE id = ?`).get(id) as ClientProject | undefined;
+  }
+
+  /** Returns the new project, or undefined when a project for the same external id already exists. */
+  createClientProject(input: Omit<ClientProject, 'id' | 'createdAt'>): ClientProject | undefined {
+    const id = randomUUID();
+    const result = this.sqlite.prepare(`INSERT OR IGNORE INTO client_projects (id, title, client, source, external_project_id, status, deadline, value, currency, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, input.title, input.client, input.source, input.externalProjectId, input.status, input.deadline, input.value, input.currency, new Date().toISOString());
+    return result.changes ? this.getClientProject(id) : undefined;
+  }
+
+  updateClientProject(id: string, patch: Partial<Pick<ClientProject, 'status' | 'deadline' | 'value'>>): ClientProject | undefined {
+    const current = this.getClientProject(id);
+    if (!current) return undefined;
+    const next = { ...current, ...patch };
+    this.sqlite.prepare('UPDATE client_projects SET status = ?, deadline = ?, value = ? WHERE id = ?').run(next.status, next.deadline, next.value, id);
+    return this.getClientProject(id);
+  }
+
+  listPayments(): Payment[] {
+    return this.sqlite.prepare(`SELECT ${PAYMENT_COLUMNS} FROM payments ORDER BY created_at DESC`).all() as Payment[];
+  }
+
+  createPayment(input: Omit<Payment, 'id' | 'createdAt'>): Payment {
+    const id = randomUUID();
+    this.sqlite.prepare(`INSERT INTO payments (id, project_id, amount, currency, status, due_date, received_at, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, input.projectId, input.amount, input.currency, input.status, input.dueDate, input.receivedAt, input.note, new Date().toISOString());
+    return this.sqlite.prepare(`SELECT ${PAYMENT_COLUMNS} FROM payments WHERE id = ?`).get(id) as Payment;
+  }
+
+  markPaymentReceived(id: string, receivedAt: string): Payment | undefined {
+    const result = this.sqlite.prepare("UPDATE payments SET status = 'received', received_at = ? WHERE id = ?").run(receivedAt, id);
+    return result.changes ? this.sqlite.prepare(`SELECT ${PAYMENT_COLUMNS} FROM payments WHERE id = ?`).get(id) as Payment : undefined;
+  }
+
   skipReasonSummary(sinceIso: string): SkipReasonSummary[] {
     return this.sqlite.prepare(`SELECT reason, COUNT(*) AS total,
       SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS recent
       FROM audit_events WHERE type = 'autopilot.bid_skipped' GROUP BY reason ORDER BY total DESC`).all(sinceIso) as SkipReasonSummary[];
-  }
-
-  bidOutcomeSummary(): BidOutcomeSummary {
-    const summary: BidOutcomeSummary = { total: 0, byOutcome: {}, byReason: {} };
-    for (const row of this.listBidOutcomes()) {
-      summary.total += 1;
-      summary.byOutcome[row.outcome] = (summary.byOutcome[row.outcome] ?? 0) + 1;
-    }
-    return summary;
   }
 
   hasAudit(type: string, resourceId: string): boolean {

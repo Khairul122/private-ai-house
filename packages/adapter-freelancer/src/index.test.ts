@@ -29,22 +29,40 @@ describe('FreelancerReadAdapter', () => {
     const fetcher = vi.fn(async (input: string | URL | Request) => {
       requests.push(input);
       return jsonResponse({ result: { bids: {
-        '11': { id: '11', project_id: '77', award_status: 'awarded', retracted: false },
-        '12': { id: '12', project_id: '78', award_status: 'rejected', retracted: false },
-        '13': { id: '13', project_id: '79', award_status: null, retracted: true },
+        '11': { id: 11, project_id: 77, award_status: 'awarded', retracted: false },
+        '12': { id: 12, project_id: 78, award_status: 'rejected', retracted: false },
+        '13': { id: 13, project_id: 79, award_status: null, retracted: true },
       } } });
     });
     const adapter = new FreelancerReadAdapter({ token: 'test-token-value-1234', fetcher });
 
     await expect(adapter.readOwnBids(['11', '12', '13'])).resolves.toEqual([
-      { id: '11', bidId: '11', projectId: '77', awardStatus: 'awarded', retracted: false, outcome: 'won' },
-      { id: '12', bidId: '12', projectId: '78', awardStatus: 'rejected', retracted: false, outcome: 'lost' },
-      { id: '13', bidId: '13', projectId: '79', awardStatus: null, retracted: true, outcome: 'lost' },
+      { bidId: '11', projectId: '77', awardStatus: 'awarded', retracted: false },
+      { bidId: '12', projectId: '78', awardStatus: 'rejected', retracted: false },
+      { bidId: '13', projectId: '79', awardStatus: null, retracted: true },
     ]);
     expect(new URL(String(requests[0])).searchParams.getAll('bids[]')).toEqual(['11', '12', '13']);
     await expect(adapter.readOwnBids(['0'.repeat(31)])).rejects.toMatchObject({ code: 'invalid_query' });
     await expect(adapter.readOwnBids(Array.from({ length: 101 }, (_, index) => String(index + 1)))).rejects.toMatchObject({ code: 'invalid_query' });
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads the latest message of each thread with its project context', async () => {
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('/threads/')) return jsonResponse({ result: { threads: [
+        { id: 501, context: { type: 'project', id: 77 } },
+        { id: 502, context: { type: 'contest', id: 9 } },
+      ] } });
+      const threadId = url.searchParams.get('threads[]');
+      return jsonResponse({ result: { messages: [{ id: Number(threadId) * 10, from_user: { id: 42 }, message: `Halo ${threadId}`, time_created: 1_760_000_000 }] } });
+    });
+    const adapter = new FreelancerReadAdapter({ token: 'test-token-value-1234', fetcher });
+
+    await expect(adapter.readLatestThreadMessages('7', 5)).resolves.toEqual([
+      { threadId: 501, projectId: '77', messageId: 5010, senderId: '42', message: 'Halo 501', createdAt: new Date(1_760_000_000_000).toISOString() },
+      { threadId: 502, projectId: null, messageId: 5020, senderId: '42', message: 'Halo 502', createdAt: new Date(1_760_000_000_000).toISOString() },
+    ]);
   });
 
   it('searches active projects and imports only rows that contain project identifiers and titles', async () => {

@@ -13,7 +13,7 @@ describe('BusinessSync', () => {
     repository.recordSubmittedBid({ projectId: 'freelancer:71', bidId: '9001', amount: 150, currency: 'USD', submittedAt: '2026-10-16T10:00:00.000Z' });
     const sync = new BusinessSync({ repository, readOwnBids: async (bidIds) => {
       expect(bidIds).toEqual(['9001']);
-      return [{ id: '9001', bidId: '9001', projectId: '71', awardStatus: 'awarded', retracted: false, outcome: 'won' }];
+      return [{ bidId: '9001', projectId: '71', awardStatus: 'awarded', retracted: false }];
     } });
 
     await sync.syncOutcomes();
