@@ -5,6 +5,7 @@ export type ProjectOpportunity = {
   title: string;
   description: string;
   clientName: string;
+  clientCountry?: string | null;
   budgetMin: number;
   budgetMax: number;
   currency: string;

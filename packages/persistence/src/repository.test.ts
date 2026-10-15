@@ -15,6 +15,18 @@ describe('WorkspaceRepository', () => {
     expect(repository.getProfile().facts).toEqual([]);
   });
 
+  it('claims a live operation once across concurrent workers', () => {
+    repository = new WorkspaceRepository();
+    const claim = {
+      type: 'marketplace.production.submit_bid', resourceId: 'freelancer:71', policyVersion: 1,
+      payloadHash: 'a'.repeat(64), reason: 'Operation in progress.',
+    };
+
+    expect(repository.claimAudit(claim)).toBe(true);
+    expect(repository.claimAudit(claim)).toBe(false);
+    expect(repository.listAudit(5)).toHaveLength(1);
+  });
+
   it('removes legacy fixture opportunities when an existing workspace opens', () => {
     const database = createDatabase();
     repository = new WorkspaceRepository(database);

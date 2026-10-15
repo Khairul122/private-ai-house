@@ -7,7 +7,7 @@ import { FreelancerAutopilot } from './autopilot.js';
 const now = new Date('2026-10-15T11:00:00.000Z');
 const profile: FreelancerProfile = {
   id: '42', username: 'sample-user', displayName: 'Sample User', country: 'Indonesia', profileUrl: 'https://www.freelancer.com/u/sample-user',
-  description: 'Python developer for APIs', hourlyRate: 18, currency: 'USD', jobs: [{ id: 15, name: 'Python' }],
+  description: 'Python developer for APIs', hourlyRate: 18, currency: 'USD', jobs: [{ id: 15, name: 'Python' }], jobIds: [15],
 };
 const project: ProjectOpportunity = {
   id: 'freelancer:71', title: 'Python API implementation', description: 'Build and document a Python REST API with clear acceptance criteria and integration checks.',
@@ -29,12 +29,14 @@ describe('FreelancerAutopilot', () => {
   it('bootstraps from public profile data and submits an eligible fixed price bid once', async () => {
     repository = new WorkspaceRepository();
     const submitBid = vi.fn(async () => ({ statusCode: 200, resultId: '9001' }));
+    const syncProfileJobs = vi.fn(async () => ({ statusCode: 200 }));
     autopilot = new FreelancerAutopilot({
       repository,
       now: () => now,
       intervalMs: 60_000,
       readProfile: async () => profile,
       readProjects: async () => ({ projects: [project], skipped: 0 }),
+      syncProfileJobs,
       submitBid,
     });
 
@@ -44,6 +46,8 @@ describe('FreelancerAutopilot', () => {
 
     expect(repository.getPolicy()).toMatchObject({ state: 'active', simulationOnly: false, allowedActions: ['bid.submit'], specializations: ['Python'] });
     expect(submitBid).toHaveBeenCalledTimes(1);
+    expect(syncProfileJobs).toHaveBeenCalledExactlyOnceWith([15]);
+    expect(repository.hasAudit('marketplace.production.edit_profile', 'freelancer-profile-sync')).toBe(true);
     expect(submitBid).toHaveBeenCalledWith(expect.objectContaining({ projectId: 71, amount: 100, period: 14 }));
     expect(repository.listProjects().find((item) => item.id === project.id)?.pipelineStatus).toBe('submitted');
     expect(autopilot.getStatus()).toMatchObject({ state: 'running', lastSubmitted: 0 });

@@ -7,6 +7,7 @@ import { createDatabase, WorkspaceRepository } from '@fvh/persistence';
 import { deleteLinkedInAccessToken, getFreelancerAccessToken, getLinkedInClientCredentials, readCredentialStatus, storeLinkedInAccessToken } from './credential-store.js';
 import { LinkedInOAuthService } from './linkedin-oauth.js';
 import { readLinkedInEnvironment } from './linkedin-env.js';
+import { readGitHubEnvironment } from './github-env.js';
 import { readFreelancerEnvironment } from './freelancer-env.js';
 import { readDraftingEnvironment } from './ai-env.js';
 import { createApp } from './app.js';
@@ -60,6 +61,7 @@ const autopilot = new FreelancerAutopilot({
   repository,
   readProfile: async () => (await createFreelancerReader()).readOwnProfile(),
   readProjects: async (query, limit) => (await createFreelancerReader()).searchActiveProjects(query, limit),
+  syncProfileJobs: async (jobIds) => new FreelancerProductionWriteAdapter({ token: await getFreelancerToken() }).run({ operation: 'edit_profile', jobIds }),
   submitBid: async (input) => new FreelancerProductionWriteAdapter({ token: await getFreelancerToken() }).run(input),
 });
 const draftingConfig = readDraftingEnvironment(projectRoot);
@@ -80,6 +82,7 @@ const webBuild = resolve(projectRoot, 'apps/web/dist');
 const hasWebBuild = existsSync(webBuild);
 const app = createApp({
   repository,
+  getGitHubToken: () => readGitHubEnvironment(projectRoot).token ?? undefined,
   getCredentialStatus: () => {
     const stored = readCredentialStatus(credentialStorePath);
     const environment = readLinkedInEnvironment(projectRoot);

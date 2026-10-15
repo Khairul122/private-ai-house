@@ -27,9 +27,11 @@ export type FreelancerProfile = {
   hourlyRate: number | null;
   currency: string | null;
   jobs: Array<{ id: number; name: string }>;
+  jobIds: number[];
 };
 
 export type FreelancerProjectsResult = { projects: ProjectOpportunity[]; skipped: number };
+export type FreelancerLatestMessage = { threadId: number; messageId: number; senderId: string; message: string; createdAt: string };
 
 type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 type JsonRecord = Record<string, unknown>;
@@ -158,6 +160,12 @@ function normalizeProject(project: JsonRecord, now: Date): ProjectOpportunity | 
   const skills = skillNames(project);
   const owner = isRecord(project.owner) ? project.owner : isRecord(project.user_details) ? project.user_details : {};
   const clientName = text(owner.display_name) ?? text(owner.username) ?? text(owner.public_name) ?? 'Klien Freelancer';
+  const ownerCountryDetails = isRecord(owner.country) ? owner.country : {};
+  const ownerCountry = text(ownerCountryDetails.name) ?? text(ownerCountryDetails.code) ?? text(ownerCountryDetails.iso_code) ?? text(owner.country);
+  const ownerLocation = isRecord(owner.location) ? owner.location : {};
+  const locationCountryDetails = isRecord(ownerLocation.country) ? ownerLocation.country : {};
+  const locationCountry = text(locationCountryDetails.name) ?? text(locationCountryDetails.code) ?? text(locationCountryDetails.iso_code) ?? text(ownerLocation.country);
+  const clientCountry = ownerCountry ?? text(owner.country_name) ?? text(owner.country_code) ?? locationCountry ?? text(ownerLocation.country_code) ?? null;
   const dueDays = deadlineDays(project, now);
   const budgetAvailable = budgetMin > 0 || budgetMax > 0;
   const briefQuality = Math.min(1, 0.25 + Math.min(description.length / 1_200, 0.55) + Math.min(skills.length / 10, 0.2));
@@ -169,6 +177,7 @@ function normalizeProject(project: JsonRecord, now: Date): ProjectOpportunity | 
     title,
     description,
     clientName,
+    clientCountry,
     budgetMin: Math.max(0, budgetMin),
     budgetMax: Math.max(0, budgetMax),
     currency: currencyCode,
@@ -258,6 +267,10 @@ export class FreelancerReadAdapter {
     if (!userId) throw new FreelancerReadError('invalid_response', 'Freelancer tidak mengembalikan ID profil akun.');
     const username = text(result.username);
     const rawJobs = objectValues(result.jobs);
+    const jobIds = [...new Set(rawJobs.flatMap((job) => {
+      const id = number(job.id);
+      return id !== undefined && Number.isSafeInteger(id) && id > 0 ? [id] : [];
+    }))].slice(0, 50);
     const jobs = rawJobs.flatMap((job) => {
       const id = number(job.id);
       const name = text(job.name);
@@ -274,6 +287,7 @@ export class FreelancerReadAdapter {
       hourlyRate: number(result.hourly_rate) ?? null,
       currency: currency && /^[A-Z]{3}$/.test(currency) ? currency : null,
       jobs,
+      jobIds,
     };
   }
 
@@ -326,6 +340,43 @@ export class FreelancerReadAdapter {
     if (!Array.isArray(messageResult.messages) && !isRecord(messageResult.messages)) {
       throw new FreelancerReadError('messages_invalid_response', 'Respons pesan Freelancer tidak memiliki daftar pesan yang valid.');
     }
+  }
+
+  async readLatestThreadMessages(userId: string, threadLimit = 20): Promise<FreelancerLatestMessage[]> {
+    if (!/^\d{1,30}$/.test(userId) || !Number.isSafeInteger(threadLimit) || threadLimit < 1 || threadLimit > 50) {
+      throw new FreelancerReadError('invalid_query', 'ID akun atau batas thread tidak valid.');
+    }
+    const threadsUrl = new URL(`${API_ROOT}/messages/0.1/threads/`);
+    threadsUrl.search = new URLSearchParams({ 'members[]': userId, limit: String(threadLimit), offset: '0' }).toString();
+    const threadsResult = resultRecord(await (await this.request(threadsUrl)).json());
+    const rawThreads = threadsResult.threads;
+    if (!Array.isArray(rawThreads) && !isRecord(rawThreads)) {
+      throw new FreelancerReadError('threads_invalid_response', 'Respons daftar thread Freelancer tidak memiliki daftar yang valid.');
+    }
+
+    const messages: FreelancerLatestMessage[] = [];
+    for (const thread of objectValues(rawThreads).slice(0, threadLimit)) {
+      const threadId = number(thread.id);
+      if (threadId === undefined || !Number.isSafeInteger(threadId) || threadId < 1) continue;
+      const messagesUrl = new URL(`${API_ROOT}/messages/0.1/messages/`);
+      messagesUrl.search = new URLSearchParams({ 'threads[]': String(threadId), limit: '1', offset: '0' }).toString();
+      const result = resultRecord(await (await this.request(messagesUrl)).json());
+      const rawMessages = result.messages;
+      if (!Array.isArray(rawMessages) && !isRecord(rawMessages)) continue;
+      const latest = objectValues(rawMessages)[0];
+      if (!latest) continue;
+      const messageId = number(latest.id);
+      const sender = isRecord(latest.from_user) ? latest.from_user : {};
+      const senderId = identifier(sender.id ?? latest.from_user_id);
+      const content = text(latest.message);
+      const createdEpoch = number(latest.time_created);
+      const createdAt = createdEpoch !== undefined
+        ? new Date(createdEpoch > 1_000_000_000_000 ? createdEpoch : createdEpoch * 1_000).toISOString()
+        : text(latest.created_at) ?? '';
+      if (messageId === undefined || !Number.isSafeInteger(messageId) || messageId < 1 || !senderId || !content || !createdAt || !Number.isFinite(Date.parse(createdAt))) continue;
+      messages.push({ threadId, messageId, senderId, message: content.slice(0, 4_000), createdAt });
+    }
+    return messages;
   }
 
   async searchActiveProjects(query: string, limit = 25): Promise<FreelancerProjectsResult> {

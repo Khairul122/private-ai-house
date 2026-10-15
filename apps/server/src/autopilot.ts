@@ -8,6 +8,7 @@ type AutopilotDependencies = {
   repository: WorkspaceRepository;
   readProfile: () => Promise<FreelancerProfile>;
   readProjects: (query: string, limit: number) => Promise<{ projects: ProjectOpportunity[]; skipped: number }>;
+  syncProfileJobs?: (jobIds: number[]) => Promise<FreelancerWriteResult>;
   submitBid: (input: { operation: 'submit_bid'; projectId: number; amount: number; period: number; milestonePercentage: number; description: string }) => Promise<FreelancerWriteResult>;
   now?: () => Date;
   intervalMs?: number;
@@ -78,14 +79,26 @@ function mondayKey(value: string): string {
 }
 
 function proposalFor(project: ProjectOpportunity, specialties: string[], price: number, durationDays: number): string {
+  const country = project.clientCountry?.trim().toLocaleLowerCase() ?? '';
+  const isIndonesianClient = country === 'id' || country === 'idn' || country.includes('indonesia');
   const matched = project.skills.filter((skill) => specialties.some((specialty) => specialty.toLocaleLowerCase() === skill.toLocaleLowerCase()));
   const scope = project.description.replace(/\s+/g, ' ').trim().slice(0, 420);
-  const greeting = project.clientName && project.clientName !== 'Klien Freelancer' ? `Halo ${project.clientName},` : 'Halo,';
+  const clientName = project.clientName && project.clientName !== 'Klien Freelancer' ? project.clientName : undefined;
+
+  if (isIndonesianClient) {
+    return [
+      clientName ? `Halo ${clientName},` : 'Halo,',
+      `Saya tertarik mengerjakan “${project.title}”.${matched.length ? ` Keahlian profil saya yang relevan: ${matched.join(', ')}.` : ''}`,
+      scope ? `Dari brief, saya memahami ruang lingkupnya sebagai berikut: ${scope}` : 'Saya akan mengikuti ruang lingkup yang tercantum dan mengonfirmasi kriteria hasil sebelum mulai.',
+      `Penawaran saya ${project.currency} ${price} dengan estimasi ${durationDays} hari. Jika ada tenggat khusus, saya akan mengonfirmasi jadwal, akses yang diperlukan, dan kriteria penerimaan sebelum pekerjaan dimulai.`,
+    ].join('\n\n').slice(0, 4_000);
+  }
+
   return [
-    greeting,
-    `Saya tertarik mengerjakan “${project.title}”.${matched.length ? ` Keahlian profil saya yang cocok dengan brief ini: ${matched.join(', ')}.` : ''}`,
-    scope ? `Dari brief, saya memahami ruang lingkupnya sebagai berikut: ${scope}` : 'Saya akan bekerja sesuai ruang lingkup yang tercantum pada proyek dan mengonfirmasi kriteria hasil sebelum mulai.',
-    `Penawaran saya ${project.currency} ${price} dengan estimasi ${durationDays} hari. Jika klien memiliki tenggat khusus, saya akan memastikannya sebelum pekerjaan dimulai, bersama akses dan kriteria penerimaan.`,
+    clientName ? `Hello ${clientName},` : 'Hello,',
+    `I would be glad to work on “${project.title}”.${matched.length ? ` Relevant skills from my profile include ${matched.join(', ')}.` : ''}`,
+    scope ? `Based on your brief, I understand the scope to be: ${scope}` : 'I will follow the scope in your brief and confirm the acceptance criteria before starting.',
+    `My bid is ${project.currency} ${price}, with an estimated delivery time of ${durationDays} days. If you have a specific deadline, I will confirm the schedule, required access, and acceptance criteria before work begins.`,
   ].join('\n\n').slice(0, 4_000);
 }
 
@@ -132,6 +145,33 @@ export class FreelancerAutopilot {
     if (this.timer) return;
     try {
       const remote = await this.dependencies.readProfile();
+      if (remote.jobIds.length > 0 && this.dependencies.syncProfileJobs && !this.dependencies.repository.hasAudit('marketplace.production.edit_profile', 'freelancer-profile-sync')) {
+        try {
+          const current = await this.dependencies.readProfile();
+          const sameJobs = current.jobIds.length === remote.jobIds.length && current.jobIds.every((id, index) => id === remote.jobIds[index]);
+          const claim = sameJobs && this.dependencies.repository.claimAudit({
+            type: 'marketplace.production.edit_profile', resourceId: 'freelancer-profile-sync',
+            policyVersion: this.dependencies.repository.getPolicy().version, payloadHash: hashPayload(remote.jobIds),
+            reason: 'Sinkronisasi idempotent daftar job profil sedang berlangsung.',
+          });
+          if (claim) {
+            const result = await this.dependencies.syncProfileJobs([...remote.jobIds]);
+            const success = result.statusCode === 200;
+            this.dependencies.repository.appendAudit({
+              type: 'marketplace.production.edit_profile', resourceId: 'freelancer-profile-sync', status: success ? 'recorded' : 'failed',
+              reason: `Sinkronisasi idempotent daftar job profil menghasilkan HTTP ${result.statusCode}; daftar yang sama dengan profil saat dibaca dikirim ulang.${result.resultId ? ` ID hasil: ${result.resultId}.` : ''}`,
+              policyVersion: this.dependencies.repository.getPolicy().version, payloadHash: hashPayload(remote.jobIds),
+            });
+          }
+        } catch (error) {
+          const statusCode = typeof error === 'object' && error !== null && 'statusCode' in error && typeof error.statusCode === 'number' ? error.statusCode : null;
+          this.dependencies.repository.appendAudit({
+            type: 'marketplace.production.edit_profile', resourceId: 'freelancer-profile-sync', status: 'failed',
+            reason: statusCode === null ? 'Sinkronisasi idempotent profil tidak menerima hasil yang dapat dipastikan.' : `Sinkronisasi idempotent profil menghasilkan HTTP ${statusCode}.`,
+            policyVersion: this.dependencies.repository.getPolicy().version, payloadHash: hashPayload(remote.jobIds),
+          });
+        }
+      }
       const jobs = matchedProfileJobs(remote);
       if (!jobs.length) {
         this.status = { ...this.status, state: 'blocked', lastRunAt: this.now().toISOString(), lastMessage: 'Profil Freelancer belum memiliki keahlian yang tercantum pada ringkasan publik; bid otomatis tetap berhenti.', specializations: [] };
@@ -225,6 +265,12 @@ export class FreelancerAutopilot {
         }
         if (repository.getPolicy().state !== 'active' || repository.getPolicy().simulationOnly) break;
         const proposal = proposalFor(project, activePolicy.specializations, bid.amount, bid.period);
+        const payloadHash = hashPayload({ projectId: project.id, amount: bid.amount, period: bid.period, description: proposal });
+        const claimed = repository.claimAudit({
+          type: 'marketplace.production.submit_bid', resourceId: project.id, policyVersion: activePolicy.version,
+          payloadHash, reason: 'Bid live sedang dikirim oleh autopilot.',
+        });
+        if (!claimed) continue;
         const draft: BidDraft = {
           id: createId('draft'), projectId: project.id, proposal, proposedPrice: bid.amount, currency: project.currency,
           durationDays: bid.period, confidence, evidence: [{ label: 'Ringkasan publik Freelancer', source: 'Profil Freelancer akun sendiri' }],
@@ -235,7 +281,7 @@ export class FreelancerAutopilot {
         try {
           const result = await this.dependencies.submitBid({ operation: 'submit_bid', projectId: Number(project.id.replace(/^freelancer:/, '')), amount: bid.amount, period: bid.period, milestonePercentage: 100, description: proposal });
           const success = result.statusCode === 200;
-          repository.appendAudit({ type: 'marketplace.production.submit_bid', resourceId: project.id, status: success ? 'recorded' : 'failed', reason: `Bid otomatis menghasilkan HTTP ${result.statusCode}.${result.resultId ? ` ID hasil: ${result.resultId}.` : ''} Isi proposal tidak disimpan pada audit.`, policyVersion: policy.version, payloadHash: hashPayload({ projectId: project.id, amount: bid.amount, period: bid.period, description: proposal }) });
+          repository.appendAudit({ type: 'marketplace.production.submit_bid', resourceId: project.id, status: success ? 'recorded' : 'failed', reason: `Bid otomatis menghasilkan HTTP ${result.statusCode}.${result.resultId ? ` ID hasil: ${result.resultId}.` : ''} Isi proposal tidak disimpan pada audit.`, policyVersion: policy.version, payloadHash });
           if (success) {
             repository.setPipelineStatus(project.id, 'submitted');
             submitted += 1;
@@ -246,7 +292,7 @@ export class FreelancerAutopilot {
           }
         } catch (error) {
           const statusCode = typeof error === 'object' && error !== null && 'statusCode' in error && typeof error.statusCode === 'number' ? error.statusCode : null;
-          repository.appendAudit({ type: 'marketplace.production.submit_bid', resourceId: project.id, status: 'failed', reason: statusCode === null ? 'Bid otomatis tidak menerima respons yang dapat dipastikan; proyek dikunci agar tidak dikirim ulang otomatis.' : `Bid otomatis menghasilkan HTTP ${statusCode}.`, policyVersion: policy.version, payloadHash: hashPayload({ projectId: project.id, amount: bid.amount, period: bid.period, description: proposal }) });
+          repository.appendAudit({ type: 'marketplace.production.submit_bid', resourceId: project.id, status: 'failed', reason: statusCode === null ? 'Bid otomatis tidak menerima respons yang dapat dipastikan; proyek dikunci agar tidak dikirim ulang otomatis.' : `Bid otomatis menghasilkan HTTP ${statusCode}.`, policyVersion: policy.version, payloadHash });
           repository.setPipelineStatus(project.id, 'reconciliation_required');
         }
       }

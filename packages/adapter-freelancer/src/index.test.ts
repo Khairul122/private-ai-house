@@ -18,7 +18,7 @@ describe('FreelancerReadAdapter', () => {
     const [url, init] = requests[0] ?? [];
 
     expect(profile).toMatchObject({ id: '42', username: 'sample-user', displayName: 'Sample User', country: 'Indonesia', profileUrl: 'https://www.freelancer.com/u/sample-user' });
-    expect(profile).toMatchObject({ description: 'Python engineer', hourlyRate: 18, currency: 'USD', jobs: [{ id: 15, name: 'Python' }] });
+    expect(profile).toMatchObject({ description: 'Python engineer', hourlyRate: 18, currency: 'USD', jobs: [{ id: 15, name: 'Python' }], jobIds: [15] });
     expect(new URL(String(url)).pathname).toBe('/api/users/0.1/self/');
     expect(new URL(String(url)).searchParams.toString()).toBe(new URLSearchParams({ compact: 'true', details: 'true', profile_description: 'true', jobs: 'true' }).toString());
     expect(init).toMatchObject({ method: 'GET', headers: { 'Freelancer-OAuth-V1': 'test-token-value-1234' } });

@@ -39,6 +39,7 @@ type FreelancerProductionWriteCheck = FreelancerSandboxWriteCheck;
 export type AppOptions = {
   repository?: WorkspaceRepository;
   githubToken?: string;
+  getGitHubToken?: () => string | undefined;
   credentialStatus?: CredentialStatus;
   getCredentialStatus?: () => CredentialStatus;
   freelancerSandboxTokenConfigured?: boolean;
@@ -185,7 +186,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       read: 'supported',
       verificationStatus: repository.listKnowledgeSources().some((source) => source.provider === 'github') ? 'supported' : 'unknown',
       scope: 'selected repository Contents: read',
-      tokenConfigured: Boolean(options.githubToken ?? process.env.GITHUB_TOKEN),
+      tokenConfigured: Boolean(options.getGitHubToken?.() ?? options.githubToken ?? process.env.GITHUB_TOKEN),
     },
     linkedin: {
       read: linkedin.authorized ? 'oidc-lite' : 'manual-only',
@@ -616,7 +617,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   app.post('/api/knowledge/github/sync', async (request, reply) => {
     const parsed = parseBody(githubSyncSchema, request.body);
     if ('issues' in parsed) return reply.code(400).send({ error: 'Repositori tidak valid.', issues: parsed.issues });
-    const token = options.githubToken ?? process.env.GITHUB_TOKEN;
+    const token = options.getGitHubToken?.() ?? options.githubToken ?? process.env.GITHUB_TOKEN;
     const adapter = new GitHubReadAdapter({ ...(token ? { token } : {}), ...(options.fetcher ? { fetcher: options.fetcher } : {}) });
     try {
       const result = await adapter.readRepository(parsed.value.repository);

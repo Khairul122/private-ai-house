@@ -212,6 +212,26 @@ export class WorkspaceRepository {
     return Boolean(this.sqlite.prepare('SELECT 1 AS found FROM audit_events WHERE type = ? AND resource_id = ? AND policy_version = ? LIMIT 1').get(type, resourceId, policyVersion));
   }
 
+  claimAudit(input: { type: string; resourceId: string; policyVersion: number; payloadHash: string | null; reason: string }): boolean {
+    this.sqlite.exec('BEGIN IMMEDIATE');
+    try {
+      const exists = this.sqlite.prepare('SELECT 1 AS found FROM audit_events WHERE type = ? AND resource_id = ? LIMIT 1').get(input.type, input.resourceId);
+      if (exists) {
+        this.sqlite.exec('ROLLBACK');
+        return false;
+      }
+      this.sqlite.prepare(`
+        INSERT INTO audit_events (id, type, resource_id, status, reason, policy_version, payload_hash, created_at)
+        VALUES (?, ?, ?, 'allowed', ?, ?, ?, ?)
+      `).run(randomUUID(), input.type, input.resourceId, input.reason, input.policyVersion, input.payloadHash, new Date(Date.now() - 1_000).toISOString());
+      this.sqlite.exec('COMMIT');
+      return true;
+    } catch (error) {
+      this.sqlite.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
   createKnowledgeSource(source: { id: string; provider: KnowledgeProvider; label: string; referenceUrl: string; updatedAt: string }, chunks: KnowledgeChunk[]) {
     const insertChunk = this.sqlite.prepare('INSERT INTO knowledge_chunks (id, source_id, path, source_ref, url, content_hash, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
     const insertFts = this.sqlite.prepare('INSERT INTO knowledge_search (chunk_id, source_id, content) VALUES (?, ?, ?)');

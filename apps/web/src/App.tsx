@@ -909,7 +909,7 @@ function CapabilitiesPage() {
       <p className="form-help">{status?.lastMessage ?? 'Menghubungkan autopilot ke profil Freelancer...'}</p>
       {status?.specializations.length ? <div className="tag-row">{status.specializations.map((item) => <span className="skill-tag" key={item}>{item}</span>)}</div> : null}
       <div className="autopilot-metrics"><span>{status?.lastImported ?? 0} proyek terakhir dipindai</span><span>{status?.lastSubmitted ?? 0} bid terkirim pada siklus terakhir</span><span>{status?.nextRunAt ? 'Pindai lagi ' + formatDate(status.nextRunAt) : 'Jadwal berikutnya belum tersedia'}</span></div>
-      <p className="provider-limit">Autopilot mengirim bid pada proyek fixed price USD yang cocok dengan keahlian di ringkasan profil publik. Batas lokal tetap berlaku: USD 100?800, maksimal 4 bid per hari dan 12 per minggu, risiko, tenggat, confidence, serta jam kerja. Endpoint edit profil dan pesan siap dipakai lewat event yang relevan; agen tidak mengubah profil atau mengirim pesan tanpa perubahan dan percakapan yang menjadi konteksnya.</p>
+      <p className="provider-limit">Autopilot mengirim bid pada proyek fixed price USD yang cocok dengan keahlian di ringkasan profil publik. Batas lokal tetap berlaku: USD 100–800, maksimal 4 bid per hari dan 12 per minggu, risiko, deadline, confidence, serta jam kerja. Job profile disinkronkan ulang dengan daftar yang sama pada startup; pesan hanya dikirim saat ada aturan respons untuk percakapan.</p>
     </section>
     <div className="capability-grid">
       <section className="form-card">
