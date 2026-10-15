@@ -1,25 +1,30 @@
 # Capability matrix
 
-Verified 14 October 2026 against official documentation. A `supported` read capability means the documented read operation exists; it does not mean this workspace has user authorization or credentials.
+Reviewed 15 October 2026 against provider documentation, local implementation, and live read-only checks from this workspace. An account capability changes to `supported` only after the corresponding authenticated request succeeds. Mock tests verify adapter contracts; they do not prove account authorization.
 
 | Provider / capability | Status | Evidence and boundary |
 |---|---|---|
-| Freelancer profile read | `supported` | The official SDK documents `GET /api/users/0.1/self/`; the saved account token returned a valid profile response in a live read-only check. The verifier keeps no profile fields. |
-| Freelancer project read | `supported` | The official SDK documents active project search at `GET /api/projects/0.1/projects/active/`; the saved account token passed a one-result read-only check. Project content is not stored by the verifier. |
-| Freelancer portfolio/message reads | `unknown` | These endpoints and their account scopes have not been verified in this workspace. |
-| Freelancer bid/profile/message writes | `unknown` | Writes are disabled. Endpoint, scopes, sandbox behavior, idempotency, and account approval are not verified for this workspace. |
-| GitHub selected repository content read | `supported` | Official Contents API supports GET; fine-grained access requires repository `Contents: read`. The local adapter reads the selected repository/branch only, caps sync at 100 eligible files and 100 KB per file, and has no cursor/incremental sync yet. No live GitHub credential was configured or used during verification. |
-| LinkedIn OIDC lite profile | `pending` | Client credentials are encrypted locally. The member must complete OAuth consent; the LinkedIn app must have OIDC product access and accept the callback URL shown in the integration page. The connector uses the official 3-legged authorization-code flow because LinkedIn does not support the OIDC `openid` permission in its native PKCE flow. It requests only `openid profile` and verifies the official `userinfo` endpoint. Full profile, posts, and messages remain unavailable; user-provided exports/manual facts remain supported. |
-| Hermes Agent CLI drafting | `supported, optional` | Official CLI documents profile selection, `chat --query-file`, and JSONL output. The adapter is covered by a fake process runner. Real Hermes execution could not be verified because the installed Windows CLI reported that its install lock was not writable by this account. Fixture drafting remains the default. |
+| Freelancer profile read | `supported` | `POST /api/freelancer/verify` successfully called `GET /api/users/0.1/self/` with the encrypted account token. The verifier retained no profile fields. |
+| Freelancer project read | `supported` | A live read-only search of active TypeScript projects returned 25 valid projects; all 25 were synced locally and none were invalid. The provider response did not include a project deadline, so the UI reports it as unavailable. |
+| Freelancer portfolio/message reads | `unknown` | These endpoint contracts and the account's scopes have not been verified. |
+| Freelancer bid/profile/message writes | `unknown` | Writes remain disabled. Endpoint, scopes, sandbox behavior, idempotency, and account approval have not been verified. |
+| GitHub selected repository content read | `unknown` for the current repository; adapter is implemented | A public read-only sync of the configured remote returned HTTP 403 without a token, and no content was indexed. The response does not distinguish a private repository from a GitHub permission/rate limit. Public repositories can be read without a token; a private repository needs a server token with `Contents: read`. The adapter caps sync at 100 eligible files and 100 KB per file. |
+| LinkedIn OIDC lite profile | `connected` | The local secure store contains an unexpired member token (shown in the UI through 13 December 2026). The OAuth callback validates the official `userinfo` response before storing a token. Page-load status checks stored-token presence and expiry; it does not revalidate `userinfo` on every request. Full profile, posts, and messages remain unavailable. |
+| Hermes Agent CLI drafting | `configured, consent required` | Hermes CLI v0.21.7 and profile `private-ai-house` are installed; the profile status command succeeds. No model prompt was run. Drafting stays disabled while `FVH_AI_DATA_CONSENT=false`. |
 | Local simulated bid | `supported` | Deterministic policy check plus audit payload hash; never calls a marketplace endpoint and never marks a bid externally submitted. |
 
-Freelancer verification performed two live read-only requests on 14 October 2026: the authenticated member endpoint and one active-project search result. No project or profile content was retained. No live write was performed. GitHub and Hermes adapters were verified using fixtures/mocked responses only.
+## Live verification record
 
-The LinkedIn developer app was inspected on 14 October 2026. Its OIDC product still shows `Request access`; LinkedIn says the app-to-company association must be verified before access can be requested. The Settings page currently associates the app with the Microsoft LinkedIn Page and marks that association unverified. The Auth page now lists `http://localhost:3001/api/linkedin/callback` as an authorized redirect URL. The first native-PKCE request was rejected because OIDC is unsupported for that flow. The 3-legged authorization-code request now reaches LinkedIn but returns an error before member consent. No product access was granted, no member consent was submitted, and no LinkedIn token was stored.
+- Freelancer read-only profile verification succeeded, and active-project search returned 25 projects. The local workspace stores those provider results; it contains no seeded demo projects.
+- The UI displays `Belum dicantumkan` for all 25 deadlines because the provider did not supply a project deadline. Policy simulation blocks a project with an unknown deadline using `deadline_unknown`.
+- LinkedIn shows connected based on the successful OAuth flow and its currently unexpired encrypted member token. This is limited to OIDC `openid profile`.
+- API health reports local SQLite mode, Hermes `disabled`, and `liveWrites: false`. No Freelancer bid, message, or profile update was sent.
+- GitHub sync for the configured project remote returned HTTP 403 without a token; no repository content was stored. The UI now leaves the live capability as `Belum diverifikasi` until a sync succeeds.
+- Unit, adapter, persistence, server, and smoke tests pass; workspace typecheck, lint, and build pass. The production build reports a large Three.js chunk warning, but completes successfully.
 
 ## Sources
 
 - [Freelancer developer portal](https://developer.freelancer.com/), [official Python SDK](https://github.com/freelancer/freelancer-sdk-python), and [API Terms](https://www.freelancer.com/about/apiterms).
 - [GitHub repository contents API](https://docs.github.com/en/rest/repos/contents).
-- [LinkedIn 3-legged authorization-code flow](https://learn.microsoft.com/en-us/linkedin/shared/authentication/authorization-code-flow) and [OIDC profile endpoint](https://learn.microsoft.com/en-us/linkedin/consumer/integrations/self-serve/sign-in-with-linkedin-v2). The native PKCE attempt returned LinkedIn's error “Open ID permission is not supported for PKCE flows,” so the connector uses the documented client-secret exchange and a registered loopback callback.
+- [LinkedIn 3-legged authorization-code flow](https://learn.microsoft.com/en-us/linkedin/shared/authentication/authorization-code-flow) and [OIDC profile endpoint](https://learn.microsoft.com/en-us/linkedin/consumer/integrations/self-serve/sign-in-with-linkedin-v2).
 - [Hermes CLI](https://hermes-agent.nousresearch.com/docs/user-guide/cli), [profiles](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/profiles.md), and [toolsets](https://hermes-agent.nousresearch.com/docs/reference/toolsets-reference).

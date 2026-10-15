@@ -4,5 +4,5 @@
   "type": "module",
   "exports": { ".": "./src/index.ts" },
   "dependencies": { "@fvh/domain": "workspace:*" },
-  "scripts": { "typecheck": "tsc --noEmit -p tsconfig.json" }
+  "scripts": { "typecheck": "tsc --noEmit -p tsconfig.json", "test": "vitest run" }
 }

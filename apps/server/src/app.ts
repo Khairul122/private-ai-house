@@ -2,7 +2,7 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import type {} from '@fastify/static';
 import { z } from 'zod';
-import { getFreelancerCapabilities } from '@fvh/adapter-freelancer';
+import { FreelancerReadError, getFreelancerCapabilities } from '@fvh/adapter-freelancer';
 import { GitHubReadAdapter, GitHubReadError } from '@fvh/adapter-github';
 import { assessProject, createId, decideBid, hashPayload, UnavailableDraftingAdapter } from '@fvh/application';
 import type { AiDraftingPort } from '@fvh/application';
@@ -18,7 +18,7 @@ const paramsSchema = z.object({ id: z.string().min(1).max(150) });
 const draftUpdateSchema = z.object({ proposal: z.string().trim().min(40).max(4_000), proposedPrice: z.number().finite().positive() });
 const githubSyncSchema = z.object({ repository: z.string().trim().min(3).max(200) });
 const freelancerSyncSchema = z.object({ query: z.string().trim().min(2).max(120), limit: z.number().int().min(1).max(50).default(25) });
-const allowedDevOrigins = new Set(['http://127.0.0.1:5173', 'http://localhost:5173']);
+const allowedDevOrigins = new Set(['http://127.0.0.1:5173', 'http://localhost:5173', 'http://127.0.0.1:5174', 'http://localhost:5174']);
 
 export type AppOptions = {
   repository?: WorkspaceRepository;
@@ -66,6 +66,16 @@ function isSameOrigin(origin: string, protocol: string, host: string | undefined
   }
 }
 
+function linkedinVerification(credentialStatus: CredentialStatus | undefined, now: Date) {
+  if (!credentialStatus?.linkedinAccessTokenConfigured) return { authorized: false, verificationStatus: 'unverified' as const };
+  const expiresAt = credentialStatus.linkedinAccessTokenExpiresAt;
+  if (!expiresAt) return { authorized: false, verificationStatus: 'unverified' as const };
+  const expiry = Date.parse(expiresAt);
+  if (!Number.isFinite(expiry)) return { authorized: false, verificationStatus: 'unverified' as const };
+  if (expiry <= now.getTime()) return { authorized: false, verificationStatus: 'expired' as const };
+  return { authorized: true, verificationStatus: 'connected' as const };
+}
+
 export function createApp(options: AppOptions = {}): FastifyInstance {
   const repository = options.repository ?? new WorkspaceRepository();
   const now = options.clock ?? (() => new Date());
@@ -84,13 +94,14 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.header('X-Frame-Options', 'DENY');
     reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
-    reply.header('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws://127.0.0.1:5173 ws://localhost:5173; object-src 'none'; base-uri 'self'; frame-ancestors 'none'");
+    reply.header('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws://127.0.0.1:5173 ws://localhost:5173 ws://127.0.0.1:5174 ws://localhost:5174; object-src 'none'; base-uri 'self'; frame-ancestors 'none'");
     return payload;
   });
 
   app.get('/api/health', async () => ({ ok: true, mode: 'local', database: 'sqlite', ai: draftingMode, liveWrites: false }));
   app.get('/api/capabilities', async () => {
     const credentialStatus = options.getCredentialStatus?.() ?? options.credentialStatus;
+    const linkedin = linkedinVerification(credentialStatus, now());
     return {
     marketplace: getFreelancerCapabilities(freelancerVerification),
     freelancerCredentials: {
@@ -99,11 +110,17 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       readProfile: freelancerVerification?.readProfile ?? false,
       readProjects: freelancerVerification?.readProjects ?? false,
     },
-    github: { read: 'supported', scope: 'selected repository Contents: read', tokenConfigured: Boolean(options.githubToken ?? process.env.GITHUB_TOKEN) },
+    github: {
+      read: 'supported',
+      verificationStatus: repository.listKnowledgeSources().some((source) => source.provider === 'github') ? 'supported' : 'unknown',
+      scope: 'selected repository Contents: read',
+      tokenConfigured: Boolean(options.githubToken ?? process.env.GITHUB_TOKEN),
+    },
     linkedin: {
-      read: credentialStatus?.linkedinAccessTokenConfigured && credentialStatus.linkedinAccessTokenExpiresAt && Date.parse(credentialStatus.linkedinAccessTokenExpiresAt) > now().getTime() ? 'oidc-lite' : 'manual-only',
+      read: linkedin.authorized ? 'oidc-lite' : 'manual-only',
       clientConfigured: credentialStatus?.linkedinClientConfigured ?? false,
-      authorized: Boolean(credentialStatus?.linkedinAccessTokenConfigured && credentialStatus.linkedinAccessTokenExpiresAt && Date.parse(credentialStatus.linkedinAccessTokenExpiresAt) > now().getTime()),
+      authorized: linkedin.authorized,
+      verificationStatus: linkedin.verificationStatus,
       accessTokenExpiresAt: credentialStatus?.linkedinAccessTokenExpiresAt ?? null,
       redirectUri: options.linkedinOAuth?.redirectUri ?? null,
       reason: 'Hanya profil OIDC ringan yang diminta. Produk OIDC LinkedIn harus disetujui dan URL callback yang ditampilkan harus diterima di Developer Portal; akses profil lengkap tetap tidak tersedia.',
@@ -143,7 +160,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
         connected: true,
         readProfile: freelancerVerification?.readProfile ?? false,
         readProjects: true,
-        reason: freelancerVerification?.readProfile ? 'verified' : 'projects_unavailable',
+        reason: freelancerVerification?.readProfile ? 'verified' : 'profile_unavailable',
       };
       repository.appendAudit({
         type: 'marketplace.projects_synced', resourceId: 'freelancer', status: 'recorded',
@@ -154,7 +171,8 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Freelancer tidak dapat diperiksa.';
       repository.appendAudit({ type: 'marketplace.sync_failed', resourceId: 'freelancer', status: 'failed', reason: message, policyVersion: repository.getPolicy().version, payloadHash: null });
-      return reply.code(message.includes('token') ? 401 : message.includes('izin') ? 403 : 502).send({ error: message });
+      const statusCode = error instanceof FreelancerReadError ? error.statusCode : undefined;
+      return reply.code(statusCode === 401 || statusCode === 403 || statusCode === 429 ? statusCode : 502).send({ error: message });
     }
   });
 
@@ -447,15 +465,20 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
 
   app.get('/api/settings', async () => {
     const credentialStatus = options.getCredentialStatus?.() ?? options.credentialStatus;
-    const linkedinAuthorized = Boolean(credentialStatus?.linkedinAccessTokenConfigured && credentialStatus.linkedinAccessTokenExpiresAt && Date.parse(credentialStatus.linkedinAccessTokenExpiresAt) > now().getTime());
+    const linkedinStatus = linkedinVerification(credentialStatus, now());
     return {
       workspace: { id: 'workspace_local', name: 'Freelancer Virtual House', accountMode: 'single-user lokal' },
       fields: ['Fullstack Engineer', 'Backend Engineer', 'Android Engineer', 'iOS Engineer', 'Frontend Engineer', 'DevOps Engineer', 'QA Engineer', 'UI/UX Designer', 'Data Engineer', 'Technical Writer'],
       profile: repository.getProfile(),
       capabilities: {
-        freelancer: { connection: freelancerVerification?.connected ? 'connected' : 'unverified', readProjects: 'supported', readProfile: 'supported', writes: 'unknown' },
+        freelancer: {
+          connection: freelancerVerification?.connected ? 'connected' : freelancerVerification?.reason === 'invalid_token' ? 'invalid' : freelancerVerification ? 'unavailable' : 'unverified',
+          readProjects: freelancerVerification?.readProjects ? 'supported' : 'unknown',
+          readProfile: freelancerVerification?.readProfile ? 'supported' : 'unknown',
+          writes: 'unknown',
+        },
         github: 'read-only',
-        linkedin: { read: linkedinAuthorized ? 'oidc-lite' : 'manual-only', clientConfigured: credentialStatus?.linkedinClientConfigured ?? false, authorized: linkedinAuthorized },
+        linkedin: { read: linkedinStatus.authorized ? 'oidc-lite' : 'manual-only', clientConfigured: credentialStatus?.linkedinClientConfigured ?? false, authorized: linkedinStatus.authorized, verificationStatus: linkedinStatus.verificationStatus },
         hermes: 'optional',
       },
       externalWrites: false,

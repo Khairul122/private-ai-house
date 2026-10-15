@@ -12,7 +12,7 @@ export type FreelancerVerification = {
   connected: boolean;
   readProfile: boolean;
   readProjects: boolean;
-  reason: 'verified' | 'invalid_token' | 'scope_denied' | 'rate_limited' | 'project_scope_denied' | 'projects_unavailable' | 'verification_unavailable' | 'invalid_response';
+  reason: 'verified' | 'invalid_token' | 'scope_denied' | 'rate_limited' | 'project_scope_denied' | 'projects_unavailable' | 'verification_unavailable' | 'invalid_response' | 'profile_unavailable';
 };
 
 export type LinkedInClientCredentials = { clientId: string; clientSecret: string };
@@ -86,7 +86,7 @@ export async function verifyFreelancerCredential(storePath: string, scriptPath: 
     const result = JSON.parse(output) as Partial<FreelancerVerification>;
     const reasons = new Set<FreelancerVerification['reason']>([
       'verified', 'invalid_token', 'scope_denied', 'rate_limited', 'project_scope_denied',
-      'projects_unavailable', 'verification_unavailable', 'invalid_response',
+      'projects_unavailable', 'verification_unavailable', 'invalid_response', 'profile_unavailable',
     ]);
     if (typeof result.connected !== 'boolean' || typeof result.readProfile !== 'boolean' || typeof result.readProjects !== 'boolean' || !result.reason || !reasons.has(result.reason)) {
       throw new Error('Invalid verification response.');

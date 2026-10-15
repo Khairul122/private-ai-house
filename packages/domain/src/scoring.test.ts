@@ -24,4 +24,10 @@ describe('scoreProject', () => {
     expect(result.score).toBe(0);
     expect(result.factors.some((factor) => factor.key === 'availability' && factor.value === 'expired')).toBe(true);
   });
+
+  it('does not invent a deadline when the source did not provide one', () => {
+    const result = scoreProject({ ...project, deadlineDays: null }, ['Backend Engineer']);
+
+    expect(result.factors.find((factor) => factor.key === 'deadline')).toMatchObject({ points: 0, value: 'belum dicantumkan' });
+  });
 });

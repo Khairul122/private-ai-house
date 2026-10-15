@@ -67,7 +67,7 @@ export type Opportunity = {
   budgetMax: number;
   currency: string;
   skills: string[];
-  deadlineDays: number;
+  deadlineDays: number | null;
   briefQuality: number;
   riskScore: number;
   status: 'open' | 'closed' | 'expired';
@@ -75,6 +75,14 @@ export type Opportunity = {
   pipelineStatus: string;
   score: number;
   factors: Array<{ key: string; label: string; points: number; value: string }>;
+};
+
+export type Capabilities = {
+  marketplace: Array<{ operation: string; status: string; evidence: string }>;
+  freelancerCredentials: { accessTokenConfigured: boolean; verificationStatus: string; readProfile: boolean; readProjects: boolean };
+  github: { read: string; verificationStatus: string; scope: string; tokenConfigured: boolean };
+  linkedin: { read: string; reason: string; redirectUri: string | null; clientConfigured: boolean; authorized: boolean; verificationStatus: string; accessTokenExpiresAt: string | null };
+  hermes: { draft: string; active: boolean; reason: string };
 };
 
 export type BidDraft = {

@@ -44,6 +44,11 @@ function text(value: unknown): string | undefined {
   return normalized || undefined;
 }
 
+function identifier(value: unknown): string | undefined {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return String(value);
+  return text(value);
+}
+
 function number(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim()) {
@@ -69,13 +74,14 @@ function skillNames(project: JsonRecord): string[] {
   return [...new Set(values.map((item) => text(item.name) ?? text(item.seo_url)).filter((value): value is string => Boolean(value)))].slice(0, 20);
 }
 
-function deadlineDays(project: JsonRecord, now: Date): number {
-  const numericExpiry = number(project.time_expire ?? project.time_free_bids_expire ?? project.deadline_timestamp);
-  const stringExpiry = text(project.deadline ?? project.expires_at ?? project.time_expire);
+function deadlineDays(project: JsonRecord, now: Date): number | null {
+  const numericExpiry = number(project.time_expire ?? project.deadline_timestamp);
+  const stringExpiry = text(project.deadline ?? project.expires_at ?? project.time_expire ?? project.deadline_timestamp);
   const expiresAt = numericExpiry !== undefined
-    ? numericExpiry * 1000
+    ? (numericExpiry > 1_000_000_000_000 ? numericExpiry : numericExpiry * 1000)
     : stringExpiry ? Date.parse(stringExpiry) : Number.NaN;
-  return Number.isFinite(expiresAt) && expiresAt > now.getTime() ? Math.ceil((expiresAt - now.getTime()) / dayMilliseconds) : 0;
+  if (!Number.isFinite(expiresAt)) return null;
+  return expiresAt > now.getTime() ? Math.ceil((expiresAt - now.getTime()) / dayMilliseconds) : 0;
 }
 
 function dateCreated(project: JsonRecord, now: Date): string {
@@ -88,7 +94,7 @@ function dateCreated(project: JsonRecord, now: Date): string {
 }
 
 function normalizeProject(project: JsonRecord, now: Date): ProjectOpportunity | undefined {
-  const externalId = text(project.id);
+  const externalId = identifier(project.id);
   const title = text(project.title);
   if (!externalId || !title) return undefined;
 
@@ -132,8 +138,8 @@ function projectsFromResult(result: JsonRecord): unknown[] | undefined {
 }
 
 export const freelancerCapabilities: FreelancerCapability[] = [
-  { operation: 'read_projects', status: 'supported', evidence: 'Kontrak baca proyek aktif didokumentasikan oleh SDK resmi Freelancer; koneksi akun harus diperiksa terpisah.' },
-  { operation: 'read_profile', status: 'supported', evidence: 'Kontrak profil akun saat ini didokumentasikan oleh SDK resmi Freelancer; koneksi akun harus diperiksa terpisah.' },
+  { operation: 'read_projects', status: 'unknown', evidence: 'Endpoint baca-saja telah diimplementasikan; akses token dan respons akun ini belum diuji.' },
+  { operation: 'read_profile', status: 'unknown', evidence: 'Endpoint baca-saja telah diimplementasikan; akses token dan respons akun ini belum diuji.' },
   { operation: 'read_portfolio', status: 'unknown', evidence: 'Akses portofolio belum diperiksa pada akun dan scope aplikasi ini.' },
   { operation: 'read_messages', status: 'unknown', evidence: 'Akses pesan belum diperiksa pada akun dan scope aplikasi ini.' },
   { operation: 'submit_bid', status: 'unknown', evidence: 'Endpoint tulis, idempotensi, scope, dan sandbox belum diverifikasi; pengiriman eksternal nonaktif.' },
@@ -165,7 +171,7 @@ export class FreelancerReadAdapter {
   async readOwnProfile(): Promise<FreelancerProfile> {
     const response = await this.request(`${API_ROOT}/users/0.1/self/`);
     const result = resultRecord(await response.json());
-    const userId = text(result.id);
+    const userId = identifier(result.id);
     if (!userId) throw new FreelancerReadError('invalid_response', 'Freelancer tidak mengembalikan ID profil akun.');
     const username = text(result.username);
     return {

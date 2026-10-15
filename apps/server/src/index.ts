@@ -58,7 +58,7 @@ const draftingReason = !draftingConfig.valid
     ? 'Mode Hermes belum dipilih. Draf AI tetap nonaktif.'
     : !draftingConfig.consent
       ? 'Hermes sudah dipilih, tetapi persetujuan pengiriman data belum diberikan. Tidak ada draf sintetis yang digunakan.'
-      : 'Hermes belum tersedia. Periksa instalasi profile fvh dan jalankan ulang server.';
+      : 'Hermes belum tersedia. Periksa instalasi profile private-ai-house dan jalankan ulang server.';
 const webBuild = resolve(projectRoot, 'apps/web/dist');
 const hasWebBuild = existsSync(webBuild);
 const app = createApp({

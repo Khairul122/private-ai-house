@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import { FixtureDraftingAdapter } from '@fvh/application';
 import { WorkspaceRepository } from '@fvh/persistence';
 import { createApp } from './app.js';
+import { insertTestOpportunity, testOpportunity } from './test-fixtures.js';
 
 describe('MVP smoke flow', () => {
-  it('runs profile setup → policy activation → fixture draft → simulated send → audit → pause', async () => {
+  it('runs profile setup → policy activation → test-only draft → simulated send → audit → pause', async () => {
     const repository = new WorkspaceRepository();
-    const app = createApp({ repository, clock: () => new Date('2026-10-14T04:00:00.000Z') });
+    insertTestOpportunity(repository);
+    const app = createApp({ repository, drafting: new FixtureDraftingAdapter(), draftingMode: 'fixture', clock: () => new Date('2026-10-14T04:00:00.000Z') });
     await app.ready();
     try {
       const profile = await app.inject({ method: 'PUT', url: '/api/profile', payload: {
@@ -17,9 +20,10 @@ describe('MVP smoke flow', () => {
       } });
       const activation = await app.inject({ method: 'POST', url: '/api/policy/activate', payload: { confirmSimulation: true } });
       const project = await app.inject({ method: 'GET', url: '/api/projects?search=inventori' });
-      const draft = await app.inject({ method: 'POST', url: '/api/projects/demo-project-01/draft' });
-      const simulation = await app.inject({ method: 'POST', url: '/api/projects/demo-project-01/simulate-submit' });
-      repository.setPipelineStatus('demo-project-01', 'scored');
+      const projectId = encodeURIComponent(testOpportunity.id);
+      const draft = await app.inject({ method: 'POST', url: `/api/projects/${projectId}/draft` });
+      const simulation = await app.inject({ method: 'POST', url: `/api/projects/${projectId}/simulate-submit` });
+      repository.setPipelineStatus(testOpportunity.id, 'scored');
       await app.inject({ method: 'GET', url: '/api/projects' });
       const pipeline = await app.inject({ method: 'GET', url: '/api/pipeline' });
       const activity = await app.inject({ method: 'GET', url: '/api/activity?limit=10' });
@@ -31,10 +35,10 @@ describe('MVP smoke flow', () => {
       expect(project.json()).toHaveLength(1);
       expect(draft.json().status).toBe('draft_ready');
       expect(simulation.json().decision.allowed).toBe(true);
-      expect(pipeline.json().find((item: { id: string }) => item.id === 'demo-project-01')).toMatchObject({ pipelineStatus: 'draft_ready', latestDraft: { status: 'draft_ready' } });
+      expect(pipeline.json().find((item: { id: string }) => item.id === testOpportunity.id)).toMatchObject({ pipelineStatus: 'draft_ready', latestDraft: { status: 'draft_ready' } });
       expect(activity.json().some((event: { type: string; payloadHash: string | null }) => event.type === 'bid.simulated' && event.payloadHash?.length === 64)).toBe(true);
       expect(pause.json().state).toBe('paused');
-      expect(repository.listProjects().find((item) => item.id === 'demo-project-01')?.pipelineStatus).toBe('draft_ready');
+      expect(repository.listProjects().find((item) => item.id === testOpportunity.id)?.pipelineStatus).toBe('draft_ready');
     } finally {
       await app.close();
       repository.close();

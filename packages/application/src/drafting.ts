@@ -44,7 +44,7 @@ export class FixtureDraftingAdapter implements AiDraftingPort {
     return {
       proposal,
       proposedPrice,
-      durationDays: Math.min(Math.max(1, project.deadlineDays), 10),
+      durationDays: Math.min(Math.max(1, project.deadlineDays ?? 10), 10),
       confidence: Math.min(0.95, Math.max(0.5, 0.58 + project.briefQuality * 0.22 + (score / 100) * 0.14)),
       evidence: [
         ...profileFacts.map(({ label, source }) => ({ label, source })),

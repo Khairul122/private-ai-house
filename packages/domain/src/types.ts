@@ -9,7 +9,7 @@ export type ProjectOpportunity = {
   budgetMax: number;
   currency: string;
   skills: string[];
-  deadlineDays: number;
+  deadlineDays: number | null;
   briefQuality: number;
   riskScore: number;
   status: 'open' | 'closed' | 'expired';

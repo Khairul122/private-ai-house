@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, NavLink, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router';
-import { api, jsonRequest, type AuditEvent, type BidDraft, type Opportunity, type Policy, type Profile } from './api.js';
+import { api, jsonRequest, type AuditEvent, type BidDraft, type Capabilities, type Opportunity, type Policy, type Profile } from './api.js';
 
 const ThreeOffice = lazy(() => import('./ThreeOffice.js'));
 
@@ -32,7 +32,7 @@ function formatDate(value: string) {
 
 function StateLabel({ state }: { state: string }) {
   const labels: Record<string, string> = {
-    active: 'Aktif', connected: 'Terhubung', supported: 'Didukung API', unverified: 'Belum diuji', invalid: 'Token tidak valid', unavailable: 'Tidak dapat diperiksa', expired: 'Kedaluwarsa', paused: 'Dijeda', draft: 'Belum aktif', recorded: 'Tercatat', blocked: 'Dilewati', failed: 'Gagal',
+    active: 'Aktif', connected: 'Terhubung', supported: 'Didukung API', unknown: 'Belum diverifikasi', unverified: 'Belum diuji', invalid: 'Token tidak valid', unavailable: 'Tidak dapat diperiksa', expired: 'Kedaluwarsa', paused: 'Dijeda', draft: 'Belum aktif', recorded: 'Tercatat', blocked: 'Dilewati', failed: 'Gagal',
     new: 'Baru', scored: 'Dinilai', draft_ready: 'Draf siap', policy_check: 'Pemeriksaan kebijakan', submitted: 'Terkirim',
     in_conversation: 'Percakapan', won: 'Berhasil', lost: 'Tidak lanjut', skipped: 'Dilewati',
     reconciliation_required: 'Perlu rekonsiliasi', error: 'Kesalahan',
@@ -86,7 +86,7 @@ function Layout() {
           ))}
         </nav>
         <div className="side-foot">
-          <p>Mode lokal memakai data contoh. Tidak ada bid yang dikirim.</p>
+          <p>Data provider hanya masuk setelah Anda memulai sinkronisasi. Tidak ada bid yang dikirim.</p>
           <Link to="/capabilities" className="capability-link">Status integrasi</Link>
         </div>
       </aside>
@@ -111,7 +111,7 @@ function Layout() {
 
         {health.isError && <ErrorNotice message="API lokal belum terhubung. Nyalakan server lalu muat ulang halaman." onRetry={() => { health.refetch(); dashboard.refetch(); }} />}
         {pause.isError && <ErrorNotice message={pause.error.message} />}
-        <div className="mode-strip"><span className="mode-indicator" />{health.data?.mode === 'local' ? 'Data contoh lokal' : 'Menyiapkan data lokal'}<span className="mode-divider" />Aksi eksternal nonaktif</div>
+        <div className="mode-strip"><span className="mode-indicator" />{health.data?.mode === 'local' ? 'Workspace lokal' : 'Menyiapkan workspace'}<span className="mode-divider" />Aksi eksternal nonaktif</div>
         <div className="page-content"><Outlet /></div>
       </main>
     </div>
@@ -166,7 +166,7 @@ function OverviewPage() {
   return <>
     <PageIntro eyebrow="14 Oktober 2026 / ruang operasi" title="Kerja yang baik dimulai dari konteks yang jelas." description="Tinjau peluang, siapkan draf berbasis fakta, dan biarkan kebijakan menjaga batas operasi." action={<Link to="/opportunities" className="button button-primary">Buka antrean peluang</Link>} />
     <section className="metrics-row" aria-label="Ringkasan ruang kerja">
-      <Metric label="Peluang contoh" value={data.counts.openProjects} note="Tidak terhubung ke akun marketplace" tone="primary" />
+      <Metric label="Peluang terbuka" value={data.counts.openProjects} note="Data tersinkron dari provider" tone="primary" />
       <Metric label="Draf lokal" value={data.counts.drafts} note="Belum pernah dikirim ke luar" />
       <Metric label="Sumber knowledge" value={data.counts.knowledgeSources} note="Fakta lokal yang bisa ditelusuri" />
       <Metric label="Keputusan dilewati" value={data.counts.policySkips} note="Alasan tersimpan di aktivitas" />
@@ -207,23 +207,43 @@ function OpportunitiesPage() {
   const [search, setSearch] = useState('');
   const [selectedDraft, setSelectedDraft] = useState<BidDraft | null>(null);
   const [notice, setNotice] = useState('');
+  const [noticeError, setNoticeError] = useState(false);
+  const [freelancerSearch, setFreelancerSearch] = useState('');
   const query = useQuery({ queryKey: ['projects', 'opportunities', search], queryFn: () => api<Opportunity[]>(`/projects?search=${encodeURIComponent(search)}`) });
+  const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: () => api<Capabilities>('/capabilities') });
+  const syncFreelancer = useMutation({
+    mutationFn: () => api<{ imported: number; skipped: number }>('/freelancer/projects/sync', jsonRequest('POST', { query: freelancerSearch, limit: 25 })),
+    onSuccess: async (result) => {
+      setNoticeError(false);
+      setNotice(`${result.imported} proyek Freelancer disinkronkan. ${result.skipped} hasil tidak valid dilewati.`);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['projects'] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+        queryClient.invalidateQueries({ queryKey: ['capabilities'] }),
+        queryClient.invalidateQueries({ queryKey: ['activity'] }),
+      ]);
+    },
+    onError: (error: Error) => { setNoticeError(true); setNotice(error.message); },
+  });
   const draftMutation = useMutation({
     mutationFn: (id: string) => api<BidDraft>(`/projects/${encodeURIComponent(id)}/draft`, jsonRequest('POST')),
-    onSuccess: (draft) => { setSelectedDraft(draft); queryClient.invalidateQueries({ queryKey: ['pipeline'] }); queryClient.invalidateQueries({ queryKey: ['dashboard'] }); setNotice('Draf lokal dibuat. Periksa fakta dan harga sebelum simulasi.'); },
-    onError: (error: Error) => setNotice(error.message),
+    onSuccess: (draft) => { setSelectedDraft(draft); queryClient.invalidateQueries({ queryKey: ['pipeline'] }); queryClient.invalidateQueries({ queryKey: ['dashboard'] }); setNoticeError(false); setNotice('Draf Hermes dibuat secara lokal. Periksa fakta dan harga sebelum simulasi.'); },
+    onError: (error: Error) => { setNoticeError(true); setNotice(error.message); },
   });
   const updateDraft = useMutation({
     mutationFn: (input: { id: string; proposal: string; proposedPrice: number }) => api<BidDraft>(`/drafts/${encodeURIComponent(input.id)}`, jsonRequest('PUT', { proposal: input.proposal, proposedPrice: input.proposedPrice })),
-    onSuccess: (draft) => { setSelectedDraft(draft); queryClient.invalidateQueries({ queryKey: ['pipeline'] }); setNotice('Draf tersimpan di ruang kerja lokal.'); },
+    onSuccess: (draft) => { setSelectedDraft(draft); queryClient.invalidateQueries({ queryKey: ['pipeline'] }); setNoticeError(false); setNotice('Draf tersimpan di ruang kerja lokal.'); },
   });
 
   useEffect(() => {
     if (!initialProject || !query.data) return;
     const project = query.data.find((item) => item.id === initialProject);
-    if (project && !selectedDraft) draftMutation.mutate(project.id);
+    if (project && !selectedDraft) {
+      if (capabilities.data?.hermes.active) draftMutation.mutate(project.id);
+      else { setNoticeError(true); setNotice(capabilities.data?.hermes.reason ?? 'Hermes belum siap membuat draf.'); }
+    }
     navigate('/opportunities', { replace: true });
-  }, [initialProject, query.data]);
+  }, [initialProject, query.data, capabilities.data]);
 
   if (query.isPending) return <LoadingPanel />;
   if (query.isError) return <ErrorNotice message="Peluang belum dapat dimuat." onRetry={() => query.refetch()} />;
@@ -231,21 +251,30 @@ function OpportunitiesPage() {
     <PageIntro eyebrow="Antrean peluang" title="Pilih pekerjaan dengan alasan yang bisa dijelaskan." description="Skor hanya memberi konteks. Setiap sumber, batas, dan ketidakpastian tetap terlihat sebelum draf disiapkan." />
     <section className="filter-bar" aria-label="Filter peluang">
       <label className="search-field"><span>Cari judul, teknologi, atau brief</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Contoh: TypeScript" /></label>
-      <div className="filter-note"><strong>{query.data.length}</strong> peluang lokal tersedia <span>Semua ditandai sebagai data contoh</span></div>
+      <div className="filter-note"><strong>{query.data.length}</strong> peluang tersimpan <span>Data masuk melalui sinkronisasi yang Anda mulai</span></div>
     </section>
-    {notice && <div className="notice notice-success" role="status">{notice}</div>}
+    <section className="sync-panel form-card" aria-label="Sinkronisasi peluang Freelancer">
+      <div className="section-heading"><div><p className="eyebrow">Sumber peluang</p><h2>Freelancer.com</h2></div><StateLabel state={capabilities.data?.freelancerCredentials.verificationStatus ?? 'unverified'} /></div>
+      <p className="form-help">Pencarian ini hanya membaca proyek aktif. Token {capabilities.data?.freelancerCredentials.accessTokenConfigured ? 'tersimpan di secure store Windows' : 'belum tersedia di secure store'}; tidak ada bid atau pesan yang dikirim.</p>
+      <form className="sync-form" onSubmit={(event) => { event.preventDefault(); syncFreelancer.mutate(); }}>
+        <label className="form-field"><span>Kata kunci proyek</span><input value={freelancerSearch} onChange={(event) => setFreelancerSearch(event.target.value)} minLength={2} maxLength={120} placeholder="misalnya TypeScript" /></label>
+        <button className="button button-secondary" type="submit" disabled={!capabilities.data?.freelancerCredentials.accessTokenConfigured || freelancerSearch.trim().length < 2 || syncFreelancer.isPending}>{syncFreelancer.isPending ? 'Menyinkronkan…' : 'Sinkronkan proyek'}</button>
+      </form>
+      {capabilities.data && <p className="form-help">Drafting Hermes: {capabilities.data.hermes.active ? 'siap' : 'nonaktif'} — {capabilities.data.hermes.reason}</p>}
+    </section>
+    {notice && <div className={`notice ${noticeError ? 'notice-error' : 'notice-success'}`} role={noticeError ? 'alert' : 'status'}>{notice}</div>}
     <div className="opportunity-list">
-      {query.data.length === 0 && <div className="empty-state"><h3>Tidak ada peluang yang cocok</h3><p>Ubah kata pencarian untuk melihat peluang contoh lainnya.</p></div>}
+      {query.data.length === 0 && <div className="empty-state"><h3>Belum ada peluang tersinkron</h3><p>Masukkan kata kunci dan jalankan sinkronisasi Freelancer, atau ubah filter pencarian lokal.</p></div>}
       {query.data.map((project) => (
         <article className="opportunity-row" key={project.id}>
-          <div className="opportunity-topline"><span className="eyebrow">{project.clientName} / CONTOH LOKAL</span><span className="score-mark"><strong>{project.score}</strong><small>skor kecocokan</small></span></div>
+          <div className="opportunity-topline"><span className="eyebrow">{project.clientName} / {project.source === 'freelancer' ? 'FREELANCER.COM' : 'FIXTURE PENGUJIAN'}</span><span className="score-mark"><strong>{project.score}</strong><small>skor kecocokan</small></span></div>
           <h2>{project.title}</h2>
           <p className="opportunity-description">{project.description}</p>
           <div className="tag-row">{project.skills.map((skill) => <span className="skill-tag" key={skill}>{skill}</span>)}</div>
           <div className="factor-list" aria-label="Alasan skor">
             {project.factors.map((factor) => <span key={factor.key}><small>{factor.label}</small><strong>{factor.value}</strong></span>)}
           </div>
-          <div className="opportunity-footer"><div><strong>{formatMoney(project.budgetMin, project.currency)} - {formatMoney(project.budgetMax, project.currency)}</strong><span>Tenggat {project.deadlineDays} hari / brief {Math.round(project.briefQuality * 100)}%</span></div><button className="button button-primary" type="button" disabled={draftMutation.isPending} onClick={() => draftMutation.mutate(project.id)}>Buat draf lokal</button></div>
+          <div className="opportunity-footer"><div><strong>{formatMoney(project.budgetMin, project.currency)} - {formatMoney(project.budgetMax, project.currency)}</strong><span>{project.deadlineDays === null ? 'Tenggat belum dicantumkan' : `Tenggat ${project.deadlineDays} hari`} / brief {Math.round(project.briefQuality * 100)}%</span></div><button className="button button-primary" type="button" disabled={draftMutation.isPending || !capabilities.data?.hermes.active} onClick={() => draftMutation.mutate(project.id)}>Buat draf dengan Hermes</button></div>
         </article>
       ))}
     </div>
@@ -259,9 +288,10 @@ function OpportunitiesPage() {
           const saved = await api<BidDraft>(`/drafts/${encodeURIComponent(selectedDraft.id)}`, jsonRequest('PUT', { proposal, proposedPrice }));
           setSelectedDraft(saved);
           const result = await api<{ decision: { allowed: boolean; reason: string }; externalWrites: false }>('/projects/' + encodeURIComponent(saved.projectId) + '/simulate-submit', jsonRequest('POST'));
+          setNoticeError(false);
           setNotice(result.externalWrites ? 'Aksi eksternal tidak diizinkan.' : `${result.decision.allowed ? 'Simulasi dicatat' : 'Simulasi dilewati'}: ${result.decision.reason}`);
           queryClient.invalidateQueries({ queryKey: ['dashboard'] }); queryClient.invalidateQueries({ queryKey: ['activity'] });
-        } catch (error) { setNotice(error instanceof Error ? error.message : 'Simulasi tidak berhasil.'); }
+        } catch (error) { setNoticeError(true); setNotice(error instanceof Error ? error.message : 'Simulasi tidak berhasil.'); }
       }}
     />}
   </>;
@@ -452,7 +482,7 @@ function KnowledgePage() {
     try {
       const result = await api<{ chunks: number; filesSeen: number; rejected: number; complete: boolean }>('/knowledge/github/sync', jsonRequest('POST', { repository: repo }));
       setNotice(`${result.filesSeen} berkas dibaca, ${result.chunks} potongan aman diindeks, ${result.rejected} dilewati.${result.complete ? '' : ' Cakupan parsial, periksa batas file.'}`);
-      queryClient.invalidateQueries({ queryKey: ['knowledge'] }); queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge'] }); queryClient.invalidateQueries({ queryKey: ['dashboard'] }); queryClient.invalidateQueries({ queryKey: ['capabilities'] });
     } catch (error) { setNotice(error instanceof Error ? error.message : 'Sinkronisasi gagal.'); }
     finally { setBusy(false); }
   };
@@ -522,13 +552,7 @@ function CapabilitiesPage() {
       window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
     }
   }, []);
-  const query = useQuery({ queryKey: ['capabilities'], queryFn: () => api<{
-    marketplace: Array<{ operation: string; status: string; evidence: string }>;
-    freelancerCredentials: { accessTokenConfigured: boolean; verificationStatus: string; readProfile: boolean; readProjects: boolean };
-    github: { read: string; scope: string; tokenConfigured: boolean };
-    linkedin: { read: string; reason: string; redirectUri: string | null; clientConfigured: boolean; authorized: boolean; accessTokenExpiresAt: string | null };
-    hermes: { draft: string; active: boolean; reason: string };
-  }>('/capabilities') });
+  const query = useQuery({ queryKey: ['capabilities'], queryFn: () => api<Capabilities>('/capabilities') });
   const verifyFreelancer = useMutation({
     mutationFn: () => api<{ message: string }>('/freelancer/verify', jsonRequest('POST')),
     onSuccess: async (result) => { setNotice(result.message); await queryClient.invalidateQueries({ queryKey: ['capabilities'] }); },
@@ -565,8 +589,8 @@ function CapabilitiesPage() {
       </section>
       <section className="form-card">
         <div className="section-heading"><div><p className="eyebrow">Sumber lain</p><h2>Knowledge dan drafting</h2></div></div>
-        <div className="capability-row"><div><strong>GitHub</strong><p>{query.data.github.scope}; mode read-only. Token server {query.data.github.tokenConfigured ? 'diatur' : 'belum diatur'}.</p></div><StateLabel state="active" /></div>
-        <div className="capability-row"><div><strong>LinkedIn</strong><p>{query.data.linkedin.reason} Kredensial aplikasi {query.data.linkedin.clientConfigured ? 'sudah diatur untuk server ini' : 'belum diatur'}; {query.data.linkedin.authorized ? 'izin anggota tersimpan' : 'consent anggota belum diberikan'}{query.data.linkedin.accessTokenExpiresAt ? `; token berlaku hingga ${formatDate(query.data.linkedin.accessTokenExpiresAt)}` : ''}.</p>{query.data.linkedin.redirectUri && <p>URL callback yang harus terdaftar di LinkedIn Developer Portal: <code>{query.data.linkedin.redirectUri}</code></p>}</div><StateLabel state={query.data.linkedin.authorized ? 'connected' : query.data.linkedin.accessTokenExpiresAt ? 'expired' : query.data.linkedin.clientConfigured ? 'unverified' : 'draft'} /></div>
+        <div className="capability-row"><div><strong>GitHub</strong><p>{query.data.github.scope}; mode read-only. Repositori publik dapat dibaca tanpa token, privat memerlukan token server.</p></div><StateLabel state={query.data.github.verificationStatus} /></div>
+        <div className="capability-row"><div><strong>LinkedIn</strong><p>{query.data.linkedin.reason} Kredensial aplikasi {query.data.linkedin.clientConfigured ? 'sudah diatur untuk server ini' : 'belum diatur'}; {query.data.linkedin.authorized ? 'izin anggota tersimpan' : query.data.linkedin.verificationStatus === 'expired' ? 'token sudah kedaluwarsa' : 'consent anggota belum terverifikasi'}{query.data.linkedin.authorized && query.data.linkedin.accessTokenExpiresAt ? `; token berlaku hingga ${formatDate(query.data.linkedin.accessTokenExpiresAt)}` : ''}.</p>{query.data.linkedin.redirectUri && <p>URL callback yang harus terdaftar di LinkedIn Developer Portal: <code>{query.data.linkedin.redirectUri}</code></p>}</div><StateLabel state={query.data.linkedin.verificationStatus} /></div>
         {query.data.linkedin.authorized
           ? <button type="button" className="button button-secondary" disabled={disconnectLinkedIn.isPending} onClick={() => disconnectLinkedIn.mutate()}>{disconnectLinkedIn.isPending ? 'Menghapus…' : 'Hapus token LinkedIn lokal'}</button>
           : <button type="button" className="button button-secondary" disabled={!query.data.linkedin.clientConfigured || connectLinkedIn.isPending} onClick={() => connectLinkedIn.mutate()}>{connectLinkedIn.isPending ? 'Menyiapkan OAuth…' : 'Hubungkan LinkedIn'}</button>}
@@ -589,7 +613,7 @@ function OfficePage() {
   if (query.isPending) return <LoadingPanel label="Memeriksa status tiap ruang..." />;
   if (query.isError) return <ErrorNotice message="Status ruang belum dapat dimuat." onRetry={() => query.refetch()} />;
   const departments = [
-    { name: 'Lobby', to: '/', role: 'Chief of staff', note: `${query.data.counts.openProjects} peluang contoh / ringkasan ruang kerja` },
+    { name: 'Lobby', to: '/', role: 'Chief of staff', note: `${query.data.counts.openProjects} peluang aktif / ringkasan ruang kerja` },
     { name: 'Sales & Bids', to: '/opportunities', role: 'Market scout / bid strategist', note: `${query.data.counts.openProjects} peluang / ${query.data.counts.drafts} draf lokal` },
     { name: 'Profile Studio', to: '/profile', role: 'Profile editor', note: query.data.profileComplete ? 'Bidang dan spesialisasi sudah diisi' : 'Profil layanan belum diatur' },
     { name: 'Client Relations', to: '/pipeline', role: 'Client relations', note: 'Pipeline lokal / akses pesan marketplace manual-only' },

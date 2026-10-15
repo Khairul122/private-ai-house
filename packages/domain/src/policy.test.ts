@@ -64,6 +64,13 @@ describe('evaluatePolicy', () => {
     expect(result).toMatchObject({ allowed: true, reasonCode: 'allowed', simulationOnly: true });
   });
 
+  it('blocks projects with no published deadline and explains the missing information', () => {
+    const result = evaluatePolicy({ ...context, capability: 'supported', executionMode: 'simulated', project: { ...project, deadlineDays: null } });
+
+    expect(result).toMatchObject({ allowed: false, reasonCode: 'deadline_unknown' });
+    expect(result.reason).toContain('belum dicantumkan');
+  });
+
   it('fails closed when paused, expired, over budget, or outside active hours', () => {
     expect(evaluatePolicy({ ...context, capability: 'supported', policy: { ...policy, state: 'paused' } }).reasonCode).toBe('policy_paused');
     expect(evaluatePolicy({ ...context, capability: 'supported', policy: { ...policy, expiresAt: '2026-10-13T00:00:00.000Z' } }).reasonCode).toBe('policy_expired');

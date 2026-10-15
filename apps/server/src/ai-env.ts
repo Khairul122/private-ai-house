@@ -10,7 +10,7 @@ export type DraftingEnvironment = {
   valid: boolean;
 };
 
-const defaults: DraftingEnvironment = { mode: 'disabled', consent: false, executable: 'hermes', profile: 'fvh', valid: true };
+const defaults: DraftingEnvironment = { mode: 'disabled', consent: false, executable: 'hermes', profile: 'private-ai-house', valid: true };
 
 export function parseDraftingEnvironment(content: string, inherited: NodeJS.ProcessEnv = {}): DraftingEnvironment {
   let fileValues: Record<string, string | undefined>;
