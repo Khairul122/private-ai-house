@@ -78,10 +78,10 @@ function isSameOrigin(origin: string, protocol: string, host: string | undefined
   }
 }
 
-function readProductionWriteChecks(repository: WorkspaceRepository): Map<FreelancerWriteOperation, FreelancerProductionWriteCheck> {
+async function readProductionWriteChecks(repository: WorkspaceRepository): Promise<Map<FreelancerWriteOperation, FreelancerProductionWriteCheck>> {
   const checks = new Map<FreelancerWriteOperation, FreelancerProductionWriteCheck>();
   const operations = new Set<FreelancerWriteOperation>(['submit_bid', 'edit_profile', 'send_message']);
-  for (const event of repository.listAudit(500)) {
+  for (const event of await repository.listAudit(500)) {
     const prefix = 'marketplace.production.';
     if (!event.type.startsWith(prefix)) continue;
     const operation = event.type.slice(prefix.length) as FreelancerWriteOperation;
@@ -107,8 +107,8 @@ function linkedinVerification(credentialStatus: CredentialStatus | undefined, no
   return { authorized: true, verificationStatus: 'connected' as const };
 }
 
-export function createApp(options: AppOptions = {}): FastifyInstance {
-  const repository = options.repository ?? new WorkspaceRepository();
+export async function createApp(options: AppOptions = {}): Promise<FastifyInstance> {
+  const repository = options.repository ?? await WorkspaceRepository.open();
   const now = options.clock ?? (() => new Date());
   const drafting = options.drafting ?? new UnavailableDraftingAdapter();
   const draftingMode = options.drafting ? options.draftingMode ?? 'fixture' : 'disabled';
@@ -117,9 +117,9 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   const app = Fastify({ logger: false, bodyLimit: 2_500_000, trustProxy: false });
   let freelancerVerification: FreelancerVerification | null = null;
   const freelancerSandboxWriteChecks = new Map<FreelancerSandboxWriteOperation, FreelancerSandboxWriteCheck>();
-  const freelancerProductionWriteChecks = readProductionWriteChecks(repository);
-  const refreshProductionWriteChecks = () => {
-    for (const [operation, check] of readProductionWriteChecks(repository)) freelancerProductionWriteChecks.set(operation, check);
+  const freelancerProductionWriteChecks = await readProductionWriteChecks(repository);
+  const refreshProductionWriteChecks = async () => {
+    for (const [operation, check] of await readProductionWriteChecks(repository)) freelancerProductionWriteChecks.set(operation, check);
   };
 
   app.addHook('onRequest', async (request, reply) => {
@@ -144,31 +144,31 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   });
 
   app.get('/api/health', async () => ({
-    ok: true, mode: 'local', database: 'sqlite', ai: draftingMode, liveWrites: options.autopilot?.getStatus().state === 'running',
+    ok: true, mode: 'local', database: 'supabase', ai: draftingMode, liveWrites: (await options.autopilot?.getStatus())?.state === 'running',
     manualProductionWritesConfigured: (options.getCredentialStatus?.() ?? options.credentialStatus)?.freelancerAccessTokenConfigured ?? false,
-    autopilot: options.autopilot?.getStatus().state ?? 'unavailable',
+    autopilot: (await options.autopilot?.getStatus())?.state ?? 'unavailable',
   }));
-  app.get('/api/autopilot', async () => options.autopilot?.getStatus() ?? {
+  app.get('/api/autopilot', async () => await options.autopilot?.getStatus() ?? {
     state: 'blocked', lastRunAt: null, nextRunAt: null, lastMessage: 'Autopilot belum tersedia pada server ini.', lastImported: 0, lastSubmitted: 0, specializations: [],
   });
   app.get('/api/business-sync', async () => options.businessSync?.getStatus() ?? null);
   // Thread project ids are bare Freelancer ids; local project ids are 'freelancer:<id>'.
-  const threadProjectIds = () => new Set(repository.listClientThreads().map((thread) => thread.projectId).filter((id): id is string => id !== null).map((id) => `freelancer:${id}`));
+  const threadProjectIds = async () => new Set((await repository.listClientThreads()).map((thread) => thread.projectId).filter((id): id is string => id !== null).map((id) => `freelancer:${id}`));
   const dayDiff = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 
   app.get('/api/insights/bids', async () => {
-    const outcomes = repository.listBidOutcomes();
+    const outcomes = await repository.listBidOutcomes();
     const won = outcomes.filter(({ outcome }) => outcome === 'won').length;
     const lost = outcomes.filter(({ outcome }) => outcome === 'lost').length;
     const pending = outcomes.filter(({ outcome }) => outcome === 'pending').length;
-    const conversations = threadProjectIds();
+    const conversations = await threadProjectIds();
     const since = new Date(now().getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const reasons = repository.skipReasonSummary(since);
+    const reasons = await repository.skipReasonSummary(since);
     const sync = options.businessSync?.getStatus().outcomes;
     const lastChecked = outcomes.map(({ checkedAt }) => checkedAt).filter((value): value is string => value !== null).sort().at(-1) ?? null;
     return {
       outcomes: { submitted: outcomes.length, won, lost, pending, withConversation: outcomes.filter((row) => conversations.has(row.projectId)).length, winRate: won + lost === 0 ? null : won / (won + lost) },
-      recent: outcomes.slice(0, 10).map((outcome) => ({ projectId: outcome.projectId, title: repository.getProject(outcome.projectId)?.title ?? null, submittedAt: outcome.submittedAt, outcome: outcome.outcome, awardStatus: outcome.awardStatus, checkedAt: outcome.checkedAt })),
+      recent: await Promise.all(outcomes.slice(0, 10).map(async (outcome) => ({ projectId: outcome.projectId, title: (await repository.getProject(outcome.projectId))?.title ?? null, submittedAt: outcome.submittedAt, outcome: outcome.outcome, awardStatus: outcome.awardStatus, checkedAt: outcome.checkedAt }))),
       skips: { total: reasons.reduce((total, reason) => total + Number(reason.total), 0), recent7d: reasons.reduce((total, reason) => total + Number(reason.recent), 0), reasons },
       lastCheck: sync?.lastRunAt ? { at: sync.lastRunAt, ok: sync.ok, error: sync.error } : { at: lastChecked, ok: lastChecked ? true : null, error: null },
     };
@@ -178,31 +178,31 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     const sync = options.businessSync?.getStatus().messages ?? null;
     const selfId = sync?.selfId ?? null;
     const nowMs = now().getTime();
-    const needsReply = selfId === null ? [] : repository.listClientThreads()
+    const needsReply = selfId === null ? [] : await Promise.all((await repository.listClientThreads())
       .filter((thread) => thread.lastSenderId !== selfId)
       .sort((a, b) => a.lastMessageAt.localeCompare(b.lastMessageAt))
-      .map((thread) => ({
+      .map(async (thread) => ({
         threadId: thread.threadId, projectId: thread.projectId, preview: thread.preview, lastMessageAt: thread.lastMessageAt,
-        projectTitle: thread.projectId ? repository.getProject(`freelancer:${thread.projectId}`)?.title ?? null : null,
+        projectTitle: thread.projectId ? (await repository.getProject(`freelancer:${thread.projectId}`))?.title ?? null : null,
         waitingHours: Math.max(0, Math.floor((nowMs - Date.parse(thread.lastMessageAt)) / 3_600_000)),
-      }));
-    const conversations = threadProjectIds();
-    const followUps = repository.listBidOutcomes()
+      })));
+    const conversations = await threadProjectIds();
+    const followUps = (await Promise.all((await repository.listBidOutcomes())
       .filter((row) => row.outcome === 'pending' && !conversations.has(row.projectId))
-      .map((row) => ({ projectId: row.projectId, title: repository.getProject(row.projectId)?.title ?? row.projectId, submittedAt: row.submittedAt, daysSinceBid: Math.floor((nowMs - Date.parse(row.submittedAt)) / 86_400_000) }))
+      .map(async (row) => ({ projectId: row.projectId, title: (await repository.getProject(row.projectId))?.title ?? row.projectId, submittedAt: row.submittedAt, daysSinceBid: Math.floor((nowMs - Date.parse(row.submittedAt)) / 86_400_000) }))))
       .filter((row) => row.daysSinceBid >= FOLLOW_UP_DAYS);
     return { sync: sync && { lastRunAt: sync.lastRunAt, ok: sync.ok, error: sync.error }, needsReply, followUps };
   });
 
   app.get('/api/work', async () => {
-    const policy = repository.getPolicy();
+    const policy = await repository.getPolicy();
     const today = localDateKey(now(), policy.timezone);
     const month = today.slice(0, 7);
-    const projectsById = new Map(repository.listClientProjects().map((project) => [project.id, project]));
+    const projectsById = new Map((await repository.listClientProjects()).map((project) => [project.id, project]));
     const projects = [...projectsById.values()]
       .map((project) => ({ ...project, daysToDeadline: project.deadline ? dayDiff(today, project.deadline) : null }))
       .sort((a, b) => Number(b.status === 'active') - Number(a.status === 'active') || (a.daysToDeadline ?? Infinity) - (b.daysToDeadline ?? Infinity));
-    const payments = repository.listPayments();
+    const payments = await repository.listPayments();
     const received = new Map<string, { currency: string; total: number; bySource: Record<string, number> }>();
     const expected = new Map<string, { currency: string; total: number }>();
     for (const payment of payments) {
@@ -227,9 +227,9 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   app.post('/api/work/projects', async (request, reply) => {
     const parsed = parseBody(createClientProjectSchema, request.body);
     if ('issues' in parsed) return reply.code(400).send({ error: 'Data proyek tidak valid.', issues: parsed.issues });
-    const project = repository.createClientProject({ ...parsed.value, externalProjectId: null });
+    const project = await repository.createClientProject({ ...parsed.value, externalProjectId: null });
     if (!project) return reply.code(409).send({ error: 'Proyek sudah ada.' });
-    repository.appendAudit({ type: 'work.project_created', resourceId: project.id, status: 'recorded', reason: `Proyek klien "${project.title}" ditambahkan.`, policyVersion: null, payloadHash: null });
+    await repository.appendAudit({ type: 'work.project_created', resourceId: project.id, status: 'recorded', reason: `Proyek klien "${project.title}" ditambahkan.`, policyVersion: null, payloadHash: null });
     return reply.code(201).send(project);
   });
 
@@ -238,32 +238,32 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     const parsed = parseBody(updateClientProjectSchema, request.body);
     if (!params.success || 'issues' in parsed) return reply.code(400).send({ error: 'Perubahan proyek tidak valid.', ...('issues' in parsed ? { issues: parsed.issues } : {}) });
     const patch = Object.fromEntries(Object.entries(parsed.value).filter(([, value]) => value !== undefined));
-    const project = repository.updateClientProject(params.data.id, patch);
+    const project = await repository.updateClientProject(params.data.id, patch);
     if (!project) return reply.code(404).send({ error: 'Proyek tidak ditemukan.' });
-    repository.appendAudit({ type: 'work.project_updated', resourceId: project.id, status: 'recorded', reason: `Proyek "${project.title}" diperbarui (status ${project.status}).`, policyVersion: null, payloadHash: null });
+    await repository.appendAudit({ type: 'work.project_updated', resourceId: project.id, status: 'recorded', reason: `Proyek "${project.title}" diperbarui (status ${project.status}).`, policyVersion: null, payloadHash: null });
     return project;
   });
 
   app.post('/api/work/payments', async (request, reply) => {
     const parsed = parseBody(createPaymentSchema, request.body);
     if ('issues' in parsed) return reply.code(400).send({ error: 'Data pembayaran tidak valid.', issues: parsed.issues });
-    if (!repository.getClientProject(parsed.value.projectId)) return reply.code(404).send({ error: 'Proyek tidak ditemukan.' });
-    const payment = repository.createPayment({ ...parsed.value, receivedAt: parsed.value.status === 'received' ? now().toISOString() : null });
-    repository.appendAudit({ type: 'work.payment_recorded', resourceId: payment.id, status: 'recorded', reason: `Pembayaran ${payment.currency} ${payment.amount} dicatat (${payment.status === 'received' ? 'diterima' : 'diharapkan'}).`, policyVersion: null, payloadHash: null });
+    if (!await repository.getClientProject(parsed.value.projectId)) return reply.code(404).send({ error: 'Proyek tidak ditemukan.' });
+    const payment = await repository.createPayment({ ...parsed.value, receivedAt: parsed.value.status === 'received' ? now().toISOString() : null });
+    await repository.appendAudit({ type: 'work.payment_recorded', resourceId: payment.id, status: 'recorded', reason: `Pembayaran ${payment.currency} ${payment.amount} dicatat (${payment.status === 'received' ? 'diterima' : 'diharapkan'}).`, policyVersion: null, payloadHash: null });
     return reply.code(201).send(payment);
   });
 
   app.post('/api/work/payments/:id/received', async (request, reply) => {
     const params = paramsSchema.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: 'ID pembayaran tidak valid.' });
-    const payment = repository.markPaymentReceived(params.data.id, now().toISOString());
+    const payment = await repository.markPaymentReceived(params.data.id, now().toISOString());
     if (!payment) return reply.code(404).send({ error: 'Pembayaran tidak ditemukan.' });
-    repository.appendAudit({ type: 'work.payment_received', resourceId: payment.id, status: 'recorded', reason: `Pembayaran ${payment.currency} ${payment.amount} ditandai diterima.`, policyVersion: null, payloadHash: null });
+    await repository.appendAudit({ type: 'work.payment_received', resourceId: payment.id, status: 'recorded', reason: `Pembayaran ${payment.currency} ${payment.amount} ditandai diterima.`, policyVersion: null, payloadHash: null });
     return payment;
   });
 
   app.get('/api/capabilities', async () => {
-    refreshProductionWriteChecks();
+    await refreshProductionWriteChecks();
     const credentialStatus = options.getCredentialStatus?.() ?? options.credentialStatus;
     const linkedin = linkedinVerification(credentialStatus, now());
     return {
@@ -295,7 +295,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     },
     github: {
       read: 'supported',
-      verificationStatus: repository.listKnowledgeSources().some((source) => source.provider === 'github') ? 'supported' : 'unknown',
+      verificationStatus: (await repository.listKnowledgeSources()).some((source) => source.provider === 'github') ? 'supported' : 'unknown',
       scope: 'selected repository Contents: read',
       tokenConfigured: Boolean(options.getGitHubToken?.() ?? options.githubToken),
     },
@@ -309,7 +309,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       reason: 'Hanya profil OIDC ringan yang diminta. Produk OIDC LinkedIn harus disetujui dan URL callback yang ditampilkan harus diterima di Developer Portal; akses profil lengkap tetap tidak tersedia.',
     },
     hermes: {
-      draft: 'optional', active: draftingMode === 'hermes', draftsInProgress: draftsInProgress + (options.autopilot?.getStatus().draftsInProgress ?? 0),
+      draft: 'optional', active: draftingMode === 'hermes', draftsInProgress: draftsInProgress + ((await options.autopilot?.getStatus())?.draftsInProgress ?? 0),
       reason: draftingMode === 'hermes'
         ? 'Data proyek terpilih, fakta profil yang diberikan, dan hingga empat potongan bukti lokal dikirim ke profil Hermes yang dikonfigurasi; kredensial marketplace tidak disertakan.'
         : options.draftingReason ?? 'Hermes belum aktif. Draf AI tidak dibuat sampai profil Hermes dikonfigurasi dan persetujuan pemrosesan data diberikan.',
@@ -355,11 +355,11 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       });
       const success = result.statusCode === 200;
       const resultDescription = result.resultId ? `ID hasil: ${result.resultId}.` : result.resultStatus ? `Status hasil: ${result.resultStatus}.` : 'Freelancer tidak memberikan ID hasil.';
-      repository.appendAudit({
+      await repository.appendAudit({
         type: `marketplace.sandbox.${input.operation}_test`, resourceId: result.resultId ?? 'freelancer-sandbox',
         status: success ? 'recorded' : 'failed',
         reason: `Uji tulis sandbox ${input.operation} menghasilkan HTTP ${result.statusCode}. ${resultDescription} Isi payload tidak disimpan.`,
-        policyVersion: repository.getPolicy().version, payloadHash: hashPayload(input),
+        policyVersion: (await repository.getPolicy()).version, payloadHash: hashPayload(input),
       });
       if (!success) return reply.code(502).send({ error: `Freelancer sandbox merespons HTTP ${result.statusCode}; status bukan 200.`, providerStatusCode: result.statusCode });
       return {
@@ -372,12 +372,12 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       const checkedAt = now().toISOString();
       const providerStatusCode = error instanceof FreelancerSandboxWriteError ? error.statusCode ?? null : null;
       freelancerSandboxWriteChecks.set(input.operation, { statusCode: providerStatusCode, checkedAt });
-      repository.appendAudit({
+      await repository.appendAudit({
         type: `marketplace.sandbox.${input.operation}_test`, resourceId: 'freelancer-sandbox', status: 'failed',
         reason: providerStatusCode === null
           ? `Uji tulis sandbox ${input.operation} tidak menerima hasil; jangan retry sebelum memeriksa sandbox.`
           : `Uji tulis sandbox ${input.operation} menghasilkan HTTP ${providerStatusCode}.`,
-        policyVersion: repository.getPolicy().version, payloadHash: hashPayload(input),
+        policyVersion: (await repository.getPolicy()).version, payloadHash: hashPayload(input),
       });
       const message = providerStatusCode === null
         ? 'Uji sandbox tidak memperoleh respons yang dapat dipastikan. Periksa thread/proyek sandbox sebelum mengulang.'
@@ -411,11 +411,11 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       freelancerProductionWriteChecks.set(liveInput.operation, check);
       const resultDescription = result.resultId ? `ID hasil: ${result.resultId}.` : result.resultStatus ? `Status hasil: ${result.resultStatus}.` : 'Freelancer tidak memberikan ID hasil.';
       const success = result.statusCode === 200;
-      repository.appendAudit({
+      await repository.appendAudit({
         type: `marketplace.production.${liveInput.operation}`, resourceId: result.resultId ?? 'freelancer-production',
         status: success ? 'recorded' : 'failed',
         reason: `Operasi live ${liveInput.operation} menghasilkan HTTP ${result.statusCode}. ${resultDescription} Isi payload tidak disimpan.`,
-        policyVersion: repository.getPolicy().version, payloadHash: hashPayload(liveInput),
+        policyVersion: (await repository.getPolicy()).version, payloadHash: hashPayload(liveInput),
       });
       if (!success) return reply.code(502).send({ error: `Freelancer merespons HTTP ${result.statusCode}; operasi tidak dinyatakan berhasil.`, providerStatusCode: result.statusCode });
       return {
@@ -428,12 +428,12 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       const checkedAt = now().toISOString();
       const providerStatusCode = error instanceof FreelancerWriteError ? error.statusCode ?? null : null;
       freelancerProductionWriteChecks.set(liveInput.operation, { statusCode: providerStatusCode, checkedAt });
-      repository.appendAudit({
+      await repository.appendAudit({
         type: `marketplace.production.${liveInput.operation}`, resourceId: 'freelancer-production', status: 'failed',
         reason: providerStatusCode === null
           ? `Hasil operasi live ${liveInput.operation} tidak dapat dipastikan; periksa akun Freelancer sebelum mengulang.`
           : `Operasi live ${liveInput.operation} menghasilkan HTTP ${providerStatusCode}.`,
-        policyVersion: repository.getPolicy().version, payloadHash: hashPayload(liveInput),
+        policyVersion: (await repository.getPolicy()).version, payloadHash: hashPayload(liveInput),
       });
       const message = providerStatusCode === null
         ? 'Hasil operasi live tidak dapat dipastikan. Periksa akun Freelancer sebelum mencoba lagi agar tidak membuat duplikasi.'
@@ -450,7 +450,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     if ('issues' in parsed) return reply.code(400).send({ error: 'Pencarian proyek tidak valid.', issues: parsed.issues });
     try {
       const result = await options.readFreelancerProjects(parsed.value.query, parsed.value.limit);
-      const synced = repository.syncFreelancerProjects(result.projects);
+      const synced = await repository.syncFreelancerProjects(result.projects);
       freelancerVerification = {
         connected: true,
         readProfile: freelancerVerification?.readProfile ?? false,
@@ -461,15 +461,15 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
         ...(freelancerVerification?.messagesError ? { messagesError: freelancerVerification.messagesError } : {}),
         reason: freelancerVerification?.readProfile ? 'verified' : 'profile_unavailable',
       };
-      repository.appendAudit({
+      await repository.appendAudit({
         type: 'marketplace.projects_synced', resourceId: 'freelancer', status: 'recorded',
         reason: `Sinkronisasi baca-saja menyimpan ${synced.upserted} proyek dari Freelancer; ${result.skipped} hasil tidak valid dilewati.`,
-        policyVersion: repository.getPolicy().version, payloadHash: null,
+        policyVersion: (await repository.getPolicy()).version, payloadHash: null,
       });
-      return { imported: synced.upserted, skipped: result.skipped, projects: repository.listProjects().filter((project) => project.source === 'freelancer') };
+      return { imported: synced.upserted, skipped: result.skipped, projects: (await repository.listProjects()).filter((project) => project.source === 'freelancer') };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Freelancer tidak dapat diperiksa.';
-      repository.appendAudit({ type: 'marketplace.sync_failed', resourceId: 'freelancer', status: 'failed', reason: message, policyVersion: repository.getPolicy().version, payloadHash: null });
+      await repository.appendAudit({ type: 'marketplace.sync_failed', resourceId: 'freelancer', status: 'failed', reason: message, policyVersion: (await repository.getPolicy()).version, payloadHash: null });
       const statusCode = error instanceof FreelancerReadError ? error.statusCode : undefined;
       return reply.code(statusCode === 401 || statusCode === 403 || statusCode === 429 ? statusCode : 502).send({ error: message });
     }
@@ -513,30 +513,30 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     }
   });
 
-  app.get('/api/profile', async () => repository.getProfile());
+  app.get('/api/profile', async () => await repository.getProfile());
   app.put('/api/profile', async (request, reply) => {
     const parsed = parseBody(updateProfileSchema, request.body);
     if ('issues' in parsed) return reply.code(400).send({ error: 'Profil tidak valid.', issues: parsed.issues });
     const profile = parsed.value;
-    repository.saveProfile(profile);
-    const policy = repository.getPolicy();
+    await repository.saveProfile(profile);
+    const policy = await repository.getPolicy();
     if (policy.state === 'active') {
       const changed: AutonomyPolicy = { ...policy, state: 'draft', version: policy.version + 1, primaryField: profile.primaryField, specializations: profile.specializations };
-      repository.savePolicy(changed);
-      repository.appendAudit({ type: 'policy.reactivation_required', resourceId: 'policy', status: 'recorded', reason: 'Profil berubah; kebijakan kembali ke draf dan perlu diaktifkan ulang.', policyVersion: changed.version, payloadHash: null });
+      await repository.savePolicy(changed);
+      await repository.appendAudit({ type: 'policy.reactivation_required', resourceId: 'policy', status: 'recorded', reason: 'Profil berubah; kebijakan kembali ke draf dan perlu diaktifkan ulang.', policyVersion: changed.version, payloadHash: null });
     } else {
-      repository.savePolicy({ ...policy, primaryField: profile.primaryField, specializations: profile.specializations });
+      await repository.savePolicy({ ...policy, primaryField: profile.primaryField, specializations: profile.specializations });
     }
-    repository.appendAudit({ type: 'profile.updated', resourceId: 'profile', status: 'recorded', reason: 'Fakta dan bidang kerja lokal diperbarui.', policyVersion: repository.getPolicy().version, payloadHash: null });
-    return { profile, policy: repository.getPolicy() };
+    await repository.appendAudit({ type: 'profile.updated', resourceId: 'profile', status: 'recorded', reason: 'Fakta dan bidang kerja lokal diperbarui.', policyVersion: (await repository.getPolicy()).version, payloadHash: null });
+    return { profile, policy: await repository.getPolicy() };
   });
 
-  app.get('/api/policy', async () => repository.getPolicy());
+  app.get('/api/policy', async () => await repository.getPolicy());
   app.put('/api/policy', async (request, reply) => {
     const parsed = parseBody(updatePolicySchema, request.body);
     if ('issues' in parsed) return reply.code(400).send({ error: 'Kebijakan tidak valid.', issues: parsed.issues });
-    const previous = repository.getPolicy();
-    const profile = repository.getProfile();
+    const previous = await repository.getPolicy();
+    const profile = await repository.getProfile();
     const next: AutonomyPolicy = {
       ...previous,
       ...parsed.value,
@@ -546,66 +546,67 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       specializations: profile.specializations,
       simulationOnly: true,
     };
-    repository.savePolicy(next);
-    repository.appendAudit({ type: 'policy.updated', resourceId: 'policy', status: 'recorded', reason: 'Batas kebijakan diperbarui; perlu aktivasi ulang.', policyVersion: next.version, payloadHash: hashPayload(next) });
+    await repository.savePolicy(next);
+    await repository.appendAudit({ type: 'policy.updated', resourceId: 'policy', status: 'recorded', reason: 'Batas kebijakan diperbarui; perlu aktivasi ulang.', policyVersion: next.version, payloadHash: hashPayload(next) });
     return next;
   });
   app.post('/api/policy/activate', async (request, reply) => {
     const parsed = parseBody(activatePolicySchema, request.body);
     if ('issues' in parsed) return reply.code(400).send({ error: 'Aktivasi memerlukan konfirmasi simulasi lokal.', issues: parsed.issues });
-    const policy = repository.getPolicy();
-    const profile = repository.getProfile();
+    const policy = await repository.getPolicy();
+    const profile = await repository.getProfile();
     if (!profile.primaryField.trim() || profile.specializations.length === 0) return reply.code(409).send({ error: 'Isi bidang utama dan minimal satu spesialisasi sebelum mengaktifkan kebijakan.' });
     if (!policy.allowedActions.includes('bid.submit')) return reply.code(409).send({ error: 'Pilih tindakan bid simulasi yang tercakup kebijakan.' });
     const activated: AutonomyPolicy = { ...policy, state: 'active', primaryField: profile.primaryField, specializations: profile.specializations, simulationOnly: true };
-    repository.savePolicy(activated);
-    repository.appendAudit({ type: 'policy.activated', resourceId: 'policy', status: 'recorded', reason: 'Pemilik mengaktifkan satu kebijakan simulasi lokal.', policyVersion: activated.version, payloadHash: hashPayload(activated) });
+    await repository.savePolicy(activated);
+    await repository.appendAudit({ type: 'policy.activated', resourceId: 'policy', status: 'recorded', reason: 'Pemilik mengaktifkan satu kebijakan simulasi lokal.', policyVersion: activated.version, payloadHash: hashPayload(activated) });
     return { policy: activated, externalWrites: false };
   });
   app.post('/api/policy/pause', async () => {
-    const policy = repository.getPolicy();
+    const policy = await repository.getPolicy();
     const paused: AutonomyPolicy = { ...policy, state: 'paused' };
-    repository.savePolicy(paused);
-    repository.appendAudit({ type: 'policy.paused', resourceId: 'policy', status: 'recorded', reason: 'Jeda darurat diaktifkan dari dashboard.', policyVersion: paused.version, payloadHash: null });
+    await repository.savePolicy(paused);
+    await repository.appendAudit({ type: 'policy.paused', resourceId: 'policy', status: 'recorded', reason: 'Jeda darurat diaktifkan dari dashboard.', policyVersion: paused.version, payloadHash: null });
     return paused;
   });
   app.post('/api/policy/resume', async (_request, reply) => {
-    const policy = repository.getPolicy();
+    const policy = await repository.getPolicy();
     if (policy.state !== 'paused') return reply.code(409).send({ error: 'Kebijakan tidak sedang dijeda.' });
     if (Date.parse(policy.expiresAt) <= now().getTime()) return reply.code(409).send({ error: 'Kebijakan kedaluwarsa dan perlu dikonfigurasi ulang.' });
     const resumed = { ...policy, state: 'active' as const };
-    repository.savePolicy(resumed);
-    repository.appendAudit({ type: 'policy.resumed', resourceId: 'policy', status: 'recorded', reason: 'Kebijakan dilanjutkan oleh pemilik.', policyVersion: resumed.version, payloadHash: null });
+    await repository.savePolicy(resumed);
+    await repository.appendAudit({ type: 'policy.resumed', resourceId: 'policy', status: 'recorded', reason: 'Kebijakan dilanjutkan oleh pemilik.', policyVersion: resumed.version, payloadHash: null });
     void options.autopilot?.start();
     return resumed;
   });
 
   app.get('/api/projects', async (request) => {
     const query = request.query as { search?: string; status?: string };
-    const profile = repository.getProfile();
+    const profile = await repository.getProfile();
     const search = query.search?.trim().toLowerCase() ?? '';
-    return repository.listProjects().map((project) => {
+    const assessed = await Promise.all((await repository.listProjects()).map(async (project) => {
       const assessment = assessProject(project, profile.specializations);
-      repository.evaluateProject(project.id, assessment.score, assessment.factors);
+      await repository.evaluateProject(project.id, assessment.score, assessment.factors);
       return { ...project, score: assessment.score, factors: assessment.factors };
-    }).filter((project) => (!search || `${project.title} ${project.description} ${project.skills.join(' ')}`.toLowerCase().includes(search)) && (!query.status || query.status === 'all' || project.status === query.status))
+    }));
+    return assessed.filter((project) => (!search || `${project.title} ${project.description} ${project.skills.join(' ')}`.toLowerCase().includes(search)) && (!query.status || query.status === 'all' || project.status === query.status))
       .sort((a, b) => b.score - a.score);
   });
   app.get('/api/projects/:id', async (request, reply) => {
     const params = paramsSchema.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: 'ID peluang tidak valid.' });
-    const project = repository.getProject(params.data.id);
+    const project = await repository.getProject(params.data.id);
     if (!project) return reply.code(404).send({ error: 'Peluang tidak ditemukan.' });
     return project;
   });
   app.post('/api/projects/:id/draft', async (request, reply) => {
     const params = paramsSchema.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: 'ID peluang tidak valid.' });
-    const project = repository.getProject(params.data.id);
+    const project = await repository.getProject(params.data.id);
     if (!project) return reply.code(404).send({ error: 'Peluang tidak ditemukan.' });
     if (project.status !== 'open') return reply.code(409).send({ error: 'Peluang ini sudah tidak terbuka.' });
     if (draftingMode === 'disabled') return reply.code(503).send({ error: options.draftingReason ?? 'Hermes belum aktif. Hubungkan profil Hermes dan aktifkan persetujuan pemrosesan data sebelum meminta draf AI.' });
-    const profile = repository.getProfile();
+    const profile = await repository.getProfile();
     const score = assessProject(project, profile.specializations).score;
     let generated;
     draftsInProgress += 1;
@@ -613,12 +614,12 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       generated = await drafting.draftBid({
         project,
         profileFacts: profile.facts,
-        evidence: repository.searchKnowledge(`${project.title} ${project.skills.join(' ')}`, 4).map((item) => ({ label: item.path, source: item.url, content: item.content })),
+        evidence: (await repository.searchKnowledge(`${project.title} ${project.skills.join(' ')}`, 4)).map((item) => ({ label: item.path, source: item.url, content: item.content })),
         profileRate: { min: profile.minPrice, max: profile.maxPrice },
         score,
       });
     } catch {
-      repository.appendAudit({ type: 'bid.draft_failed', resourceId: project.id, status: 'failed', reason: 'Adapter drafting gagal atau mengembalikan output yang tidak valid. Tidak ada tindakan marketplace.', policyVersion: repository.getPolicy().version, payloadHash: null });
+      await repository.appendAudit({ type: 'bid.draft_failed', resourceId: project.id, status: 'failed', reason: 'Adapter drafting gagal atau mengembalikan output yang tidak valid. Tidak ada tindakan marketplace.', policyVersion: (await repository.getPolicy()).version, payloadHash: null });
       return reply.code(503).send({ error: 'Draf tidak dapat dibuat saat ini. Tidak ada tindakan marketplace yang dijalankan.' });
     } finally {
       draftsInProgress -= 1;
@@ -627,8 +628,8 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       id: createId('draft'), projectId: project.id, ...generated, currency: project.currency,
       status: 'draft_ready', createdAt: now().toISOString(),
     };
-    repository.createDraft(draft);
-    repository.appendAudit({ type: 'bid.draft_created', resourceId: project.id, status: 'recorded', reason: draftingMode === 'hermes' ? 'Draf dibuat Hermes dari fakta dan bukti lokal yang dipilih.' : 'Draf dibuat oleh adapter yang secara eksplisit dipilih untuk pengujian.', policyVersion: repository.getPolicy().version, payloadHash: hashPayload({ proposal: draft.proposal, proposedPrice: draft.proposedPrice, currency: draft.currency }) });
+    await repository.createDraft(draft);
+    await repository.appendAudit({ type: 'bid.draft_created', resourceId: project.id, status: 'recorded', reason: draftingMode === 'hermes' ? 'Draf dibuat Hermes dari fakta dan bukti lokal yang dipilih.' : 'Draf dibuat oleh adapter yang secara eksplisit dipilih untuk pengujian.', policyVersion: (await repository.getPolicy()).version, payloadHash: hashPayload({ proposal: draft.proposal, proposedPrice: draft.proposedPrice, currency: draft.currency }) });
     return reply.code(201).send(draft);
   });
   app.put('/api/drafts/:id', async (request, reply) => {
@@ -636,21 +637,21 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     const parsed = parseBody(draftUpdateSchema, request.body);
     if (!params.success) return reply.code(400).send({ error: 'ID draf tidak valid.' });
     if ('issues' in parsed) return reply.code(400).send({ error: 'Draf tidak valid.', issues: parsed.issues });
-    const before = repository.getDraft(params.data.id);
+    const before = await repository.getDraft(params.data.id);
     if (!before) return reply.code(404).send({ error: 'Draf tidak ditemukan.' });
-    const updated = repository.updateDraft(params.data.id, parsed.value);
+    const updated = await repository.updateDraft(params.data.id, parsed.value);
     if (!updated) return reply.code(404).send({ error: 'Draf tidak ditemukan.' });
-    repository.appendAudit({ type: 'bid.draft_updated', resourceId: updated.projectId, status: 'recorded', reason: 'Pemilik memperbarui draf lokal.', policyVersion: repository.getPolicy().version, payloadHash: hashPayload({ proposal: updated.proposal, proposedPrice: updated.proposedPrice, currency: updated.currency }) });
+    await repository.appendAudit({ type: 'bid.draft_updated', resourceId: updated.projectId, status: 'recorded', reason: 'Pemilik memperbarui draf lokal.', policyVersion: (await repository.getPolicy()).version, payloadHash: hashPayload({ proposal: updated.proposal, proposedPrice: updated.proposedPrice, currency: updated.currency }) });
     return updated;
   });
   app.post('/api/projects/:id/simulate-submit', async (request, reply) => {
     const params = paramsSchema.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: 'ID peluang tidak valid.' });
-    const project = repository.getProject(params.data.id);
-    const draft = repository.getLatestDraft(params.data.id);
+    const project = await repository.getProject(params.data.id);
+    const draft = await repository.getLatestDraft(params.data.id);
     if (!project || !draft) return reply.code(404).send({ error: 'Buat draf sebelum menjalankan simulasi.' });
-    const policy = repository.getPolicy();
-    const audits = repository.listAudit(1000).filter((event) => event.type === 'bid.simulated' && event.status === 'recorded');
+    const policy = await repository.getPolicy();
+    const audits = (await repository.listAudit(1000)).filter((event) => event.type === 'bid.simulated' && event.status === 'recorded');
     const today = localDateKey(now(), policy.timezone);
     const week = mondayKey(today);
     const dailyUsed = audits.filter((event) => localDateKey(new Date(event.createdAt), policy.timezone) === today).length;
@@ -659,7 +660,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     const decision = decideBid({ policy, project, confidence: draft.confidence, proposedPrice: draft.proposedPrice, dailyUsed, weeklyUsed, now: now() });
     const transition = decision.allowed ? transitionPipeline('draft_ready', 'policy_check') : undefined;
     if (transition && !transition.ok) return reply.code(409).send({ error: 'Status pipeline tidak dapat diperiksa.' });
-    const event = repository.appendAudit({
+    const event = await repository.appendAudit({
       type: decision.allowed ? 'bid.simulated' : 'bid.simulation_skipped', resourceId: project.id,
       status: decision.allowed ? 'recorded' : 'blocked', reason: decision.reason,
       policyVersion: policy.version, payloadHash: hashPayload(payload),
@@ -669,21 +670,22 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       event,
       externalWrites: false,
       marketplaceStatus: 'unchanged',
-      pipelineStatus: decision.allowed ? 'draft_ready' : repository.listProjects().find((item) => item.id === project.id)?.pipelineStatus ?? 'draft_ready',
+      pipelineStatus: decision.allowed ? 'draft_ready' : (await repository.listProjects()).find((item) => item.id === project.id)?.pipelineStatus ?? 'draft_ready',
     };
   });
 
-  app.get('/api/pipeline', async () => repository.listProjects().map((project) => ({
+  app.get('/api/pipeline', async () => (await Promise.all((await repository.listProjects()).map(async (project) => ({
     ...project,
-    latestDraft: repository.getLatestDraft(project.id) ?? null,
-  })).sort((a, b) => b.score - a.score));
+    latestDraft: await repository.getLatestDraft(project.id) ?? null,
+  })))).sort((a, b) => b.score - a.score));
   app.get('/api/dashboard', async () => {
-    const projects = repository.listProjects();
-    const activity = repository.listAudit(8);
-    const audits = repository.listAudit(5_000);
-    const sources = repository.listKnowledgeSources();
-    const policy = repository.getPolicy();
-    const profile = repository.getProfile();
+    const projects = await repository.listProjects();
+    const draftCount = (await Promise.all(projects.map((project) => repository.getLatestDraft(project.id)))).filter(Boolean).length;
+    const activity = await repository.listAudit(8);
+    const audits = await repository.listAudit(5_000);
+    const sources = await repository.listKnowledgeSources();
+    const policy = await repository.getPolicy();
+    const profile = await repository.getProfile();
     const currentDate = localDateKey(now(), policy.timezone);
     const currentWeek = mondayKey(currentDate);
     const bidAudits = audits.filter((event) => event.type === 'marketplace.production.submit_bid' && event.status === 'recorded');
@@ -691,9 +693,9 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       mode: 'workspace lokal',
       counts: {
         openProjects: projects.filter((project) => project.status === 'open').length,
-        drafts: projects.filter((project) => repository.getLatestDraft(project.id)).length,
+        drafts: draftCount,
         submittedBids: projects.filter((project) => project.pipelineStatus === 'submitted').length,
-        policySkips: repository.countAuditByStatus('blocked'),
+        policySkips: await repository.countAuditByStatus('blocked'),
         knowledgeSources: sources.length,
       },
       policy: { state: policy.state, version: policy.version, simulationOnly: policy.simulationOnly },
@@ -710,14 +712,14 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   app.get('/api/activity', async (request) => {
     const query = request.query as { limit?: string };
     const limit = Math.max(1, Math.min(100, Number.parseInt(query.limit ?? '50', 10) || 50));
-    return repository.listAudit(limit);
+    return await repository.listAudit(limit);
   });
 
   app.get('/api/knowledge', async () => ({
-    sources: repository.listKnowledgeSources(),
-    coverage: repository.knowledgeCoverage(),
-    freshness: repository.listKnowledgeSources().map(({ id, updatedAt }) => ({ id, updatedAt })),
-    searchMode: 'sqlite-fts5',
+    sources: await repository.listKnowledgeSources(),
+    coverage: await repository.knowledgeCoverage(),
+    freshness: (await repository.listKnowledgeSources()).map(({ id, updatedAt }) => ({ id, updatedAt })),
+    searchMode: 'postgres-fts',
   }));
   app.post('/api/knowledge/import', async (request, reply) => {
     const parsed = parseBody(knowledgeImportSchema, request.body);
@@ -732,8 +734,8 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       else rejected.push({ path: file.path, code: prepared.code, reason: prepared.reason });
     }
     if (chunks.length === 0) return reply.code(422).send({ error: 'Tidak ada konten yang lolos pemeriksaan sebelum indeks.', rejected });
-    const source = repository.createKnowledgeSource({ id: sourceId, provider: parsed.value.provider, label: parsed.value.label, referenceUrl: parsed.value.referenceUrl, updatedAt }, chunks);
-    repository.appendAudit({ type: 'knowledge.imported', resourceId: sourceId, status: 'recorded', reason: `${chunks.length} potongan teks ditambahkan; ${rejected.length} file dikecualikan.`, policyVersion: repository.getPolicy().version, payloadHash: null });
+    const source = await repository.createKnowledgeSource({ id: sourceId, provider: parsed.value.provider, label: parsed.value.label, referenceUrl: parsed.value.referenceUrl, updatedAt }, chunks);
+    await repository.appendAudit({ type: 'knowledge.imported', resourceId: sourceId, status: 'recorded', reason: `${chunks.length} potongan teks ditambahkan; ${rejected.length} file dikecualikan.`, policyVersion: (await repository.getPolicy()).version, payloadHash: null });
     return reply.code(201).send({ source, chunks: chunks.length, rejected });
   });
   const githubAdapter = () => {
@@ -754,9 +756,9 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
       else rejected += 1;
     }
     if (!chunks.length) return { result, chunks: 0, rejected, source: null };
-    for (const old of repository.listKnowledgeSources()) if (old.provider === 'github' && old.label === result.repository) repository.deleteKnowledgeSource(old.id);
-    const source = repository.createKnowledgeSource({ id: sourceId, provider: 'github', label: result.repository, referenceUrl: repositoryUrl, updatedAt }, chunks);
-    repository.appendAudit({ type: 'knowledge.github_sync', resourceId: sourceId, status: 'recorded', reason: `${result.repository}: ${result.fetched} file dibaca pada ${result.ref}; ${rejected + result.skipped} file dilewati.`, policyVersion: repository.getPolicy().version, payloadHash: null });
+    for (const old of await repository.listKnowledgeSources()) if (old.provider === 'github' && old.label === result.repository) await repository.deleteKnowledgeSource(old.id);
+    const source = await repository.createKnowledgeSource({ id: sourceId, provider: 'github', label: result.repository, referenceUrl: repositoryUrl, updatedAt }, chunks);
+    await repository.appendAudit({ type: 'knowledge.github_sync', resourceId: sourceId, status: 'recorded', reason: `${result.repository}: ${result.fetched} file dibaca pada ${result.ref}; ${rejected + result.skipped} file dilewati.`, policyVersion: (await repository.getPolicy()).version, payloadHash: null });
     return { result, chunks: chunks.length, rejected, source };
   };
 
@@ -797,18 +799,18 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   app.post('/api/knowledge/search', async (request, reply) => {
     const parsed = parseBody(knowledgeSearchSchema, request.body);
     if ('issues' in parsed) return reply.code(400).send({ error: 'Pencarian tidak valid.', issues: parsed.issues });
-    return repository.searchKnowledge(parsed.value.query, parsed.value.limit);
+    return await repository.searchKnowledge(parsed.value.query, parsed.value.limit);
   });
   app.delete('/api/knowledge/sources/:id', async (request, reply) => {
     const params = paramsSchema.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: 'ID sumber tidak valid.' });
-    if (!repository.deleteKnowledgeSource(params.data.id)) return reply.code(404).send({ error: 'Sumber tidak ditemukan.' });
-    repository.appendAudit({ type: 'knowledge.deleted', resourceId: params.data.id, status: 'recorded', reason: 'Sumber dan potongan indeks terkait dihapus.', policyVersion: repository.getPolicy().version, payloadHash: null });
+    if (!await repository.deleteKnowledgeSource(params.data.id)) return reply.code(404).send({ error: 'Sumber tidak ditemukan.' });
+    await repository.appendAudit({ type: 'knowledge.deleted', resourceId: params.data.id, status: 'recorded', reason: 'Sumber dan potongan indeks terkait dihapus.', policyVersion: (await repository.getPolicy()).version, payloadHash: null });
     return { deleted: true, id: params.data.id };
   });
 
   app.get('/api/settings', async () => {
-    refreshProductionWriteChecks();
+    await refreshProductionWriteChecks();
     const credentialStatus = options.getCredentialStatus?.() ?? options.credentialStatus;
     const linkedinStatus = linkedinVerification(credentialStatus, now());
     const writeOperations = Object.fromEntries((['submit_bid', 'edit_profile', 'send_message'] as const).map((operation) => [
@@ -820,7 +822,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
     return {
       workspace: { id: 'workspace_local', name: 'Freelancer Virtual House', accountMode: 'single-user lokal' },
       fields: ['Fullstack Engineer', 'Backend Engineer', 'Android Engineer', 'iOS Engineer', 'Frontend Engineer', 'DevOps Engineer', 'QA Engineer', 'UI/UX Designer', 'Data Engineer', 'Technical Writer'],
-      profile: repository.getProfile(),
+      profile: await repository.getProfile(),
       capabilities: {
         freelancer: {
           connection: freelancerVerification?.connected ? 'connected' : freelancerVerification?.reason === 'invalid_token' ? 'invalid' : freelancerVerification ? 'unavailable' : 'unverified',
@@ -835,7 +837,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
         linkedin: { read: linkedinStatus.authorized ? 'oidc-lite' : 'manual-only', clientConfigured: credentialStatus?.linkedinClientConfigured ?? false, authorized: linkedinStatus.authorized, verificationStatus: linkedinStatus.verificationStatus },
         hermes: 'optional',
       },
-      externalWrites: repository.getPolicy().state === 'active' && !repository.getPolicy().simulationOnly,
+      externalWrites: (await repository.getPolicy()).state === 'active' && !(await repository.getPolicy()).simulationOnly,
     };
   });
 
@@ -850,7 +852,7 @@ export function createApp(options: AppOptions = {}): FastifyInstance {
   app.addHook('onClose', async () => {
     options.autopilot?.stop();
     options.linkedinOAuth?.close();
-    if (!options.repository) repository.close();
+    if (!options.repository) await repository.close();
   });
   return app;
 }

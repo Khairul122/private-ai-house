@@ -18,9 +18,9 @@ export const testOpportunity: ProjectOpportunity = {
   createdAt: '2026-10-14T00:00:00.000Z',
 };
 
-export function insertTestOpportunity(repository: WorkspaceRepository, project: ProjectOpportunity = testOpportunity) {
-  repository.sqlite.prepare(`
+export async function insertTestOpportunity(repository: WorkspaceRepository, project: ProjectOpportunity = testOpportunity) {
+  await repository.sql.query(`
     INSERT INTO projects (id, platform, external_id, project_json, pipeline_status, score, score_factors_json, created_at)
-    VALUES (?, ?, ?, ?, 'new', 0, '[]', ?)
-  `).run(project.id, project.source, project.id, JSON.stringify(project), project.createdAt);
+    VALUES ($1, $2, $3, $4, 'new', 0, '[]', $5)
+  `, [project.id, project.source, project.id, JSON.stringify(project), project.createdAt]);
 }

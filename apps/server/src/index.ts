@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { parseEnv } from 'node:util';
 import fastifyStatic from '@fastify/static';
 import { FreelancerProductionWriteAdapter, FreelancerReadAdapter, FreelancerReadError, FreelancerSandboxWriteAdapter } from '@fvh/adapter-freelancer';
 import { HermesCliDraftingAdapter } from '@fvh/adapter-hermes';
@@ -29,8 +30,7 @@ const projectRoot = findProjectRoot(process.cwd());
 const dataDirectory = process.env.FVH_DATA_DIR
   ? (isAbsolute(process.env.FVH_DATA_DIR) ? process.env.FVH_DATA_DIR : resolve(projectRoot, process.env.FVH_DATA_DIR))
   : resolve(projectRoot, '.local');
-const databaseFile = resolve(dataDirectory, 'freelancer-virtual-house.sqlite');
-mkdirSync(dirname(databaseFile), { recursive: true });
+mkdirSync(dataDirectory, { recursive: true });
 const credentialStorePath = resolve(dataDirectory, 'credentials.dpapi.json');
 const credentialScriptPath = resolve(projectRoot, 'apps/server/src/credential-store.ps1');
 const freelancerEnvironment = readFreelancerEnvironment(projectRoot);
@@ -56,7 +56,11 @@ const linkedinOAuth = new LinkedInOAuthService({
   storeAccessToken: (accessToken, expiresAt) => storeLinkedInAccessToken(credentialStorePath, credentialScriptPath, accessToken, expiresAt),
 });
 
-const repository = new WorkspaceRepository(createDatabase(databaseFile));
+// Only DATABASE_URL is read here; the other readers parse .env themselves and .env is not loaded into process.env.
+const envFile = join(projectRoot, '.env');
+const databaseUrl = (process.env.DATABASE_URL ?? (existsSync(envFile) ? parseEnv(readFileSync(envFile, 'utf8')).DATABASE_URL : undefined))?.trim();
+if (!databaseUrl) throw new Error('DATABASE_URL belum diatur di .env (connection string Postgres Supabase).');
+const repository = await WorkspaceRepository.open(await createDatabase(databaseUrl));
 const createFreelancerReader = async () => new FreelancerReadAdapter({ token: await getFreelancerToken() });
 const businessSync = new BusinessSync({
   repository,
@@ -90,7 +94,7 @@ const draftingReason = !draftingConfig.valid
       : 'Hermes belum tersedia. Periksa instalasi profile private-ai-house dan jalankan ulang server.';
 const webBuild = resolve(projectRoot, 'apps/web/dist');
 const hasWebBuild = existsSync(webBuild);
-const app = createApp({
+const app = await createApp({
   repository,
   getGitHubToken: () => readGitHubEnvironment(projectRoot).token ?? undefined,
   getCredentialStatus: () => {
@@ -175,9 +179,9 @@ if (hasWebBuild) {
 
 if (!['127.0.0.1', 'localhost', '::1'].includes(host)) throw new Error('FVH_HOST must stay on loopback for the local single-user app.');
 await app.listen({ host, port });
-app.log.info({ host, port, databaseFile }, 'Freelancer Virtual House API is ready');
+app.log.info({ host, port }, 'Freelancer Virtual House API is ready');
 void (async () => {
   await app.inject({ method: 'POST', url: '/api/freelancer/verify' });
-  await autopilot.start();
   businessSync.start();
+  void autopilot.start();
 })();

@@ -8,14 +8,14 @@
   "dependencies": {
     "@fvh/domain": "workspace:*",
     "@fvh/knowledge": "workspace:*",
-    "better-sqlite3": "^12.11.1",
-    "drizzle-orm": "latest"
+    "pg": "^8.23.1"
   },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^9.6.0"
+    "@electric-sql/pglite": "^0.5.10",
+    "@types/pg": "^8.23.1"
   }
 }

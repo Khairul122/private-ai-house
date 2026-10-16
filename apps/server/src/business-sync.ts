@@ -69,7 +69,7 @@ export class BusinessSync {
     this.status.step = 'outcomes';
     const lastRunAt = this.now().toISOString();
     try {
-      const pending = repository.listBidOutcomes().filter((row) => row.outcome === 'pending');
+      const pending = (await repository.listBidOutcomes()).filter((row) => row.outcome === 'pending');
       const byId = new Map(pending.map((row) => [row.bidId, row]));
       const bids = pending.length ? await this.dependencies.readOwnBids(pending.map((row) => row.bidId)) : [];
       let checked = 0;
@@ -77,19 +77,19 @@ export class BusinessSync {
         const previous = byId.get(bid.bidId);
         if (!previous) continue;
         const outcome = bidOutcome(bid.awardStatus, bid.retracted);
-        repository.updateBidOutcome(previous.projectId, { awardStatus: bid.awardStatus, outcome, checkedAt: this.now().toISOString() });
+        await repository.updateBidOutcome(previous.projectId, { awardStatus: bid.awardStatus, outcome, checkedAt: this.now().toISOString() });
         checked += 1;
         if (outcome === 'pending') continue;
-        repository.setPipelineStatus(previous.projectId, outcome);
-        repository.appendAudit({ type: 'bid.outcome_changed', resourceId: previous.projectId, status: 'recorded', reason: `Status bid di Freelancer: ${bid.awardStatus ?? (bid.retracted ? 'retracted' : 'tidak diketahui')}.`, policyVersion: null, payloadHash: null });
+        await repository.setPipelineStatus(previous.projectId, outcome);
+        await repository.appendAudit({ type: 'bid.outcome_changed', resourceId: previous.projectId, status: 'recorded', reason: `Status bid di Freelancer: ${bid.awardStatus ?? (bid.retracted ? 'retracted' : 'tidak diketahui')}.`, policyVersion: null, payloadHash: null });
         if (outcome === 'won') {
-          const project = repository.getProject(previous.projectId);
-          const created = repository.createClientProject({
+          const project = await repository.getProject(previous.projectId);
+          const created = await repository.createClientProject({
             title: project?.title ?? 'Proyek Freelancer', client: project?.clientName ?? 'Klien Freelancer', source: 'freelancer',
             externalProjectId: previous.projectId, status: 'active', deadline: null, value: previous.amount,
             currency: previous.currency ?? project?.currency ?? 'USD',
           });
-          if (created) repository.appendAudit({ type: 'work.project_created', resourceId: created.id, status: 'recorded', reason: 'Proyek aktif dibuat dari bid yang menang.', policyVersion: null, payloadHash: null });
+          if (created) await repository.appendAudit({ type: 'work.project_created', resourceId: created.id, status: 'recorded', reason: 'Proyek aktif dibuat dari bid yang menang.', policyVersion: null, payloadHash: null });
         }
       }
       this.status.outcomes = { lastRunAt, ok: true, error: null, checked };
@@ -108,7 +108,7 @@ export class BusinessSync {
     try {
       const selfId = this.status.messages.selfId ?? await readSelfId();
       const messages = await readThreads(selfId);
-      repository.upsertClientThreads(messages.map((message) => ({
+      await repository.upsertClientThreads(messages.map((message) => ({
         threadId: String(message.threadId), projectId: message.projectId, lastSenderId: message.senderId,
         lastMessageAt: message.createdAt, preview: message.message.slice(0, 200), syncedAt: lastRunAt,
       })));

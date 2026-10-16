@@ -13,7 +13,7 @@ pnpm install
 pnpm dev
 ```
 
-Open `http://127.0.0.1:5174`. SQLite data is kept in the ignored `.local` directory. Set `FVH_DATA_DIR` to a private local path to move it.
+Open `http://127.0.0.1:5174`. Data lives in Supabase Postgres: set `DATABASE_URL` in `.env` (see `.env.example`). `.local` still holds credentials, logs and pid files (`FVH_DATA_DIR` moves it).
 
 ## Configure optional sources
 

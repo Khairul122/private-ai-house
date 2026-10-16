@@ -5,7 +5,7 @@ import { buildLinkedInAuthorizationUrl, completeLinkedInAuthorization, LinkedInO
 const redirectUri = 'http://localhost:3001/api/linkedin/callback';
 
 describe('LinkedIn authorization code connection', () => {
-  it('builds an OIDC authorization URL without PKCE or secrets in the URL', () => {
+  it('builds an OIDC authorization URL without PKCE or secrets in the URL', async () => {
     const state = randomBytes(32).toString('base64url');
     const authorizationUrl = new URL(buildLinkedInAuthorizationUrl({ clientId: 'client-id-for-test', redirectUri, state }));
 
@@ -18,7 +18,7 @@ describe('LinkedIn authorization code connection', () => {
     expect(authorizationUrl.searchParams.has('code_challenge')).toBe(false);
   });
 
-  it('rejects a mismatched or expired callback state', () => {
+  it('rejects a mismatched or expired callback state', async () => {
     expect(validateLinkedInCallback('wrong', 'expected-state', 5_000, 1_000)).toBe('invalid_state');
     expect(validateLinkedInCallback('expected-state', 'expected-state', 5_000, 6_000)).toBe('expired');
     expect(validateLinkedInCallback('expected-state', 'expected-state', 5_000, 4_000)).toBe('valid');

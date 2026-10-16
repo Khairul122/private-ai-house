@@ -2,7 +2,7 @@
 
 ## Batas sistem
 
-MVP berjalan sebagai aplikasi satu pengguna di loopback, menyimpan data kerja di SQLite lokal, dan mulai dengan antrean peluang kosong. Peluang Freelancer hanya ditambahkan setelah pemilik memulai sinkronisasi baca-saja. Tidak ada operasi tulis marketplace. GitHub hanya dibaca untuk repositori yang dipilih; LinkedIn dibatasi pada alur OIDC ringan atau fakta manual/ekspor milik pengguna. Drafting Hermes bersifat opsional dan memerlukan persetujuan pengiriman data yang eksplisit.
+MVP berjalan sebagai aplikasi satu pengguna di loopback, menyimpan data kerja di Supabase Postgres (RLS aktif, hanya diakses server lewat `DATABASE_URL`), dan mulai dengan antrean peluang kosong. Peluang Freelancer hanya ditambahkan setelah pemilik memulai sinkronisasi baca-saja. Tidak ada operasi tulis marketplace. GitHub hanya dibaca untuk repositori yang dipilih; LinkedIn dibatasi pada alur OIDC ringan atau fakta manual/ekspor milik pengguna. Drafting Hermes bersifat opsional dan memerlukan persetujuan pengiriman data yang eksplisit.
 
 ## Ancaman dan perlindungan
 

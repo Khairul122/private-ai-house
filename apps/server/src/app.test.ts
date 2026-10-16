@@ -10,15 +10,15 @@ let repository: WorkspaceRepository;
 let app: ReturnType<typeof createApp>;
 
 beforeEach(async () => {
-  repository = new WorkspaceRepository();
+  repository = await WorkspaceRepository.open();
   insertTestOpportunity(repository);
-  app = createApp({ repository, clock: () => new Date(fixedNow), drafting: new FixtureDraftingAdapter(), draftingMode: 'fixture' });
+  app = await createApp({ repository, clock: () => new Date(fixedNow), drafting: new FixtureDraftingAdapter(), draftingMode: 'fixture' });
   await app.ready();
 });
 
 afterEach(async () => {
   await app.close();
-  repository.close();
+  await repository.close();
 });
 
 async function configureAndActivatePolicy() {
@@ -62,8 +62,8 @@ describe('local API', () => {
   });
 
   it('keeps a new workspace empty and disables drafting unless an adapter is explicitly provided', async () => {
-    const emptyRepository = new WorkspaceRepository();
-    const emptyApp = createApp({ repository: emptyRepository });
+    const emptyRepository = await WorkspaceRepository.open();
+    const emptyApp = await createApp({ repository: emptyRepository });
     await emptyApp.ready();
     const health = await emptyApp.inject({ method: 'GET', url: '/api/health' });
     const projects = await emptyApp.inject({ method: 'GET', url: '/api/projects' });
@@ -71,7 +71,7 @@ describe('local API', () => {
     const bidInsights = await emptyApp.inject({ method: 'GET', url: '/api/insights/bids' });
     await emptyApp.close();
 
-    const disabledApp = createApp({ repository, draftingReason: 'Hermes belum diaktifkan.' });
+    const disabledApp = await createApp({ repository, draftingReason: 'Hermes belum diaktifkan.' });
     const draft = await disabledApp.inject({ method: 'POST', url: `/api/projects/${encodeURIComponent(testOpportunity.id)}/draft` });
 
     expect(health.json().ai).toBe('disabled');
@@ -86,11 +86,11 @@ describe('local API', () => {
     expect(draft.statusCode).toBe(503);
     expect(draft.json().error).toContain('Hermes belum diaktifkan');
     await disabledApp.close();
-    emptyRepository.close();
+    await emptyRepository.close();
   });
 
   it('reports Hermes drafting as active without enabling marketplace writes', async () => {
-    const hermesApp = createApp({ drafting: new FixtureDraftingAdapter(), draftingMode: 'hermes' });
+    const hermesApp = await createApp({ drafting: new FixtureDraftingAdapter(), draftingMode: 'hermes' });
     const health = await hermesApp.inject({ method: 'GET', url: '/api/health' });
     const capabilities = await hermesApp.inject({ method: 'GET', url: '/api/capabilities' });
 
@@ -101,7 +101,7 @@ describe('local API', () => {
   });
 
   it('reports credential presence without exposing credential values', async () => {
-    const credentialApp = createApp({ credentialStatus: { freelancerAccessTokenConfigured: true, linkedinClientConfigured: true, linkedinAccessTokenConfigured: false, linkedinAccessTokenExpiresAt: null } });
+    const credentialApp = await createApp({ credentialStatus: { freelancerAccessTokenConfigured: true, linkedinClientConfigured: true, linkedinAccessTokenConfigured: false, linkedinAccessTokenExpiresAt: null } });
     const response = await credentialApp.inject({ method: 'GET', url: '/api/capabilities' });
 
     expect(response.json().freelancerCredentials).toMatchObject({ accessTokenConfigured: true, verificationStatus: 'unverified' });
@@ -111,7 +111,7 @@ describe('local API', () => {
   });
 
   it('keeps malformed LinkedIn expiry data unverified instead of calling it expired', async () => {
-    const credentialApp = createApp({
+    const credentialApp = await createApp({
       credentialStatus: { freelancerAccessTokenConfigured: false, linkedinClientConfigured: true, linkedinAccessTokenConfigured: true, linkedinAccessTokenExpiresAt: 'not-a-date' },
     });
     const capabilities = await credentialApp.inject({ method: 'GET', url: '/api/capabilities' });
@@ -120,7 +120,7 @@ describe('local API', () => {
   });
 
   it('verifies Freelancer with read-only evidence and never returns marketplace writes as supported', async () => {
-    const credentialApp = createApp({
+    const credentialApp = await createApp({
       credentialStatus: { freelancerAccessTokenConfigured: true, linkedinClientConfigured: false, linkedinAccessTokenConfigured: false, linkedinAccessTokenExpiresAt: null },
       verifyFreelancer: async () => ({ connected: true, readProfile: true, readProjects: true, reason: 'verified' }),
     });
@@ -138,7 +138,7 @@ describe('local API', () => {
 
   it('records HTTP 200 sandbox checks for each write without marking production writes as supported', async () => {
     const verifySandboxWrite = vi.fn(async () => ({ statusCode: 200 }));
-    const sandboxApp = createApp({ freelancerSandboxTokenConfigured: true, verifyFreelancerSandboxWrite: verifySandboxWrite });
+    const sandboxApp = await createApp({ freelancerSandboxTokenConfigured: true, verifyFreelancerSandboxWrite: verifySandboxWrite });
     const cases = [
       { operation: 'submit_bid', projectId: 71, amount: 2, period: 1, milestonePercentage: 100, description: 'Sandbox bid test.' },
       { operation: 'edit_profile', jobIds: [17, 23] },
@@ -161,7 +161,7 @@ describe('local API', () => {
   });
 
   it('refreshes production write capability from automatic bid audit records', async () => {
-    repository.appendAudit({
+    await repository.appendAudit({
       type: 'marketplace.production.submit_bid', resourceId: 'freelancer:71', status: 'recorded',
       reason: 'Bid otomatis menghasilkan HTTP 200. ID hasil: 9001. Isi proposal tidak disimpan pada audit.',
       policyVersion: 2, payloadHash: 'a'.repeat(64),
@@ -177,13 +177,13 @@ describe('local API', () => {
 
   it('requires the dedicated sandbox token and exposes provider failures without promoting the capability', async () => {
     const verifySandboxWrite = vi.fn(async () => { throw new FreelancerSandboxWriteError(403, 'denied'); });
-    const noTokenApp = createApp({ verifyFreelancerSandboxWrite: verifySandboxWrite });
+    const noTokenApp = await createApp({ verifyFreelancerSandboxWrite: verifySandboxWrite });
     const deniedConfig = await noTokenApp.inject({ method: 'POST', url: '/api/freelancer/sandbox-write-test', payload: { operation: 'send_message', threadId: 81, message: 'Check.' } });
     expect(deniedConfig.statusCode).toBe(409);
     expect(verifySandboxWrite).not.toHaveBeenCalled();
     await noTokenApp.close();
 
-    const sandboxApp = createApp({ freelancerSandboxTokenConfigured: true, verifyFreelancerSandboxWrite: verifySandboxWrite });
+    const sandboxApp = await createApp({ freelancerSandboxTokenConfigured: true, verifyFreelancerSandboxWrite: verifySandboxWrite });
     const failedCheck = await sandboxApp.inject({ method: 'POST', url: '/api/freelancer/sandbox-write-test', payload: { operation: 'send_message', threadId: 81, message: 'Check.' } });
     const capabilities = await sandboxApp.inject({ method: 'GET', url: '/api/capabilities' });
     const messageCapability = capabilities.json().marketplace.find((item: { operation: string }) => item.operation === 'send_message');
@@ -196,7 +196,7 @@ describe('local API', () => {
 
   it('records production HTTP 200 only after an explicitly confirmed live operation', async () => {
     const runWrite = vi.fn(async (input: { operation: string }) => ({ statusCode: 200, resultId: input.operation === 'edit_profile' ? undefined : '9001', resultStatus: input.operation === 'edit_profile' ? 'success' : undefined }));
-    const productionApp = createApp({
+    const productionApp = await createApp({
       credentialStatus: { freelancerAccessTokenConfigured: true, linkedinClientConfigured: false, linkedinAccessTokenConfigured: false, linkedinAccessTokenExpiresAt: null },
       runFreelancerProductionWrite: runWrite,
     });
@@ -223,13 +223,13 @@ describe('local API', () => {
   it('requires a production token and explicit live confirmation, and preserves provider failures', async () => {
     const runWrite = vi.fn(async () => { throw new FreelancerWriteError(403, 'denied'); });
     const input = { operation: 'send_message', threadId: 81, message: 'Live message.' };
-    const noTokenApp = createApp({ runFreelancerProductionWrite: runWrite });
+    const noTokenApp = await createApp({ runFreelancerProductionWrite: runWrite });
     const deniedConfig = await noTokenApp.inject({ method: 'POST', url: '/api/freelancer/production-write', payload: { ...input, confirmLive: true } });
     expect(deniedConfig.statusCode).toBe(409);
     expect(runWrite).not.toHaveBeenCalled();
     await noTokenApp.close();
 
-    const productionApp = createApp({
+    const productionApp = await createApp({
       credentialStatus: { freelancerAccessTokenConfigured: true, linkedinClientConfigured: false, linkedinAccessTokenConfigured: false, linkedinAccessTokenExpiresAt: null },
       runFreelancerProductionWrite: runWrite,
     });
@@ -247,9 +247,9 @@ describe('local API', () => {
   });
 
   it('restores the latest production write status from the local audit after a server restart', async () => {
-    const durableRepository = new WorkspaceRepository();
+    const durableRepository = await WorkspaceRepository.open();
     const credentialStatus = { freelancerAccessTokenConfigured: true, linkedinClientConfigured: false, linkedinAccessTokenConfigured: false, linkedinAccessTokenExpiresAt: null };
-    const firstApp = createApp({
+    const firstApp = await createApp({
       repository: durableRepository,
       credentialStatus,
       runFreelancerProductionWrite: async () => ({ statusCode: 200, resultId: '9001' }),
@@ -259,17 +259,17 @@ describe('local API', () => {
     expect(submitted.statusCode).toBe(200);
     await firstApp.close();
 
-    const restartedApp = createApp({ repository: durableRepository, credentialStatus });
+    const restartedApp = await createApp({ repository: durableRepository, credentialStatus });
     const capabilities = await restartedApp.inject({ method: 'GET', url: '/api/capabilities' });
     const bidCapability = capabilities.json().marketplace.find((item: { operation: string }) => item.operation === 'submit_bid');
     expect(bidCapability).toMatchObject({ status: 'supported', productionVerification: { statusCode: 200, resultId: '9001' } });
     await restartedApp.close();
-    durableRepository.close();
+    await durableRepository.close();
   });
 
   it('syncs only provider results and updates read capability after a successful API response', async () => {
     const project = { ...testOpportunity, id: 'freelancer:839101', source: 'freelancer' as const };
-    const credentialApp = createApp({
+    const credentialApp = await createApp({
       repository,
       credentialStatus: { freelancerAccessTokenConfigured: true, linkedinClientConfigured: false, linkedinAccessTokenConfigured: false, linkedinAccessTokenExpiresAt: null },
       readFreelancerProjects: vi.fn(async (query, limit) => {
@@ -284,7 +284,7 @@ describe('local API', () => {
 
     expect(synced.statusCode).toBe(200);
     expect(synced.json()).toMatchObject({ imported: 1, skipped: 1 });
-    expect(repository.getProject(project.id)?.source).toBe('freelancer');
+    expect((await repository.getProject(project.id))?.source).toBe('freelancer');
     expect(rows.find((item) => item.operation === 'read_projects')?.status).toBe('supported');
     expect(rows.find((item) => item.operation === 'read_profile')?.status).toBe('unknown');
     expect(rows.filter((item) => ['submit_bid', 'edit_profile', 'send_message'].includes(item.operation)).every((item) => item.status === 'unknown')).toBe(true);
@@ -292,7 +292,7 @@ describe('local API', () => {
   });
 
   it('returns provider authorization and rate-limit status codes without mislabeling them', async () => {
-    const credentialApp = createApp({
+    const credentialApp = await createApp({
       credentialStatus: { freelancerAccessTokenConfigured: true, linkedinClientConfigured: false, linkedinAccessTokenConfigured: false, linkedinAccessTokenExpiresAt: null },
       readFreelancerProjects: async () => { throw new FreelancerReadError('rate_limited', 'Freelancer membatasi permintaan.', 429); },
     });
@@ -305,7 +305,7 @@ describe('local API', () => {
   it('starts LinkedIn consent only for a local application origin', async () => {
     const start = vi.fn(async (returnUrl: string) => ({ authorizationUrl: `https://www.linkedin.com/oauth/v2/authorization?redirect=${encodeURIComponent(returnUrl)}` }));
     const handleCallback = vi.fn(async () => ({ statusCode: 200, title: 'LinkedIn terhubung', message: 'Profil ringan terverifikasi.', returnUrl: 'http://localhost:5173/capabilities' }));
-    const credentialApp = createApp({ linkedinOAuth: { redirectUri: 'http://127.0.0.1:3001/api/linkedin/callback', start, handleCallback, close: () => {} } });
+    const credentialApp = await createApp({ linkedinOAuth: { redirectUri: 'http://127.0.0.1:3001/api/linkedin/callback', start, handleCallback, close: () => {} } });
     const response = await credentialApp.inject({ method: 'POST', url: '/api/linkedin/connect', headers: { origin: 'http://localhost:5173' } });
     const alternatePort = await credentialApp.inject({ method: 'POST', url: '/api/linkedin/connect', headers: { origin: 'http://127.0.0.1:5174' } });
     const denied = await credentialApp.inject({ method: 'POST', url: '/api/linkedin/connect', headers: { origin: 'https://attacker.example' } });
@@ -344,7 +344,7 @@ describe('local API', () => {
     const result = await app.inject({ method: 'POST', url: '/api/policy/activate', payload: { confirmSimulation: false } });
 
     expect(result.statusCode).toBe(400);
-    expect(repository.getPolicy().state).toBe('draft');
+    expect((await repository.getPolicy()).state).toBe('draft');
   });
 
   it('creates and edits a proposal from project facts without claiming undocumented experience', async () => {
@@ -371,7 +371,7 @@ describe('local API', () => {
     expect(simulated.statusCode).toBe(200);
     expect(response).toMatchObject({ externalWrites: false, marketplaceStatus: 'unchanged', pipelineStatus: 'draft_ready', decision: { allowed: true, simulationOnly: true } });
     expect(response.event.payloadHash).toMatch(/^[a-f0-9]{64}$/);
-    expect(repository.listProjects().find((item) => item.id === testOpportunity.id)?.pipelineStatus).toBe('draft_ready');
+    expect((await repository.listProjects()).find((item) => item.id === testOpportunity.id)?.pipelineStatus).toBe('draft_ready');
   });
 
   it('pauses the kill switch immediately and records the blocked reason', async () => {
@@ -381,7 +381,7 @@ describe('local API', () => {
     const result = await app.inject({ method: 'POST', url: `/api/projects/${encodeURIComponent(testOpportunity.id)}/simulate-submit` });
 
     expect(result.json().decision).toMatchObject({ allowed: false, reasonCode: 'policy_paused' });
-    expect(repository.listAudit(10).some((event) => event.type === 'bid.simulation_skipped')).toBe(true);
+    expect((await repository.listAudit(10)).some((event) => event.type === 'bid.simulation_skipped')).toBe(true);
   });
 
   it('imports searchable local evidence, rejects credentials, and deletes the index', async () => {
@@ -402,18 +402,18 @@ describe('local API', () => {
     expect(rejected.statusCode).toBe(422);
     expect(rejected.body).not.toContain('ghp_123456789012345678901234567890123456');
     expect(deleted.statusCode).toBe(200);
-    expect(repository.knowledgeCoverage()).toEqual({ sources: 0, chunks: 0 });
+    expect(await repository.knowledgeCoverage()).toEqual({ sources: 0, chunks: 0 });
   });
 
   it('keeps GitHub unknown until a repository sync succeeds, then records read-only evidence', async () => {
-    const githubRepository = new WorkspaceRepository();
+    const githubRepository = await WorkspaceRepository.open();
     const fetcher = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       if (url.endsWith('/repos/owner/repo')) return new Response(JSON.stringify({ default_branch: 'main' }), { status: 200 });
       if (url.includes('/git/trees/main?recursive=1')) return new Response(JSON.stringify({ sha: 'tree-sha', tree: [{ path: 'README.md', type: 'blob', size: 45 }] }), { status: 200 });
       return new Response('A local workspace for documented project notes.', { status: 200 });
     });
-    const githubApp = createApp({ repository: githubRepository, fetcher });
+    const githubApp = await createApp({ repository: githubRepository, fetcher });
     await githubApp.ready();
 
     expect((await githubApp.inject({ method: 'GET', url: '/api/capabilities' })).json().github.verificationStatus).toBe('unknown');
@@ -423,10 +423,10 @@ describe('local API', () => {
     expect(synced.statusCode).toBe(201);
     expect(synced.json()).toMatchObject({ filesSeen: 1, complete: true });
     expect(capabilities.json().github.verificationStatus).toBe('supported');
-    expect(githubRepository.listKnowledgeSources()).toMatchObject([{ provider: 'github', label: 'owner/repo' }]);
+    expect(await githubRepository.listKnowledgeSources()).toMatchObject([{ provider: 'github', label: 'owner/repo' }]);
 
     await githubApp.close();
-    githubRepository.close();
+    await githubRepository.close();
   });
 });
 
@@ -439,7 +439,7 @@ describe('business operations API', () => {
   });
 
   it('lists bids without any client conversation after three days as follow-ups', async () => {
-    repository.recordSubmittedBid({ projectId: testOpportunity.id, bidId: '9001', amount: 200, currency: 'USD', submittedAt: '2026-10-10T00:00:00.000Z' });
+    await repository.recordSubmittedBid({ projectId: testOpportunity.id, bidId: '9001', amount: 200, currency: 'USD', submittedAt: '2026-10-10T00:00:00.000Z' });
     const inbox = (await app.inject({ method: 'GET', url: '/api/inbox' })).json();
     expect(inbox.followUps).toEqual([expect.objectContaining({ projectId: testOpportunity.id, daysSinceBid: 4 })]);
   });
@@ -483,14 +483,14 @@ describe('GitHub knowledge sync', () => {
       if (url.includes('/git/trees/')) return json({ sha: 'tree-1', truncated: false, tree: [{ path: 'README.md', type: 'blob', size: 40 }] });
       return new Response('# Portfolio\n\nLaravel and Flutter delivery notes.', { status: 200 });
     });
-    const githubApp = createApp({ repository, githubToken: 'token-value-1234567890', fetcher: fetcher as typeof fetch });
+    const githubApp = await createApp({ repository, githubToken: 'token-value-1234567890', fetcher: fetcher as typeof fetch });
 
     const first = (await githubApp.inject({ method: 'POST', url: '/api/knowledge/github/sync-all' })).json();
     await githubApp.inject({ method: 'POST', url: '/api/knowledge/github/sync-all' });
 
     expect(first).toMatchObject({ synced: 1, repositories: [{ repository: 'me/portfolio', error: null }] });
-    expect(repository.listKnowledgeSources().filter((source) => source.label === 'me/portfolio')).toHaveLength(1);
-    expect((await createApp({ repository }).inject({ method: 'POST', url: '/api/knowledge/github/sync-all' })).statusCode).toBe(400);
+    expect((await repository.listKnowledgeSources()).filter((source) => source.label === 'me/portfolio')).toHaveLength(1);
+    expect((await (await createApp({ repository })).inject({ method: 'POST', url: '/api/knowledge/github/sync-all' })).statusCode).toBe(400);
     await githubApp.close();
   });
 });

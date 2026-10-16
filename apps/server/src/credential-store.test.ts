@@ -19,7 +19,7 @@ afterEach(() => {
 });
 
 describe('encrypted credential status', () => {
-  it('defaults to unconfigured when no local store exists', () => {
+  it('defaults to unconfigured when no local store exists', async () => {
     expect(readCredentialStatus(join(tmpdir(), 'fvh-missing-credentials.dpapi.json'), 'win32')).toEqual({
       freelancerAccessTokenConfigured: false,
       linkedinClientConfigured: false,
@@ -28,7 +28,7 @@ describe('encrypted credential status', () => {
     });
   });
 
-  it('returns only booleans for DPAPI ciphertext fields', () => {
+  it('returns only booleans for DPAPI ciphertext fields', async () => {
     const path = createStore({
       version: 1,
       freelancerAccessToken: '01000000d08c9ddf-ciphertext',
@@ -44,7 +44,7 @@ describe('encrypted credential status', () => {
     });
   });
 
-  it('does not report Windows-encrypted credentials as usable on another platform', () => {
+  it('does not report Windows-encrypted credentials as usable on another platform', async () => {
     const path = createStore({
       version: 1,
       freelancerAccessToken: '01000000d08c9ddf-ciphertext',
@@ -60,7 +60,7 @@ describe('encrypted credential status', () => {
     });
   });
 
-  it('reports a locally encrypted LinkedIn member token and its expiry without exposing it', () => {
+  it('reports a locally encrypted LinkedIn member token and its expiry without exposing it', async () => {
     const path = createStore({
       version: 1,
       linkedinAccessToken: '01000000d08c9ddf-encrypted-token',
@@ -73,7 +73,7 @@ describe('encrypted credential status', () => {
     });
   });
 
-  it('treats a malformed local store as unconfigured without preventing server startup', () => {
+  it('treats a malformed local store as unconfigured without preventing server startup', async () => {
     const path = createStore({ version: 1, freelancerAccessToken: 'not encrypted' });
     writeFileSync(path, '{ invalid json', 'utf8');
 

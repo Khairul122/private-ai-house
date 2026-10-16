@@ -23,6 +23,90 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 }
 
+type CalendarView = 'day' | 'month' | 'year';
+type CalendarEvent = {
+  id: string;
+  dateKey: string;
+  title: string;
+  detail: string;
+  kind: 'operation' | 'deadline' | 'payment' | 'policy';
+  time: string | null;
+  href: string | null;
+};
+
+const calendarWeekdays = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
+
+function dateKeyParts(value: string) {
+  const [year = 0, month = 1, day = 1] = value.split('-').map(Number);
+  return { year, month, day };
+}
+
+function makeDateKey(year: number, month: number, day: number) {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function dateKeyInTimezone(value: string, timezone: string) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return null;
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(date);
+    const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value;
+    const year = part('year');
+    const month = part('month');
+    const day = part('day');
+    return year && month && day ? `${year}-${month}-${day}` : null;
+  } catch {
+    return null;
+  }
+}
+
+function timeInTimezone(value: string, timezone: string) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return null;
+  try {
+    return new Intl.DateTimeFormat('id-ID', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(date);
+  } catch {
+    return null;
+  }
+}
+
+function calendarDateLabel(value: string, options: Intl.DateTimeFormatOptions = {}) {
+  const { year, month, day } = dateKeyParts(value);
+  return new Intl.DateTimeFormat('id-ID', { timeZone: 'UTC', ...options }).format(new Date(Date.UTC(year, month - 1, day)));
+}
+
+function moveCalendarDate(value: string, view: CalendarView, amount: number) {
+  const { year, month, day } = dateKeyParts(value);
+  if (view === 'day') {
+    const date = new Date(Date.UTC(year, month - 1, day + amount));
+    return makeDateKey(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
+  }
+  if (view === 'month') {
+    const date = new Date(Date.UTC(year, month - 1 + amount, 1));
+    return makeDateKey(date.getUTCFullYear(), date.getUTCMonth() + 1, 1);
+  }
+  return makeDateKey(year + amount, 1, 1);
+}
+
+function calendarMonthCells(year: number, month: number) {
+  const firstWeekday = (new Date(Date.UTC(year, month - 1, 1)).getUTCDay() + 6) % 7;
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const count = Math.ceil((firstWeekday + daysInMonth) / 7) * 7;
+  return Array.from({ length: count }, (_, index) => {
+    const date = new Date(Date.UTC(year, month - 1, index - firstWeekday + 1));
+    return {
+      dateKey: makeDateKey(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate()),
+      inMonth: date.getUTCMonth() + 1 === month,
+    };
+  });
+}
+
 function StateLabel({ state }: { state: string }) {
   const labels: Record<string, string> = {
     active: 'Aktif', running: 'Berjalan', starting: 'Menyiapkan', connected: 'Terhubung', supported: 'Didukung API', unknown: 'Belum diverifikasi', unverified: 'Belum diuji', invalid: 'Token tidak valid', unavailable: 'Tidak dapat diperiksa', expired: 'Kedaluwarsa', paused: 'Dijeda', draft: 'Belum aktif', recorded: 'Tercatat', blocked: 'Dilewati', failed: 'Gagal',
@@ -184,6 +268,8 @@ function OpportunitiesPage() {
   if (query.isPending) return <LoadingPanel />;
   if (query.isError) return <ErrorNotice message="Peluang belum dapat dimuat." onRetry={() => query.refetch()} />;
   const status = autopilot.data;
+  const selectedId = new URLSearchParams(location.search).get('project');
+  if (selectedId) return <OpportunityDetail project={query.data.find((item) => item.id === selectedId)} />;
   return <>
     <PageIntro eyebrow="Antrean peluang" title="Peluang dipindai otomatis." description="Autopilot membaca pencarian yang cocok dengan profil Freelancer dan membuat bid tanpa form per proyek. Daftar ini diperbarui berkala." />
     <section className="filter-bar" aria-label="Filter peluang tersimpan">
@@ -210,6 +296,33 @@ function OpportunitiesPage() {
       ))}
     </div>
   </>;
+}
+
+function OpportunityDetail({ project }: { project: Opportunity | undefined }) {
+  const back = <Link to="/opportunities" className="button button-secondary opp-back">← Semua peluang</Link>;
+  if (!project) return <>{back}<div className="empty-state"><h3>Peluang tidak ditemukan</h3><p>Proyek ini mungkin sudah dihapus dari daftar tersimpan.</p></div></>;
+  const fixed = project.projectType === 'hourly' ? 'Per jam' : project.projectType === 'fixed' ? 'Harga tetap' : 'Tipe tidak diketahui';
+  const facts: Array<[string, string]> = [
+    ['Budget', formatMoney(project.budgetMin, project.currency) + ' – ' + formatMoney(project.budgetMax, project.currency)],
+    ['Tipe', fixed],
+    ['Sisa waktu', project.deadlineDays === null ? 'Tidak diberikan (durasi bid 14 hari)' : project.deadlineDays + ' hari'],
+    ['Klien', project.clientName],
+    ['Kualitas brief', Math.round(project.briefQuality * 100) + '%'],
+    ['Risiko', Math.round(project.riskScore * 100) + '%'],
+    ['Sumber', project.source === 'freelancer' ? 'Freelancer.com' : 'Fixture pengujian'],
+  ];
+  return <article className="opp-detail">
+    {back}
+    <header className="opp-head">
+      <div><p className="eyebrow">{project.clientName}</p><h2>{project.title}</h2></div>
+      <div className="opp-score"><strong>{project.score}</strong><small>skor kecocokan</small></div>
+    </header>
+    <div className="opp-status"><StateLabel state={project.pipelineStatus} /></div>
+    <dl className="opp-facts">{facts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+    <section><h3>Deskripsi</h3><p className="opp-description">{project.description}</p></section>
+    <section><h3>Skill dibutuhkan</h3><div className="tag-row">{project.skills.map((skill) => <span className="skill-tag" key={skill}>{skill}</span>)}</div></section>
+    <section><h3>Alasan skor</h3><ul className="opp-factors">{project.factors.map((factor) => <li key={factor.key}><span>{factor.label}</span><strong>{factor.value}</strong><em>{factor.points > 0 ? '+' : ''}{factor.points}</em></li>)}</ul></section>
+  </article>;
 }
 
 function PipelinePage() {
@@ -319,7 +432,7 @@ function AgentsPage() {
       name: 'Knowledge Curator',
       dept: 'Knowledge Hub',
       role: 'Kurator Pengetahuan & Kode',
-      task: 'Menyinkronkan repositori GitHub dan catatan lokal ke SQLite FTS5 untuk dijadikan bukti klaim proposal.',
+      task: 'Menyinkronkan repositori GitHub dan catatan lokal ke Supabase (pencarian teks Postgres) untuk dijadikan bukti klaim proposal.',
       boundary: 'Read-only lokal; memindai & mengecualikan token/kredensial sebelum pengindeksan.',
       metric: `${dashboard.data.counts.knowledgeSources} sumber pengetahuan diindeks`,
     },
@@ -481,6 +594,127 @@ function TaskBoardPage() {
   </>;
 }
 
+function OperationsCalendar({ policy, work, workPending, workError }: { policy: Policy; work: Work | undefined; workPending: boolean; workError: boolean }) {
+  const autopilotQuery = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 30_000 });
+  const [view, setView] = useState<CalendarView>('month');
+  const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
+  const autopilot = autopilotQuery.isError ? undefined : autopilotQuery.data;
+  const events = useMemo<CalendarEvent[]>(() => {
+    const result: CalendarEvent[] = [];
+    const expiryKey = dateKeyInTimezone(policy.expiresAt, policy.timezone);
+    const expiryTime = timeInTimezone(policy.expiresAt, policy.timezone);
+    if (expiryKey) result.push({ id: 'policy-expiry', dateKey: expiryKey, title: 'Masa berlaku kebijakan berakhir', detail: `Kebijakan versi ${policy.version}`, kind: 'policy', time: expiryTime, href: '/policy' });
+
+    if (autopilot?.state === 'running' && autopilot.nextRunAt) {
+      const dateKey = dateKeyInTimezone(autopilot.nextRunAt, policy.timezone);
+      const timestamp = new Date(autopilot.nextRunAt).getTime();
+      if (dateKey && Number.isFinite(timestamp) && timestamp >= Date.now()) result.push({
+        id: `autopilot-${autopilot.nextRunAt}`,
+        dateKey,
+        title: 'Siklus autopilot berikutnya',
+        detail: autopilot.cycleInProgress ? 'Siklus saat ini sedang berjalan' : 'Jadwal dari status server',
+        kind: 'operation',
+        time: timeInTimezone(autopilot.nextRunAt, policy.timezone),
+        href: '/activity',
+      });
+    }
+
+    for (const item of work?.projects ?? []) {
+      if (item.status !== 'active' || !item.deadline) continue;
+      const dateKey = dateKeyInTimezone(item.deadline, policy.timezone);
+      if (dateKey) result.push({ id: `project-${item.id}`, dateKey, title: `Tenggat: ${item.title}`, detail: `Klien: ${item.client}`, kind: 'deadline', time: null, href: '/work' });
+    }
+
+    for (const payment of work?.payments ?? []) {
+      if (payment.status !== 'expected' || !payment.dueDate) continue;
+      const dateKey = dateKeyInTimezone(payment.dueDate, policy.timezone);
+      if (dateKey) result.push({ id: `payment-${payment.id}`, dateKey, title: 'Pembayaran diharapkan', detail: formatMoney(payment.amount, payment.currency), kind: 'payment', time: null, href: '/work' });
+    }
+
+    return result.sort((left, right) => left.dateKey.localeCompare(right.dateKey) || (left.time ?? '99:99').localeCompare(right.time ?? '99:99'));
+  }, [policy, work, autopilot]);
+  const eventsByDate = useMemo(() => {
+    const grouped = new Map<string, CalendarEvent[]>();
+    for (const event of events) grouped.set(event.dateKey, [...(grouped.get(event.dateKey) ?? []), event]);
+    return grouped;
+  }, [events]);
+
+  const now = new Date();
+  const todayKey = dateKeyInTimezone(now.toISOString(), policy.timezone) ?? now.toISOString().slice(0, 10);
+  const currentDateKey = selectedDateKey ?? todayKey;
+  const { year, month } = dateKeyParts(currentDateKey);
+  const monthCells = calendarMonthCells(year, month);
+  const currentEvents = eventsByDate.get(currentDateKey) ?? [];
+  const heading = view === 'year'
+    ? String(year)
+    : view === 'month'
+      ? calendarDateLabel(currentDateKey, { month: 'long', year: 'numeric' })
+      : calendarDateLabel(currentDateKey, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const changePeriod = (amount: number) => setSelectedDateKey(moveCalendarDate(currentDateKey, view, amount));
+
+  return <section className="calendar-card calendar-browser" aria-labelledby="calendar-browser-title">
+    <div className="calendar-browser-heading">
+      <div><p className="eyebrow">Agenda ruang kerja</p><h2 id="calendar-browser-title">Kalender</h2><p>Zona waktu kebijakan: <strong>{policy.timezone}</strong></p></div>
+      <div className="calendar-view-tabs" role="group" aria-label="Tampilan kalender">
+        {(['day', 'month', 'year'] as const).map((item) => <button key={item} className={`calendar-view-button${view === item ? ' active' : ''}`} type="button" aria-pressed={view === item} onClick={() => setView(item)}>{item === 'day' ? 'Hari' : item === 'month' ? 'Bulan' : 'Tahun'}</button>)}
+      </div>
+    </div>
+    <div className="calendar-navigation">
+      <div className="calendar-period-controls">
+        <button className="calendar-nav-button" type="button" aria-label={`Periode ${view === 'day' ? 'hari' : view === 'month' ? 'bulan' : 'tahun'} sebelumnya`} onClick={() => changePeriod(-1)}>‹</button>
+        <h3 aria-live="polite">{heading}</h3>
+        <button className="calendar-nav-button" type="button" aria-label={`Periode ${view === 'day' ? 'hari' : view === 'month' ? 'bulan' : 'tahun'} berikutnya`} onClick={() => changePeriod(1)}>›</button>
+      </div>
+      <button className="calendar-today-button" type="button" onClick={() => { setSelectedDateKey(todayKey); setView('day'); }}>Hari ini</button>
+    </div>
+
+    {view === 'month' && <div className="calendar-month-view">
+      <div className="calendar-weekdays" aria-hidden="true">{calendarWeekdays.map((weekday) => <span key={weekday}>{weekday}</span>)}</div>
+      <div className="calendar-month-grid" aria-label={`Tanggal bulan ${heading}`}>
+        {monthCells.map(({ dateKey, inMonth }) => {
+          const dayEvents = eventsByDate.get(dateKey) ?? [];
+          const date = dateKeyParts(dateKey);
+          const isToday = dateKey === todayKey;
+          const isSelected = dateKey === currentDateKey;
+          const eventLabel = dayEvents.length === 0 ? 'tanpa agenda' : `${dayEvents.length} agenda`;
+          return <button key={dateKey} type="button" className={`calendar-day-cell${inMonth ? '' : ' outside-month'}${isToday ? ' today' : ''}${isSelected ? ' selected' : ''}`} aria-label={`${calendarDateLabel(dateKey, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}, ${eventLabel}`} aria-pressed={isSelected} onClick={() => { setSelectedDateKey(dateKey); setView('day'); }}>
+            <span className="calendar-day-number">{date.day}</span>{dayEvents.length > 0 && <span className="calendar-day-events"><span className="calendar-event-mark" aria-hidden="true" />{dayEvents.length}</span>}
+          </button>;
+        })}
+      </div>
+    </div>}
+
+    {view === 'day' && <div className="calendar-day-view">
+      <div className="calendar-day-summary"><strong>{calendarDateLabel(currentDateKey, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</strong><span>{currentEvents.length} agenda tercatat</span></div>
+      {currentEvents.length === 0
+        ? <div className="calendar-empty"><strong>Belum ada agenda pada tanggal ini.</strong><span>Jadwal berasal dari status autopilot, tenggat proyek, pembayaran, dan masa berlaku kebijakan.</span></div>
+        : <ol className="calendar-event-list">{currentEvents.map((event) => <li key={event.id} className={`calendar-event calendar-event-${event.kind}`}>
+          <span className="calendar-event-date">{event.time ?? (event.kind === 'deadline' ? 'Tenggat' : event.kind === 'payment' ? 'Pembayaran' : event.kind === 'policy' ? 'Kebijakan' : 'Operasi')}</span>
+          <div><strong>{event.title}</strong><span>{event.detail}</span></div>{event.href && <Link to={event.href} className="calendar-event-link">Buka detail</Link>}
+        </li>)}</ol>}
+    </div>}
+
+    {view === 'year' && <div className="calendar-year-grid">
+      {Array.from({ length: 12 }, (_, index) => {
+        const monthDate = new Date(Date.UTC(year, index, 1));
+        const monthKey = `${year}-${String(index + 1).padStart(2, '0')}`;
+        const count = events.filter((event) => event.dateKey.startsWith(`${monthKey}-`)).length;
+        return <button className="calendar-year-month" type="button" key={monthKey} aria-label={`${new Intl.DateTimeFormat('id-ID', { month: 'long', timeZone: 'UTC' }).format(monthDate)} ${year}, ${count} agenda`} onClick={() => { setSelectedDateKey(makeDateKey(year, index + 1, 1)); setView('month'); }}>
+          <strong>{new Intl.DateTimeFormat('id-ID', { month: 'long', timeZone: 'UTC' }).format(monthDate)}</strong><span>{count === 0 ? 'Tidak ada agenda' : `${count} agenda`}</span>
+        </button>;
+      })}
+    </div>}
+
+    <div className="calendar-source-state" aria-live="polite">
+      {autopilotQuery.isPending && <span role="status">Memuat jadwal siklus server...</span>}
+      {autopilotQuery.isError && <span>Jadwal siklus server tidak tersedia; data lama disembunyikan.</span>}
+      {workPending && <span role="status">Memuat tenggat proyek dan pembayaran...</span>}
+      {workError && <span>Tenggat proyek dan pembayaran tidak tersedia; data lama disembunyikan.</span>}
+      <span>Penutupan listing Freelancer menggunakan hitungan dari sinkronisasi terakhir, bukan tanggal pasti.</span>
+    </div>
+  </section>;
+}
+
 function CalendarPage() {
   const policyQuery = useQuery({ queryKey: ['policy'], queryFn: () => api<Policy>('/policy') });
   const projectsQuery = useQuery({ queryKey: ['projects', 'calendar'], queryFn: () => api<Opportunity[]>('/projects') });
@@ -505,11 +739,13 @@ function CalendarPage() {
   return <>
     <PageIntro
       eyebrow="Jadwal & Waktu"
-      title="Kalender kerja dan batas waktu automasi."
-      description="Pantau jam aktif automasi, batas frekuensi penawaran harian dan mingguan, serta tenggat waktu proyek."
+      title="Kalender kerja, server, dan proyek."
+      description="Lihat agenda per hari, bulan, dan tahun, termasuk jadwal autopilot, tenggat proyek, pembayaran, dan masa berlaku kebijakan."
     />
 
     <div className="calendar-grid">
+      <OperationsCalendar policy={policy} work={workQuery.isError ? undefined : workQuery.data} workPending={workQuery.isPending} workError={workQuery.isError} />
+
       <section className="calendar-card">
         <h3>Jam Kerja & Status Operasi</h3>
         <div className={`hours-status-badge ${isWithinHours && policy.state === 'active' ? 'hours-active' : 'hours-inactive'}`}>
@@ -669,45 +905,84 @@ function ProfilePage() {
   </>;
 }
 
+/** Number input that keeps the raw text while typing, so clearing or typing "50" does not turn into "050". */
+function NumField({ value, onChange, ...rest }: { value: number; onChange: (value: number) => void; min?: string; max?: string; step?: string }) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => { if (Number(text) !== value) setText(String(value)); }, [value]);
+  return <input type="number" {...rest} value={text} onChange={(event) => { setText(event.target.value); if (event.target.value !== '') onChange(Number(event.target.value)); }} />;
+}
+
 function PolicyPage() {
   const queryClient = useQueryClient();
   const policyQuery = useQuery({ queryKey: ['policy'], queryFn: () => api<Policy>('/policy') });
   const autopilotQuery = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 30_000 });
+  const [draft, setDraft] = useState<Policy | null>(null);
+  // Raw text of the comma lists, so a typed trailing comma/space is not stripped on every keystroke.
+  const [listText, setListText] = useState<{ keywords?: string; noNegotiationTerms?: string }>({});
+  const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
+  const refresh = async () => Promise.all([
+    queryClient.invalidateQueries({ queryKey: ['policy'] }),
+    queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+    queryClient.invalidateQueries({ queryKey: ['autopilot'] }),
+  ]);
+  const save = useMutation({
+    mutationFn: (value: Policy) => api<Policy>('/policy', jsonRequest('PUT', {
+      allowedActions: value.allowedActions,
+      keywords: value.keywords,
+      minimumConfidence: value.minimumConfidence,
+      minPrice: value.minPrice,
+      maxPrice: value.maxPrice,
+      dailyBidLimit: value.dailyBidLimit,
+      weeklyBidLimit: value.weeklyBidLimit,
+      timezone: value.timezone,
+      activeHours: value.activeHours,
+      noNegotiationTerms: value.noNegotiationTerms,
+    })),
+    onSuccess: async (value) => { setDraft(value); setListText({}); setNotice({ text: 'Policy tersimpan sebagai draf. Aktifkan setelah memeriksa batasnya.', error: false }); await refresh(); },
+    onError: (error) => setNotice({ text: error instanceof Error ? error.message : 'Policy tidak dapat disimpan.', error: true }),
+  });
+  const activate = useMutation({
+    mutationFn: () => api<{ policy: Policy }>('/policy/activate', jsonRequest('POST', { confirmSimulation: true })),
+    onSuccess: async () => { setNotice({ text: 'Policy aktif dalam mode simulasi lokal.', error: false }); await refresh(); },
+    onError: (error) => setNotice({ text: error instanceof Error ? error.message : 'Policy tidak dapat diaktifkan.', error: true }),
+  });
   const control = useMutation({
     mutationFn: (action: 'pause' | 'resume') => api<Policy>('/policy/' + action, jsonRequest('POST')),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['policy'] }),
-        queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
-        queryClient.invalidateQueries({ queryKey: ['autopilot'] }),
-      ]);
-    },
+    onSuccess: refresh,
   });
   if (policyQuery.isPending) return <LoadingPanel label="Membaca kebijakan autopilot..." />;
   if (policyQuery.isError) return <ErrorNotice message="Kebijakan belum dapat dimuat." onRetry={() => policyQuery.refetch()} />;
-  const policy = policyQuery.data;
+  const policy = draft ?? policyQuery.data;
   const autopilot = autopilotQuery.data;
+  const setList = (key: 'keywords' | 'noNegotiationTerms', value: string) => { setListText({ ...listText, [key]: value }); setDraft({ ...policy, [key]: value.split(',').map((item) => item.trim()).filter(Boolean) }); };
   return <>
-    <PageIntro eyebrow="Policy engine" title="Aturan otomatis dari profil yang tersambung." description="Autopilot memakai batas lokal secara otomatis. Tidak perlu mengisi form untuk menilai atau mengirim setiap peluang." action={<StateLabel state={policy.state} />} />
+    <PageIntro eyebrow="Policy engine" title="Atur batas autopilot." description="Perubahan disimpan sebagai draf. Aktivasi selalu dimulai dalam mode simulasi lokal." action={<StateLabel state={policy.state} />} />
+    {notice && (notice.error ? <ErrorNotice message={notice.text} /> : <div className="notice notice-success" role="status">{notice.text}</div>)}
     {control.isError && <ErrorNotice message={(control.error as Error).message} />}
     <div className="policy-summary-grid">
       <section className="form-card">
+        <div className="section-heading"><div><p className="eyebrow">Editor policy</p><h2>Batas keputusan otomatis</h2></div><span>Versi {policy.version}</span></div>
+        <p className="form-help">Pisahkan kata kunci dan istilah non-negosiasi dengan koma. Perubahan policy aktif membuatnya kembali menjadi draf.</p>
+        <form className="policy-form" onSubmit={(event) => { event.preventDefault(); if (draft) save.mutate(draft); }}>
+          <div className="form-grid form-grid-three">
+            <label className="form-field"><span>Confidence minimum (50–100%)</span><NumField min="50" max="100" step="1" value={Math.round(policy.minimumConfidence * 100)} onChange={(next) => setDraft({ ...policy, minimumConfidence: next / 100 })} /></label>
+            <label className="form-field"><span>Harga minimum (USD)</span><NumField min="0" value={policy.minPrice} onChange={(next) => setDraft({ ...policy, minPrice: next })} /></label>
+            <label className="form-field"><span>Harga maksimum (USD)</span><NumField min="0" value={policy.maxPrice} onChange={(next) => setDraft({ ...policy, maxPrice: next })} /></label>
+            <label className="form-field"><span>Batas bid harian</span><NumField min="0" max="50" value={policy.dailyBidLimit} onChange={(next) => setDraft({ ...policy, dailyBidLimit: next })} /></label>
+            <label className="form-field"><span>Batas bid mingguan</span><NumField min="0" max="200" value={policy.weeklyBidLimit} onChange={(next) => setDraft({ ...policy, weeklyBidLimit: next })} /></label>
+            <label className="form-field"><span>Zona waktu</span><input value={policy.timezone} onChange={(event) => setDraft({ ...policy, timezone: event.target.value })} /></label>
+            <label className="form-field"><span>Jam mulai</span><NumField min="0" max="23" value={policy.activeHours.start} onChange={(next) => setDraft({ ...policy, activeHours: { ...policy.activeHours, start: next } })} /></label>
+            <label className="form-field"><span>Jam selesai</span><NumField min="1" max="24" value={policy.activeHours.end} onChange={(next) => setDraft({ ...policy, activeHours: { ...policy.activeHours, end: next } })} /></label>
+          </div>
+          <label className="form-field"><span>Kata kunci proyek</span><input value={listText.keywords ?? policy.keywords.join(', ')} onChange={(event) => setList('keywords', event.target.value)} placeholder="Python, Laravel, API" /></label>
+          <label className="form-field"><span>Istilah non-negosiasi</span><input value={listText.noNegotiationTerms ?? policy.noNegotiationTerms.join(', ')} onChange={(event) => setList('noNegotiationTerms', event.target.value)} placeholder="pembayaran di muka, onsite" /></label>
+          <div className="form-actions"><button className="button button-primary" type="submit" disabled={!draft || save.isPending}>{save.isPending ? 'Menyimpan...' : 'Simpan policy sebagai draf'}</button><button className="button button-secondary" type="button" disabled={activate.isPending || policy.state === 'active'} onClick={() => activate.mutate()}>{activate.isPending ? 'Mengaktifkan...' : 'Aktifkan simulasi lokal'}</button></div>
+        </form>
+      </section>
+      <section className="form-card">
         <div className="section-heading"><div><p className="eyebrow">Operasi berjalan</p><h2>{autopilot?.lastMessage ?? 'Autopilot sedang menyiapkan akun.'}</h2></div><StateLabel state={autopilot?.state ?? 'starting'} /></div>
-        <div className="policy-facts">
-          <div><span>Spesialisasi</span><strong>{policy.specializations.join(', ') || 'Menunggu profil Freelancer'}</strong></div>
-          <div><span>Rentang penawaran</span><strong>{formatMoney(policy.minPrice, 'USD')}?{formatMoney(policy.maxPrice, 'USD')}</strong></div>
-          <div><span>Batas harian / mingguan</span><strong>{policy.dailyBidLimit} / {policy.weeklyBidLimit}</strong></div>
-          <div><span>Confidence minimum</span><strong>{Math.round(policy.minimumConfidence * 100)}%</strong></div>
-          <div><span>Jam operasi</span><strong>{policy.activeHours.start}:00?{policy.activeHours.end}:00 ? {policy.timezone}</strong></div>
-          <div><span>Berlaku sampai</span><strong>{formatDate(policy.expiresAt)}</strong></div>
-        </div>
-        <p className="form-help">Kebijakan melewati proyek di luar bidang profil, anggaran USD, batas risiko, confidence, jam kerja, dan kuota. Jika deadline klien tidak tersedia, proposal mencantumkan estimasi pengiriman 14 hari dan meminta konfirmasi tenggat sebelum mulai. Hanya proyek fixed price yang diproses otomatis.</p>
-        <div className="form-actions">
-          {policy.state === 'paused'
-            ? <button className="button button-primary" type="button" disabled={control.isPending || policy.simulationOnly} onClick={() => control.mutate('resume')}>{control.isPending ? 'Melanjutkan?' : 'Lanjutkan autopilot'}</button>
-            : <button className="button button-secondary" type="button" disabled={control.isPending || policy.state !== 'active'} onClick={() => control.mutate('pause')}>{control.isPending ? 'Menjeda?' : 'Jeda darurat'}</button>}
-          <span>{policy.simulationOnly ? 'Mode live belum aktif.' : 'Bid live berjalan sesuai kebijakan tersimpan.'}</span>
-        </div>
+        <div className="policy-facts"><div><span>Spesialisasi</span><strong>{policy.specializations.join(', ') || 'Menunggu profil Freelancer'}</strong></div><div><span>Rentang penawaran</span><strong>{formatMoney(policy.minPrice, 'USD')} – {formatMoney(policy.maxPrice, 'USD')}</strong></div><div><span>Batas harian / mingguan</span><strong>{policy.dailyBidLimit} / {policy.weeklyBidLimit}</strong></div><div><span>Berlaku sampai</span><strong>{formatDate(policy.expiresAt)}</strong></div></div>
+        <div className="form-actions">{policy.state === 'paused' ? <button className="button button-primary" type="button" disabled={control.isPending || policy.simulationOnly} onClick={() => control.mutate('resume')}>Lanjutkan autopilot</button> : <button className="button button-secondary" type="button" disabled={control.isPending || policy.state !== 'active'} onClick={() => control.mutate('pause')}>Jeda darurat</button>}<span>{policy.simulationOnly ? 'Mode simulasi lokal.' : 'Bid live mengikuti policy tersimpan.'}</span></div>
       </section>
     </div>
   </>;
@@ -780,7 +1055,7 @@ function KnowledgePage() {
   return <>
     <PageIntro eyebrow="Knowledge Hub" title="Bawa bukti kerja, bukan seluruh repositori ke setiap draf." description="Pilih sumber yang Anda izinkan. Teks diperiksa sebelum masuk indeks lokal dan setiap hasil menyimpan path serta provenance." />
     {notice && (notice.error ? <ErrorNotice message={notice.text} /> : <div className="notice notice-success" role="status">{notice.text}</div>)}
-    <section className="knowledge-summary"><div><p className="eyebrow">Cakupan saat ini</p><strong>{knowledge.data.coverage.sources} sumber / {knowledge.data.coverage.chunks} potongan</strong><span>SQLite FTS5 / freshness tercatat per sumber</span></div><div className="provider-boundaries"><span>GitHub: baca saja</span><span>LinkedIn: impor milik pengguna</span></div></section>
+    <section className="knowledge-summary"><div><p className="eyebrow">Cakupan saat ini</p><strong>{knowledge.data.coverage.sources} sumber / {knowledge.data.coverage.chunks} potongan</strong><span>Postgres FTS / freshness tercatat per sumber</span></div><div className="provider-boundaries"><span>GitHub: baca saja</span><span>LinkedIn: impor milik pengguna</span></div></section>
     <div className="knowledge-grid">
       <section className="form-card"><div className="section-heading"><div><p className="eyebrow">Pilih cakupan</p><h2>Impor berkas teks</h2></div></div>
         <form className="stack-form" onSubmit={runImport}>

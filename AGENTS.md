@@ -35,7 +35,7 @@ Terakhir diperbarui: 16 Oktober 2026.
 ### 2.3 Tindakan yang butuh izin eksplisit pemilik
 - Mengubah kebijakan (`/api/policy/*`), menjeda/melanjutkan autopilot, menyimpan profil (lihat jebakan §12), mengirim apa pun ke Freelancer, mengubah `.env`, menghapus data, `git commit/push`.
 - **Jangan menyentuh kill switch** ("Jeda automasi") kecuali diminta. Jangan "melanjutkan" kebijakan yang dijeda pemilik — itu mengaktifkan bid live.
-- Database `.local/freelancer-virtual-house.sqlite` berisi **data nyata**. Cadangkan (`VACUUM INTO`) sebelum perubahan berisiko.
+- Database **Supabase Postgres** (`DATABASE_URL` di `.env`, berisi password: jangan dicetak) berisi **data nyata**. Cadangkan (`pg_dump` atau backup dashboard) sebelum perubahan berisiko. Arsip SQLite terakhir ada di `.local/backup/` (gitignored).
 
 ### 2.4 Cara bekerja
 - Kecilkan diff; jangan me-refactor area yang tidak diminta. Jangan menambah dependensi baru tanpa alasan kuat (OrbitControls diambil dari paket `three` yang sudah ada).
@@ -57,7 +57,7 @@ Terakhir diperbarui: 16 Oktober 2026.
 
 - **Perintah memakai spasi**: `pnpm private:start` (bukan `pnpm-private:start`).
 - Port: **API `127.0.0.1:3001`**, **web `127.0.0.1:5174`** (Vite mem-proxy `/api` ke 3001).
-- `.env` hanya dibaca saat server start → setelah mengubah `.env`, jalankan `pnpm private:stop && pnpm private:start`.
+- `.env` hanya dibaca saat server start → setelah mengubah `.env`, jalankan `pnpm private:stop; pnpm private:start` (PowerShell 5.1 tidak mengenal `&&`).
 - Node ≥ 24, pnpm 12. Platform utama pemilik: **Windows 11** (PowerShell + Git Bash).
 
 ---
@@ -72,14 +72,14 @@ packages/
   domain/              Tipe inti, scoring proyek, policy engine, transisi pipeline, bidOutcome
   application/         Port drafting (AiDraftingPort, DraftingInput), createId, hashPayload
   contracts/           Skema zod untuk body API
-  persistence/         SQLite (better-sqlite3 + drizzle), migrasi SQL, WorkspaceRepository
-  knowledge/           Pemeriksaan & pemotongan file untuk Knowledge Hub (FTS5)
+  persistence/         Postgres (`pg`; PGlite di memori untuk tes), migrasi SQL, WorkspaceRepository (semua method `async`; buka dengan `WorkspaceRepository.open()`)
+  knowledge/           Pemeriksaan & pemotongan file untuk Knowledge Hub
   adapter-freelancer/  API Freelancer.com: baca (proyek, profil, pesan, bid) & tulis (bid, profil, pesan)
   adapter-github/      Baca repo GitHub (Contents) + daftar repo milik sendiri
   adapter-hermes/      Menjalankan Hermes CLI untuk menulis draf proposal
 scripts/private.mjs    private:start / private:stop
 docs/                  hermes-agent-setup.md, capability-matrix.md, threat-model.md
-.local/                (gitignored) database SQLite, credential store DPAPI, log, pid
+.local/                (gitignored) arsip SQLite lama, credential store DPAPI, log, pid
 ```
 
 Nama paket npm: `@fvh/<nama>`. Semua paket diekspor langsung dari `src/index.ts` (tanpa build).
@@ -116,9 +116,9 @@ Alasan penolakan policy engine (`packages/domain/src/policy.ts`): `policy_paused
 
 ---
 
-## 6. Data (SQLite)
+## 6. Data (Supabase Postgres)
 
-File: `.local/freelancer-virtual-house.sqlite` (WAL). Migrasi: **semua** `packages/persistence/migrations/*.sql` dijalankan berurutan **setiap start**.
+Koneksi: `DATABASE_URL` (Session pooler Supabase, port 5432) dibaca dari `.env` oleh `index.ts`; server menolak start tanpanya. Migrasi: **semua** `packages/persistence/migrations/*.sql` dijalankan berurutan **setiap start**. Semua tabel ada di schema **`fvh`** (bukan `public`; database yang sama dipakai proyek lain, jangan dicampur) lewat `search_path` koneksi. RLS aktif di semua tabel tanpa policy: akses hanya lewat koneksi Postgres server, bukan Data API. Tes memakai PGlite di memori (±4 dtk per database).
 
 **Aturan migrasi: hanya aditif** (`CREATE TABLE/INDEX IF NOT EXISTS`). Tidak ada DROP/ALTER pada tabel berisi data. Karena `IF NOT EXISTS`, nama tabel yang bentrok **tidak** diganti diam-diam — periksa dulu tabel yang sudah ada di database nyata.
 
@@ -128,12 +128,12 @@ File: `.local/freelancer-virtual-house.sqlite` (WAL). Migrasi: **semua** `packag
 | `projects` | Proyek Freelancer + `pipeline_status`, skor, faktor |
 | `bid_drafts` | Draf proposal (manual & autopilot) |
 | `audit_events` | Log audit semua keputusan & aksi (sumber Live Activity) |
-| `knowledge_sources`, `knowledge_chunks`, `knowledge_search` (FTS5) | Knowledge Hub |
+| `knowledge_sources`, `knowledge_chunks` (kolom `content_tsv` + indeks GIN untuk pencarian) | Knowledge Hub |
 | `bid_results` | Bid terkirim: `bid_id`, jumlah, `award_status` mentah, `outcome` |
 | `client_threads` | Thread pesan Freelancer terbaru |
 | `client_projects`, `payments` | Proyek aktif multi-sumber & pembayaran |
 
-⚠️ **Tabel lama `bid_outcomes`** (255 baris keputusan skipped/submitted, dari versi kode sebelum git) ada di database nyata, **bukan** bagian skema saat ini. **Jangan dihapus, jangan dipakai ulang namanya.** Tabel baru sengaja bernama `bid_results`.
+⚠️ **Tabel lama `bid_outcomes`** (di Postgres diarsipkan sebagai `legacy_bid_outcomes`; 255 baris keputusan skipped/submitted, dari versi kode sebelum git) ada di database nyata, **bukan** bagian skema saat ini. **Jangan dihapus, jangan dipakai ulang namanya.** Tabel baru sengaja bernama `bid_results`.
 
 Pipeline status: `new, scored, draft_ready, policy_check, submitted, in_conversation, won, lost, skipped, expired, reconciliation_required, error`. `submitted` **hanya** diset setelah HTTP 200 dari Freelancer.
 
@@ -244,7 +244,7 @@ Tes penting: `office-state.test.ts` (aturan status), `office-layout.test.ts` (ku
 3. **ID dari Freelancer berupa angka.** Gunakan `identifier()` (bukan `text()`) di adapter; tes harus memakai ID numerik.
 4. **Kuota bid** dihitung dari audit `marketplace.production.submit_bid` berstatus `recorded` di zona waktu kebijakan — bukan dari jumlah draf.
 5. **Hitungan "Keputusan dilewati"** memakai `countAuditByStatus('blocked')` (semua), bukan 200 event terakhir.
-6. **Jam operasi** diperiksa dalam **zona waktu kebijakan** (`Asia/Jakarta`, 08–19), bukan zona waktu browser.
+6. **Jam operasi** diperiksa dalam **zona waktu kebijakan** (`Asia/Jakarta`, 00–24), bukan zona waktu browser.
 7. **"Tenggat" proyek Freelancer** sebenarnya waktu penutupan listing saat sinkronisasi terakhir (`deadlineDays` statis).
 8. **Proses detached di Windows** tidak menulis output node ke file handle warisan → `private:start` memakai supervisor node yang mem-pipe output `pnpm dev`. `shell: true` + argumen menimbulkan peringatan deprecation → panggil `cmd.exe /d /s /c` eksplisit.
 9. **OpenCode** pernah membatalkan perubahan pemilik di `app.ts` (baris `GITHUB_TOKEN`) dan meninggalkan kode setengah jadi. Selalu review diff setelah alat otomatis.
@@ -254,7 +254,7 @@ Tes penting: `office-state.test.ts` (aturan status), `office-layout.test.ts` (ku
 
 ## 13. Keputusan pemilik (jangan diubah tanpa bertanya)
 
-- Bid dikirim **otomatis penuh** (tanpa antrean persetujuan) dalam batas kebijakan: harga 100–800 USD, 4 bid/hari, 12/minggu, jam 08–19 WIB.
+- Bid dikirim **otomatis penuh** (tanpa antrean persetujuan) dalam batas kebijakan: harga 100–800 USD, 4 bid/hari, 12/minggu, jam 00–24 WIB.
 - Proposal bid otomatis **ditulis Hermes**; consent pengiriman data ke Hermes **sudah diberikan**.
 - **Lead Agent (Hermes)** ditampilkan di kantor dengan status nyata.
 - LinkedIn: API tidak memberi riwayat kerja/skill → gunakan **impor file ekspor LinkedIn** (CSV) di Knowledge Hub.
@@ -270,3 +270,15 @@ Tes penting: `office-state.test.ts` (aturan status), `office-layout.test.ts` (ku
 - Kanal/sesi Hermes (mis. Telegram) tidak dilaporkan → ditampilkan "Tidak tersedia".
 - API lokal tanpa autentikasi (dilindungi loopback + Host + Origin) — cukup untuk lokal satu pengguna.
 - Ide: sinyal kerja nyata untuk Knowledge Curator (saat sinkronisasi GitHub), kamera mengikuti agen yang berjalan, menghapus CSS sidebar lama, membaca milestone Freelancer untuk pendapatan otomatis.
+
+<!-- antislop:start -->
+## antislop
+For UI work, read the core and relevant skill files from the owner's global antislop installation:
+- Core: `C:/Users/khair/.agents/skills/antislop/SKILL.md`
+- UI / visual: `C:/Users/khair/.agents/skills/antislop-ui/SKILL.md`
+- People and accessibility: `C:/Users/khair/.agents/skills/antislop-human/SKILL.md`
+- Mobile / responsive: `C:/Users/khair/.agents/skills/antislop-layoutmobile/SKILL.md`
+- The human skill's contrast checker is in the same `antislop-human` folder.
+Before UI work in a new session, ask whether antislop applies during the work or afterward.
+These paths use the owner's global installation; keep the skill files from the same release and do not copy or download them through an agent.
+<!-- antislop:end -->
