@@ -11,7 +11,9 @@ const POD_XS = [-16, -9.5, -3];
 const POD_ZS = [-9.5, -3, 3.5];
 export const LEAD_ID = 'lead-agent';
 // The lead has its own desk (LEAD_DESK); the other nine agents fill the 3×3 pod grid.
-export const PODS = ROSTER.filter((entry) => entry.id !== LEAD_ID).map((entry, i) => ({ ...entry, x: POD_XS[i % 3]!, z: POD_ZS[Math.floor(i / 3)]! }));
+export const PODS = ROSTER.filter((entry) => entry.id !== LEAD_ID && !entry.floor).map((entry, i) => ({ ...entry, x: POD_XS[i % 3]!, z: POD_ZS[Math.floor(i / 3)]! }));
+export const MANAGER_DESK = {x:-9,z:9.2};
+export const FLOOR_TWO_PODS = PODS.map((pod,index)=>{const entry=ROSTER.filter(a=>a.floor===2 && a.id!=='delivery-manager')[index];return {...pod,...(entry ?? {id:`vacant-${index}`,name:'Meja tersedia',role:'Belum ditempati',color:'#8b928e'})};});
 export const LEAD_DESK = { x: -4, z: 10.4 };
 const corridorZ = (podZ: number) => podZ + POD_SIZE / 2 + 0.75;
 export const OWNER_SPOT: Spot = { x: -17.1, z: 8.2, y: 0, facing: 0, seated: false, via: [[SPINE_X, corridorZ(POD_ZS[2]!)], [-17.1, corridorZ(POD_ZS[2]!)]] };
@@ -47,8 +49,9 @@ const LOBBY_SLOTS: Spot[] = [-16.5, -15, -13.5, -12, -10.5].flatMap((x) => [9.4,
 })));
 
 function podSeat(id: string): Spot {
-  if (id === LEAD_ID) return { x: LEAD_DESK.x, z: LEAD_DESK.z - 1, y: 0.5, facing: 0, seated: true, via: [[SPINE_X, corridorZ(POD_ZS[2]!)], [LEAD_DESK.x + 1.8, corridorZ(POD_ZS[2]!)], [LEAD_DESK.x + 1.8, LEAD_DESK.z - 1]] };
-  const pod = PODS.find((entry) => entry.id === id)!;
+  if(id==='floor-one-manager') return {x:MANAGER_DESK.x,z:MANAGER_DESK.z-1,y:0.5,facing:0,seated:true,via:[[SPINE_X,corridorZ(POD_ZS[2]!)],[MANAGER_DESK.x+1.8,corridorZ(POD_ZS[2]!)],[MANAGER_DESK.x+1.8,MANAGER_DESK.z-1]]};
+  if (id === LEAD_ID || id==='delivery-manager') return { x: LEAD_DESK.x, z: LEAD_DESK.z - 1, y: 0.5, facing: 0, seated: true, via: [[SPINE_X, corridorZ(POD_ZS[2]!)], [LEAD_DESK.x + 1.8, corridorZ(POD_ZS[2]!)], [LEAD_DESK.x + 1.8, LEAD_DESK.z - 1]] };
+  const pod = [...PODS,...FLOOR_TWO_PODS].find((entry) => entry.id === id)!;
   const cz = corridorZ(pod.z);
   // Walk in through the opening on the right of the pod front, then around the desk.
   return { x: pod.x, z: pod.z - 0.9, y: 0.5, facing: 0, seated: true, via: [[SPINE_X, cz], [pod.x + 1.6, cz], [pod.x + 1.6, pod.z - 0.9]] };
@@ -57,10 +60,10 @@ function podSeat(id: string): Spot {
 /** Destination spot of every agent that is placed on the floor (offline agents are not placed). */
 export function spotsFor(agents: OfficeAgent[]): Map<string, Spot> {
   const spots = new Map<string, Spot>();
-  const rank: Record<RoomKey, number> = { workspace: 0, meeting: 0, lounge: 0, lobby: 0 };
+  const ranks: Record<number,Record<RoomKey,number>>={1:{workspace:0,meeting:0,lounge:0,lobby:0},2:{workspace:0,meeting:0,lounge:0,lobby:0}};
   for (const agent of agents) {
     if (!agent.room) continue;
-    const n = rank[agent.room]++;
+    const n = ranks[agent.floor ?? 1]![agent.room]++;
     const spot = agent.room === 'workspace' ? podSeat(agent.id)
       : agent.room === 'meeting' ? MEETING_SEATS[n % MEETING_SEATS.length]
         : agent.room === 'lounge' ? BREAK_SLOTS[n % BREAK_SLOTS.length]
@@ -88,8 +91,8 @@ export function dayPhase(hour: number) {
   return { label: 'Malam', sky: '#18202e', grass: '#2f3d33', ambient: 0.55, sun: 0.6, sunColor: '#a9bcff', night: true };
 }
 
-export type BoardId = 'opportunities' | 'pipeline' | 'tasks' | 'calendar' | 'inbox' | 'work' | 'activity' | 'agents' | 'profile' | 'policy' | 'knowledge' | 'capabilities';
-export type BoardSlot = { id: BoardId; route: string; label: string; x: number; y: number; z: number; rotY: number; normal: P2 };
+export type BoardId = 'opportunities' | 'pipeline' | 'tasks' | 'calendar' | 'inbox' | 'work' | 'activity' | 'agents' | 'profile' | 'policy' | 'knowledge' | 'capabilities' | 'operations';
+export type BoardSlot = { id: BoardId; route: string; label: string; x: number; y: number; z: number; rotY: number; normal: P2; floor?: 1 | 2 };
 
 export const BOARD_SIZE = { w: 4.2, h: 1.5 };
 const BACK_BOARDS: Array<[BoardId, string, string]> = [
@@ -103,6 +106,7 @@ const LEFT_BOARDS: Array<[BoardId, string, string]> = [
 
 /** Wall-mounted boards: the back wall faces +z and the left wall faces +x, both toward the default camera. */
 export const BOARDS: BoardSlot[] = [
+  {id:'operations',route:'/operations',label:'Operasional Klien · Lt 2',x:-9.5,y:3.4,z:FLOOR.minZ+0.16,rotY:0,normal:[0,1],floor:2},
   ...BACK_BOARDS.map(([id, route, label], i) => ({ id, route, label, x: -16.8 + i * 4.7, y: 3.4, z: FLOOR.minZ + 0.16, rotY: 0, normal: [0, 1] as P2 })),
   ...LEFT_BOARDS.map(([id, route, label], i) => ({ id, route, label, x: FLOOR.minX + 0.16, y: 3.4, z: -10.2 + i * 5.1, rotY: Math.PI / 2, normal: [1, 0] as P2 })),
 ];

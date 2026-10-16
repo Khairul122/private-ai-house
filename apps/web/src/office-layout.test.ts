@@ -10,11 +10,13 @@ const autopilot = (cycleInProgress: boolean): Autopilot => ({
 describe('office layout', () => {
   it('gives every placed agent its own spot and skips offline agents', () => {
     for (const data of [autopilot(true), autopilot(false), undefined]) {
-      const agents = deriveOfficeAgents(data, []);
+      for(const floor of [1,2]) {
+      const agents = deriveOfficeAgents(data, []).filter(a=>(a.floor ?? 1)===floor);
       const spots = spotsFor(agents);
       expect(spots.size).toBe(agents.filter((agent) => agent.room).length);
       expect(new Set([...spots.values()].map((spot) => `${spot.x},${spot.z}`)).size).toBe(spots.size);
       expect(spots.has('qa-engineer')).toBe(false);
+      }
     }
   });
 
@@ -34,8 +36,9 @@ describe('office layout', () => {
 
   it('mounts every board inside its wall without overlap and with a unique route', () => {
     expect(new Set(BOARDS.map((board) => board.route)).size).toBe(BOARDS.length);
-    for (const wall of [0, Math.PI / 2]) {
-      const along = BOARDS.filter((board) => board.rotY === wall).map((board) => (wall === 0 ? board.x : board.z)).sort((a, b) => a - b);
+    for (const floor of [1,2]) for (const wall of [0, Math.PI / 2]) {
+      const along = BOARDS.filter((board) => board.rotY === wall && (board.floor ?? 1)===floor).map((board) => (wall === 0 ? board.x : board.z)).sort((a, b) => a - b);
+      if(!along.length) continue;
       along.forEach((value, index) => { if (index) expect(value - along[index - 1]!).toBeGreaterThan(BOARD_SIZE.w); });
       const [min, max] = wall === 0 ? [FLOOR.minX, FLOOR.maxX] : [FLOOR.minZ, FLOOR.maxZ];
       expect(along[0]! - BOARD_SIZE.w / 2).toBeGreaterThan(min);

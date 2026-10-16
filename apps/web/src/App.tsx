@@ -6,6 +6,10 @@ import { deriveOfficeAgents, ROOM_LABELS, STATE_COLORS, STATE_LABELS, summarize,
 import { BOARDS, dayPhase, FLOOR, PODS, spotsFor, ZONES, type BoardId, type Spot } from './office-layout.js';
 import type { BoardContent, CameraCommand } from './VisualOffice.js';
 import { bindOwnerKeyboard, createOwnerInput, type OwnerDirection, type OwnerInput } from './owner-input.js';
+import OperationsPage from './OperationsPage.js';
+import type { OperationsData } from './operations-api.js';
+import { OPERATIONS_ROSTER } from '@fvh/domain';
+import { FLOOR_TWO_PODS } from './office-layout.js';
 
 const VisualOffice = lazy(() => import('./VisualOffice.js'));
 
@@ -382,6 +386,7 @@ function PipelinePage() {
 }
 
 function AgentsPage() {
+  const operations=useQuery({queryKey:['operations'],queryFn:()=>api<OperationsData>('/operations'),refetchInterval:5000});
   const knowledgeSync = useQuery({ queryKey: ['knowledge-sync'], queryFn: () => api<{ job: { state: string; provider: string; current: string | null } | null }>('/knowledge/sync-status'), refetchInterval: 3_000 });
   const dashboard = useQuery({ queryKey: ['dashboard'], queryFn: () => api<{
     policy: { state: Policy['state']; version: number };
@@ -400,7 +405,7 @@ function AgentsPage() {
 
   const inboxWaiting = inbox.isError ? undefined : inbox.data?.needsReply.length;
   const derived = deriveOfficeAgents(autopilot.isError ? undefined : autopilot.data, dashboard.data.activity, {
-    sync: sync.isError ? undefined : sync.data, inboxWaiting, dueSoon: work.isError ? undefined : work.data?.dueSoon, hermes: capabilities.data.hermes, knowledge: knowledgeSync.isError ? undefined : knowledgeSync.data?.job,
+    sync: sync.isError ? undefined : sync.data, inboxWaiting, dueSoon: work.isError ? undefined : work.data?.dueSoon, hermes: capabilities.data.hermes, knowledge: knowledgeSync.isError ? undefined : knowledgeSync.data?.job,operations:operations.isError?undefined:operations.data,
   });
   const agents = [
     {
@@ -493,6 +498,7 @@ function AgentsPage() {
       boundary: 'Beroperasi di lingkungan lokal & sandbox; tanpa kredensial live produksi.',
       metric: 'Tidak ada komponen runtime di aplikasi',
     },
+    ...OPERATIONS_ROSTER.map(a=>({id:a.id,name:a.name,dept:`Lantai ${a.floor}`,role:a.role,task:a.role,boundary:'Pekerjaan dari data tersimpan. Pesan hanya untuk proyek yang diaktifkan pemilik; pembayaran tidak ditebak.',metric:operations.isError?'Status tidak tersedia':operations.data?.runtime.jobs[a.id]?.lastRunAt?`Terakhir ${formatDate(operations.data.runtime.jobs[a.id]!.lastRunAt!)}`:'Menunggu tugas sesuai peran.'})),
   ];
 
   return <>
@@ -522,7 +528,7 @@ function AgentsPage() {
           </div>
           <div className="agent-foot">
             <span>{agent.metric}</span>
-            <Link className="button button-secondary" to={agent.id === 'knowledge-curator' ? '/knowledge' : agent.id === 'profile-editor' ? '/profile' : agent.id === 'client-relations' ? '/inbox' : agent.id === 'compliance-auditor' ? '/policy' : agent.id === 'operations-analyst' ? '/work' : agent.id === 'market-scout' ? '/opportunities' : agent.id === 'bid-strategist' || agent.id === 'lead-agent' ? '/pipeline' : agent.id === 'qa-engineer' ? '/capabilities' : '/overview'}>Buka ruang kerja</Link>
+            <Link className="button button-secondary" to={OPERATIONS_ROSTER.some(a=>a.id===agent.id)?'/operations':agent.id === 'knowledge-curator' ? '/knowledge' : agent.id === 'profile-editor' ? '/profile' : agent.id === 'client-relations' ? '/inbox' : agent.id === 'compliance-auditor' ? '/policy' : agent.id === 'operations-analyst' ? '/work' : agent.id === 'market-scout' ? '/opportunities' : agent.id === 'bid-strategist' || agent.id === 'lead-agent' ? '/pipeline' : agent.id === 'qa-engineer' ? '/capabilities' : '/overview'}>Buka ruang kerja</Link>
           </div>
         </article>
       ))}
@@ -650,6 +656,8 @@ const AGENDA_LABELS: Array<[keyof AgendaSummary['days'][string], (count: number)
 ];
 
 function OperationsCalendar({ policy, work, workPending, workError }: { policy: Policy; work: Work | undefined; workPending: boolean; workError: boolean }) {
+  const ownerAgenda=useQuery({queryKey:['operations'],queryFn:()=>api<OperationsData>('/operations'),refetchInterval:30_000});
+  const ownerTasks=ownerAgenda.isError?undefined:ownerAgenda.data?.tasks;
   const autopilotQuery = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 30_000 });
   const [view, setView] = useState<CalendarView>('month');
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
@@ -659,6 +667,10 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
   const agenda = agendaQuery.isError ? undefined : agendaQuery.data;
   const events = useMemo<CalendarEvent[]>(() => {
     const result: CalendarEvent[] = [];
+    for(const task of ownerTasks ?? []) {
+      const dateKey=dateKeyInTimezone(task.startAt,policy.timezone);
+      if(dateKey) result.push({id:`owner-${task.id}`,dateKey,title:`${task.done?'Selesai':'Tugas pemilik'}: ${task.title}`,detail:task.notes || (task.syncGoogle?'Dipilih untuk Google Calendar':'Jadwal pribadi'),kind:'operation',time:timeInTimezone(task.startAt,policy.timezone),href:'/operations'});
+    }
     const expiryKey = dateKeyInTimezone(policy.expiresAt, policy.timezone);
     const expiryTime = timeInTimezone(policy.expiresAt, policy.timezone);
     if (expiryKey) result.push({ id: 'policy-expiry', dateKey: expiryKey, title: 'Masa berlaku kebijakan berakhir', detail: `Kebijakan versi ${policy.version}`, kind: 'policy', time: expiryTime, href: '/policy' });
@@ -696,7 +708,7 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
       }
     }
     return result.sort((left, right) => left.dateKey.localeCompare(right.dateKey) || (left.time ?? '99:99').localeCompare(right.time ?? '99:99'));
-  }, [policy, work, autopilot, agenda]);
+  }, [policy, work, autopilot, agenda, ownerTasks]);
   const eventsByDate = useMemo(() => {
     const grouped = new Map<string, CalendarEvent[]>();
     for (const event of events) grouped.set(event.dateKey, [...(grouped.get(event.dateKey) ?? []), event]);
@@ -1391,11 +1403,13 @@ type StateChange = { key: string; at: string; name: string; from: AgentState; to
 
 const SHEET_TITLES: Record<string, string> = { '/overview': 'Ringkasan', ...Object.fromEntries(BOARDS.map((board) => [board.route, board.label])) };
 const BOARD_ACCENTS: Record<BoardId, string> = {
+  operations:'#67518b',
   opportunities: '#2a9d8f', pipeline: '#457b9d', tasks: '#6a4c93', calendar: '#e76f51', inbox: '#1c7ed6', work: '#2f9e44',
   activity: '#495057', agents: '#d62828', profile: '#f4a261', policy: '#9c6ade', knowledge: '#8ab17d', capabilities: '#277da1',
 };
 
 type ShellData = {
+  operations?: OperationsData | undefined;
   dashboard?: { counts: { openProjects: number; drafts: number; submittedBids: number; policySkips: number; knowledgeSources: number }; policy: { state: Policy['state'] }; bidUsage?: { today: number; week: number }; externalWrites: boolean } | undefined;
   autopilot?: Autopilot | undefined; pipeline?: Opportunity[] | undefined; policy?: Policy | undefined; profile?: Profile | undefined;
   knowledge?: { coverage: { sources: number; chunks: number } } | undefined; capabilities?: Capabilities | undefined;
@@ -1411,6 +1425,7 @@ function buildBoards(data: ShellData): BoardContent[] {
   const unavailable = ['Tidak tersedia', 'Data gagal dimuat'];
   const count = (status: string[]) => data.pipeline?.filter((item) => status.includes(item.pipelineStatus)).length ?? 0;
   const lines: Record<BoardId, { lines: string[]; alert?: boolean }> = {
+    operations:data.operations?{lines:[`${data.operations.projects.filter(p=>p.status==='active').length} proyek aktif`,`${data.operations.tasks.filter(t=>!t.done).length} tugas · ${data.operations.invoices.length} invoice`]}:{lines:unavailable},
     opportunities: data.dashboard ? { lines: [`${data.dashboard.counts.openProjects} peluang`, data.autopilot?.nextRunAt ? `Pindai berikutnya ${timeOf(data.autopilot.nextRunAt)}` : `Autopilot ${data.autopilot?.state ?? 'tidak diketahui'}`] } : { lines: unavailable },
     pipeline: data.pipeline ? { lines: [`${count(['submitted', 'in_conversation'])} terkirim`, `${count(['won'])} menang · ${count(['lost'])} kalah`] } : { lines: unavailable },
     tasks: data.pipeline ? { lines: [`${count(['new', 'scored'])} di antrean`, `${count(['draft_ready', 'policy_check'])} draf · ${count(['skipped', 'lost', 'expired', 'reconciliation_required', 'error'])} selesai`] } : { lines: unavailable },
@@ -1453,6 +1468,8 @@ function OwnerControls({ input, moving }: { input: OwnerInput; moving: boolean }
 }
 
 function OfficeShell() {
+  const operations=useQuery({queryKey:['operations'],queryFn:()=>api<OperationsData>('/operations'),refetchInterval:3000});
+  const [floor,setFloor]=useState<1|2>(1);
   const knowledgeSync = useQuery({ queryKey: ['knowledge-sync'], queryFn: () => api<{ job: { state: string; provider: string; current: string | null } | null }>('/knowledge/sync-status'), refetchInterval: 3_000 });
   const location = useLocation();
   const navigate = useNavigate();
@@ -1511,11 +1528,14 @@ function OfficeShell() {
   const dueSoon = fresh(work)?.dueSoon;
   const hermes = fresh(capabilities)?.hermes;
   const knowledgeJob = fresh(knowledgeSync)?.job;
-  const agents = useMemo(() => deriveOfficeAgents(autopilotData, activityData, { sync: syncData, inboxWaiting, dueSoon, hermes, knowledge: knowledgeJob }), [autopilotData, activityData, syncData, inboxWaiting, dueSoon, hermes, knowledgeJob]);
+  const operationsData=fresh(operations);
+  const allAgents = useMemo(() => deriveOfficeAgents(autopilotData, activityData, { sync: syncData, inboxWaiting, dueSoon, hermes, knowledge: knowledgeJob,operations:operationsData }), [autopilotData, activityData, syncData, inboxWaiting, dueSoon, hermes, knowledgeJob,operationsData]);
+  const agents=useMemo(()=>allAgents.filter(a=>(a.floor ?? 1)===floor),[allAgents,floor]);
   const spots = useMemo(() => spotsFor(agents), [agents]);
   const ownerTarget = selectedId ? spots.get(selectedId) ?? null : null;
   const counts = summarize(agents);
   const boards = buildBoards({
+    operations:operationsData,
     dashboard: fresh(dashboard), autopilot: autopilotData, pipeline: fresh(pipeline), policy: fresh(policy), profile: fresh(profile),
     knowledge: fresh(knowledge), capabilities: fresh(capabilities), inbox: fresh(inbox), work: fresh(work), activity: activityData, counts,
   });
@@ -1598,6 +1618,7 @@ function OfficeShell() {
   };
   useEffect(() => {
     const board = BOARDS.find((slot) => slot.route === location.pathname);
+    if(board) setFloor(board.floor ?? 1);
     if (board) fly({ kind: 'board', id: board.id });
     if (location.pathname !== '/') sheetHeading.current?.focus();
   }, [location.pathname]);
@@ -1633,6 +1654,10 @@ function OfficeShell() {
   const externalLabel = !dashboardData ? 'Status aksi eksternal tidak diketahui' : autopilotData?.marketplaceNotice?.quotaExhausted ? 'Bid terakhir ditolak: kuota akun Freelancer habis' : dashboardData.externalWrites ? 'Bid live ke Freelancer aktif' : 'Aksi eksternal nonaktif';
   const lastCycle = !autopilotData ? 'Tidak tersedia' : autopilotData.lastRunAt ? formatDate(autopilotData.lastRunAt) : 'Belum tercatat';
   const employeeMetrics = (id: string) => {
+    if(OPERATIONS_ROSTER.some(a=>a.id===id)) {
+      const signal=operationsData?.runtime.jobs[id];
+      return [{label:'Pekerjaan terakhir',value:!operationsData?'Tidak tersedia':signal?.lastRunAt?formatDate(signal.lastRunAt):'Belum tercatat'},{label:'Tugas runtime',value:signal?.reason ?? 'Menunggu tugas sesuai peran'}];
+    }
     if (id === 'market-scout') return [
       { label: 'Proyek tersinkron pada siklus terakhir', value: !autopilotData ? 'Tidak tersedia' : autopilotData.lastRunAt ? String(autopilotData.lastImported) : autopilotData.cycleInProgress ? 'Siklus berjalan' : 'Belum tercatat' },
       { label: 'Siklus terakhir', value: lastCycle },
@@ -1672,7 +1697,7 @@ function OfficeShell() {
   return <div className="vo3d vo3d-app" ref={stage} style={{ background: phase.sky }}>
     <div className="vo3d-canvas" role="img" aria-label={`Kantor 3D Mission Control. ${summary}. Gunakan menu Papan dan daftar agen untuk navigasi dengan keyboard.`}>
       {webgl ? <Suspense fallback={<div className="vo3d-fallback">Memuat kantor visual...</div>}>
-        <VisualOffice agents={agents} ready={!autopilot.isPending} selectedId={selectedId} ownerSelected={panel === 'owner'} ownerInput={ownerInput} ownerTarget={ownerTarget} ownerVisitVersion={ownerVisitVersion} onOwnerMoving={setOwnerMoving} followId={followId} onSelect={selectAgent} onOwnerSelect={openOwner} onCameraInteract={() => { setFollowId(null); setTour(false); }} command={command} view={view} tour={tour} phase={phase} reducedMotion={reducedMotion} boards={boards} onOpenBoard={openBoard} />
+        <VisualOffice key={floor} floor={floor} agents={agents} ready={!autopilot.isPending} selectedId={selectedId} ownerSelected={panel === 'owner'} ownerInput={ownerInput} ownerTarget={ownerTarget} ownerVisitVersion={ownerVisitVersion} onOwnerMoving={setOwnerMoving} followId={followId} onSelect={selectAgent} onOwnerSelect={openOwner} onCameraInteract={() => { setFollowId(null); setTour(false); }} command={command} view={view} tour={tour} phase={phase} reducedMotion={reducedMotion} boards={boards} onOpenBoard={openBoard} />
       </Suspense> : <div className="vo3d-fallback">WebGL tidak tersedia di browser ini. Gunakan menu Papan untuk membuka setiap kartu.</div>}
     </div>
 
@@ -1680,6 +1705,7 @@ function OfficeShell() {
       <h1><span className={`vo3d-live${autopilotData ? '' : ' is-off'}`} aria-hidden="true" />Mission Control</h1>
       <p><OfficeIcon name="sun" />{phase.label} · {time}</p>
       <p>{summary}</p>
+      <div className="vo3d-floor-picker" role="group" aria-label="Pilih lantai">{([1,2] as const).map(n=><button type="button" key={n} aria-pressed={floor===n} onClick={()=>{ownerInput.stop();setSelectedId(null);setPanel(null);setFloor(n);fly({kind:'overview'});}}>Lantai {n}</button>)}</div>
       <p className={dashboardData?.externalWrites ? 'vo3d-warn' : ''}>{externalLabel}</p>
       {health.isError && <p className="vo3d-warn">API lokal tidak terhubung.</p>}
       <Link to="/overview" className="vo3d-cta">Buka ringkasan</Link>
@@ -1809,10 +1835,10 @@ function OfficeShell() {
           <rect x={zone.x - zone.w / 2} y={zone.z - zone.d / 2} width={zone.w} height={zone.d} rx="0.6" fill={zone.id === 'workspace' ? 'none' : '#e3ece0'} stroke="#c8cfc4" strokeWidth="0.15" strokeDasharray={zone.id === 'workspace' ? '0.6 0.4' : undefined} />
           {zone.id !== 'workspace' && <text x={zone.x} y={zone.z + 0.6} textAnchor="middle" fontSize="1.6" fill="#3b4650">{zone.label}</text>}
         </g>)}
-        {PODS.map((pod) => <rect key={pod.id} x={pod.x - 2.3} y={pod.z - 2.3} width="4.6" height="4.6" rx="0.5" fill={pod.color} opacity="0.3" onClick={() => selectAgent(pod.id)} />)}
+        {(floor===1?PODS:FLOOR_TWO_PODS).map((pod) => <rect key={pod.id} x={pod.x - 2.3} y={pod.z - 2.3} width="4.6" height="4.6" rx="0.5" fill={pod.color} opacity="0.3" onClick={() => selectAgent(pod.id)} />)}
         {agents.map((agent) => { const spot = spots.get(agent.id); return spot ? <circle key={agent.id} cx={spot.x} cy={spot.z} r="0.75" fill={STATE_COLORS[agent.state]} stroke="#fff" strokeWidth="0.3" /> : null; })}
       </svg>
-      <p>Lt 1 · titik = posisi tujuan tiap agen</p>
+      <p>Lt {floor} · titik = posisi tujuan tiap agen</p>
     </figure>}
 
     <nav className="vo3d-float vo3d-dock" aria-label="Navigasi ruangan">
@@ -2008,6 +2034,7 @@ export default function App() {
       <Route path="knowledge" element={<KnowledgePage />} />
       <Route path="activity" element={<ActivityPage />} />
       <Route path="capabilities" element={<CapabilitiesPage />} />
+      <Route path="operations" element={<OperationsPage />} />
       <Route path="office" element={<Navigate to="/" replace />} />
       <Route path="*" element={<NotFoundPage />} />
     </Route>

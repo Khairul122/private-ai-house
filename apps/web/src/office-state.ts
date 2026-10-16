@@ -1,4 +1,6 @@
 import type { AuditEvent, Autopilot, BusinessSyncStatus } from './api.js';
+import { OPERATIONS_ROSTER } from '@fvh/domain';
+import type { OperationsData } from './operations-api.js';
 
 export type AgentState = 'working' | 'reviewing' | 'collaborating' | 'idle' | 'offline' | 'unknown';
 // Lobby is the neutral spot for agents whose state cannot be determined.
@@ -14,6 +16,7 @@ export type OfficeAgent = {
   name: string;
   role: string;
   color: string;
+  floor?: 1 | 2;
   state: AgentState;
   room: RoomId;
   reason: string;
@@ -21,7 +24,7 @@ export type OfficeAgent = {
   recentActivity: AuditEvent[];
 };
 
-type RosterEntry = Pick<OfficeAgent, 'id' | 'name' | 'role' | 'color'>;
+type RosterEntry = Pick<OfficeAgent, 'id' | 'name' | 'role' | 'color' | 'floor'>;
 
 export const ROSTER: RosterEntry[] = [
   { id: 'chief-of-staff', name: 'Chief of Staff', role: 'Orchestrator Ruang Kerja', color: '#e76f51' },
@@ -34,6 +37,7 @@ export const ROSTER: RosterEntry[] = [
   { id: 'compliance-auditor', name: 'Compliance Auditor', role: 'Auditor Kebijakan & Keamanan', color: '#d62828' },
   { id: 'qa-engineer', name: 'QA Engineer', role: 'Verifikator Kontrak & Smoke', color: '#277da1' },
   { id: 'lead-agent', name: 'Lead Agent', role: 'Koordinator Tim AI (Hermes)', color: '#343a40' },
+  ...OPERATIONS_ROSTER,
 ];
 
 const WORK_REASON = 'Siklus autopilot sedang berjalan.';
@@ -83,6 +87,7 @@ function activityFor(id: string, activity: AuditEvent[]): AuditEvent[] {
 
 /** Extra real signals beyond the autopilot. `undefined` means the source could not be loaded. */
 export type OfficeContext = {
+  operations?: Pick<OperationsData,'runtime'|'whatsapp'|'google'> | undefined;
   sync?: BusinessSyncStatus | null | undefined;
   hermes?: { active: boolean; reason: string; draftsInProgress?: number | undefined } | undefined;
   inboxWaiting?: number | undefined;
@@ -112,7 +117,17 @@ export function deriveOfficeAgents(autopilot: Autopilot | undefined, activity: A
   const { sync, hermes, inboxWaiting, dueSoon } = context;
   return ROSTER.map((entry) => {
     let derived: Derived;
-    if (entry.id === 'lead-agent') derived = leadState(hermes);
+    const signal=context.operations?.runtime.jobs[entry.id];
+    if (entry.id === 'lead-agent' && context.operations?.runtime.jobs['lead-operations']?.busy) derived={state:'reviewing',reason:'Hermes meninjau laporan manajer.',task:'Kolaborasi dengan manajer lantai 1 dan 2.'};
+    else if (OPERATIONS_ROSTER.some(a=>a.id===entry.id)) {
+      if(!context.operations) derived={state:'unknown',reason:'Status operasional tidak tersedia.'};
+      else if(signal?.busy) derived={state:entry.id.includes('manager')?'collaborating':'working',reason:signal.reason,task:signal.reason};
+      else if(signal?.error) derived={state:'offline',reason:signal.error};
+      else if(entry.id==='whatsapp-operator' && context.operations.whatsapp?.state!=='connected') derived={state:'offline',reason:context.operations.whatsapp?.reason ?? 'WhatsApp belum terhubung.'};
+      else if(entry.id==='calendar-operator' && !context.operations.google?.connected) derived={state:'offline',reason:context.operations.google?.reason ?? 'Google Calendar belum terhubung.'};
+      else derived={state:'idle',reason:signal?.reason ?? 'Siap; bekerja saat ada tugas sesuai peran.'};
+    }
+    else if (entry.id === 'lead-agent') derived = leadState(hermes);
     else if (entry.id === 'market-scout') derived = autopilotState(autopilot, false);
     else if (entry.id === 'bid-strategist' && sync?.step === 'outcomes') derived = { state: 'reviewing', reason: 'Memeriksa hasil bid di Freelancer.', task: 'Memeriksa status bid yang menunggu.' };
     else if (entry.id === 'bid-strategist' || entry.id === 'compliance-auditor') derived = autopilotState(autopilot, true);

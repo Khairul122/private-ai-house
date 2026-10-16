@@ -6,6 +6,7 @@ export type DraftingInput = {
   project: ProjectOpportunity;
   profileFacts: ProfileFact[];
   evidence: DraftingEvidence[];
+  publicPortfolio?: Array<{label:string;url:string}>;
   profileRate: { min: number; max: number };
   score: number;
   /** Set by the autopilot: price and duration are decided by policy, the model only writes the text. */

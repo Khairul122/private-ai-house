@@ -2,7 +2,7 @@ import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { BOARD_SIZE, BOARDS, FLOOR, LEAD_DESK, LEAD_ID, OWNER_SPOT, PODS, POD_SIZE, planPath, spotsFor, ZONES, type BoardId, type BoardSlot, type dayPhase, type P2, type Spot } from './office-layout.js';
+import { BOARD_SIZE, BOARDS, FLOOR, FLOOR_TWO_PODS, LEAD_DESK, LEAD_ID, MANAGER_DESK, OWNER_SPOT, PODS, POD_SIZE, planPath, spotsFor, ZONES, type BoardId, type BoardSlot, type dayPhase, type P2, type Spot } from './office-layout.js';
 import { STATE_COLORS, type OfficeAgent } from './office-state.js';
 import type { OwnerInput } from './owner-input.js';
 import { createOwnerMotion, setOwnerDestination, stepOwnerMotion, stopOwnerMotion } from './owner-motion.js';
@@ -14,6 +14,7 @@ type Phase = ReturnType<typeof dayPhase>;
 type V3 = [number, number, number];
 
 export type VisualOfficeProps = {
+  floor: 1 | 2;
   agents: OfficeAgent[];
   ready: boolean;
   selectedId: string | null;
@@ -192,7 +193,7 @@ function Pantry() {
   </group>;
 }
 
-function LeadDesk({ active }: { active: boolean }) {
+function LeadDesk({ active,manager=false }: { active: boolean; manager?: boolean }) {
   const screen = active ? { c: '#8fe3b0', e: '#5ad08b' } : { c: '#2a3038', e: undefined };
   return <group position={[LEAD_DESK.x, 0, LEAD_DESK.z]}>
     <mesh position={[0, 0.02, -0.4]} receiveShadow><cylinderGeometry args={[2.2, 2.2, 0.04, 28]} /><meshLambertMaterial color="#343a40" transparent opacity={0.18} /></mesh>
@@ -204,7 +205,7 @@ function LeadDesk({ active }: { active: boolean }) {
     </group>)}
     <Chair p={[0, 0, -0.95]} c="#343a40" />
     <Plant p={[1.9, 0, -0.6]} scale={0.9} />
-    <Label text="Lead Agent · Hermes" p={[0, 2.1, 0.3]} />
+    <Label text={manager?'Manajer Operasional':'Lead Agent · Hermes'} p={[0, 2.1, 0.3]} />
   </group>;
 }
 
@@ -233,7 +234,7 @@ function LampPost({ p, night }: { p: V3; night: boolean }) {
   </group>;
 }
 
-function Building({ agents, phase, selectedId }: { agents: OfficeAgent[]; phase: Phase; selectedId: string | null }) {
+function Building({ agents, phase, selectedId, floor }: { agents: OfficeAgent[]; phase: Phase; selectedId: string | null; floor:1|2 }) {
   const { minX, maxX, minZ, maxZ } = FLOOR;
   const w = maxX - minX;
   const d = maxZ - minZ;
@@ -248,10 +249,12 @@ function Building({ agents, phase, selectedId }: { agents: OfficeAgent[]; phase:
     <B p={[minX, 2.15, cz]} s={[0.25, 4.3, d]} c="#f4f2ec" />
     <B p={[cx, 0.2, maxZ]} s={[w, 0.4, 0.2]} c="#f4f2ec" />
     <B p={[maxX, 0.2, cz]} s={[0.2, 0.4, d]} c="#f4f2ec" />
-    {PODS.map((pod) => <Pod key={pod.id} x={pod.x} z={pod.z} color={pod.color} name={pod.name} screenOn={working.has(pod.id)} night={phase.night} showLabel={pod.id !== selectedId} />)}
+    {(floor===1?PODS:FLOOR_TWO_PODS).map((pod) => <Pod key={pod.id} x={pod.x} z={pod.z} color={pod.color} name={pod.name} screenOn={working.has(pod.id)} night={phase.night} showLabel={pod.id !== selectedId} />)}
     <MeetingRoom active={agents.some((agent) => agent.room === 'meeting')} />
     <Lounge /><Pantry /><Lobby />
-    <LeadDesk active={agents.some((agent) => agent.id === LEAD_ID && agent.room === 'workspace')} />
+    <LeadDesk manager={floor===2} active={agents.some((agent) => agent.id === (floor===1?LEAD_ID:'delivery-manager') && agent.room === 'workspace')} />
+    <group position={[MANAGER_DESK.x,0,MANAGER_DESK.z]}><B p={[0,0.75,0]} s={[2.8,0.12,1]} c="#67523f"/><B p={[0,0.36,0]} s={[0.15,0.72,0.8]} c="#343a40"/><Chair p={[0,0,-0.95]}/><Label text={floor===1?'Manajer Akuisisi':'Meja koordinasi'} p={[0,2.1,0.3]}/></group>
+    <Label text={`LANTAI ${floor} · ${floor===1?'AKUISISI PROYEK':'DELIVERY & KEUANGAN'}`} p={[1.5,3.5,8]} />
     {ZONES.filter((zone) => zone.id !== 'workspace').map((zone) => <Label key={zone.id} text={zone.label} p={[zone.x, 2.4, zone.z - zone.d / 2 + 0.3]} />)}
     {[[-24, 0, -8], [-25, 0, 6], [19, 0, -10], [20, 0, 4], [-8, 0, 18], [6, 0, 19], [18, 0, 16]].map((p, i) => <Tree key={i} p={p as V3} s={0.9 + (i % 3) * 0.2} />)}
     {[[-6, 0, 14.5], [3, 0, 14.5], [15.5, 0, -2], [15.5, 0, 8]].map((p, i) => <LampPost key={i} p={p as V3} night={phase.night} />)}
@@ -588,7 +591,7 @@ function Lights({ phase }: { phase: Phase }) {
   </>;
 }
 
-export default function VisualOffice({ agents, ready, selectedId, ownerSelected, ownerInput, ownerTarget, ownerVisitVersion, onOwnerMoving, followId, onSelect, onOwnerSelect, onCameraInteract, command, view, tour, phase, reducedMotion, boards, onOpenBoard }: VisualOfficeProps) {
+export default function VisualOffice({ floor, agents, ready, selectedId, ownerSelected, ownerInput, ownerTarget, ownerVisitVersion, onOwnerMoving, followId, onSelect, onOwnerSelect, onCameraInteract, command, view, tour, phase, reducedMotion, boards, onOpenBoard }: VisualOfficeProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [hoveredBoard, setHoveredBoard] = useState<BoardId | null>(null);
   const spots = useMemo(() => spotsFor(agents), [agents]);
@@ -596,8 +599,8 @@ export default function VisualOffice({ agents, ready, selectedId, ownerSelected,
   useEffect(() => { document.body.style.cursor = hoveredId || hoveredBoard ? 'pointer' : ''; return () => { document.body.style.cursor = ''; }; }, [hoveredId, hoveredBoard]);
   return <Canvas shadows dpr={[1, 2]} camera={{ position: [20, 34, 38], fov: 38, near: 0.5, far: 400 }} onPointerMissed={() => onSelect(null)}>
     <Lights phase={phase} />
-    <Building agents={agents} phase={phase} selectedId={selectedId} />
-    {BOARDS.map((slot) => { const content = boards.find((board) => board.id === slot.id); return content ? <Board key={slot.id} slot={slot} content={content} hovered={hoveredBoard === slot.id} onHover={setHoveredBoard} onOpen={onOpenBoard} /> : null; })}
+    <Building agents={agents} phase={phase} selectedId={selectedId} floor={floor}/>
+    {BOARDS.filter(slot=>(slot.floor ?? 1)===floor).map((slot) => { const content = boards.find((board) => board.id === slot.id); return content ? <Board key={slot.id} slot={slot} content={content} hovered={hoveredBoard === slot.id} onHover={setHoveredBoard} onOpen={onOpenBoard} /> : null; })}
     {ready && agents.map((agent, index) => {
       const spot = spots.get(agent.id);
       return spot ? <Agent key={agent.id} agent={agent} index={index} spot={spot} selected={agent.id === selectedId} hovered={agent.id === hoveredId}

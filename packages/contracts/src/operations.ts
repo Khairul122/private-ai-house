@@ -1,0 +1,9 @@
+import { z } from 'zod';
+const id = z.string().trim().min(1).max(150);
+const date = z.iso.date();
+export const clientAutomationSchema = z.object({ projectId: id, phone: z.string().regex(/^[1-9]\d{7,14}$/, 'Nomor internasional tanpa + atau spasi, misalnya 62812…'), enabled: z.boolean(), progress: z.boolean(), payments: z.boolean(), reminders: z.boolean() });
+export const progressNoteSchema = z.object({ projectId: id, text: z.string().trim().min(5).max(3000) });
+export const ownerTaskSchema = z.object({ title: z.string().trim().min(1).max(180), projectId: id.nullable(), startAt: z.iso.datetime(), endAt: z.iso.datetime(), timezone: z.string().refine((v) => { try { new Intl.DateTimeFormat('en',{timeZone:v}); return true; } catch { return false; } }, 'Zona waktu tidak valid.'), notes: z.string().trim().max(3000), done: z.boolean(), syncGoogle: z.boolean() }).refine((v) => Date.parse(v.endAt)>Date.parse(v.startAt), 'Waktu selesai harus setelah mulai.');
+export const invoiceIdentitySchema = z.object({ businessName: z.string().trim().min(1).max(120), address: z.string().trim().max(500), email: z.union([z.email(),z.literal('')]), paymentInstructions: z.string().trim().max(1200), footer: z.string().trim().max(600), signatory: z.string().trim().max(120) });
+export const invoiceSchema = z.object({ projectId: id, issuedOn: date, dueOn: date, category: z.string().trim().max(150), description: z.string().trim().max(3000), clientEmail: z.union([z.email(),z.literal('')]), currency: z.string().regex(/^[A-Z]{3}$/), totalMinor: z.number().int().positive().max(1_000_000_000_000) }).refine((v) => v.dueOn>=v.issuedOn, 'Jatuh tempo harus pada/setelah tanggal invoice.');
+export const googleClientSchema = z.object({ clientId: z.string().trim().min(10).max(500).endsWith('.apps.googleusercontent.com'), clientSecret: z.string().trim().min(5).max(500) });

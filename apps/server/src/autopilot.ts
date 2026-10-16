@@ -12,6 +12,7 @@ type AutopilotDependencies = {
   submitBid: (input: { operation: 'submit_bid'; projectId: number; amount: number; period: number; milestonePercentage: number; description: string }) => Promise<FreelancerWriteResult>;
   /** Hermes drafting; when absent or failing, the built-in template writes the proposal. */
   draftProposal?: AiDraftingPort['draftBid'];
+  publicPortfolio?: (evidence:Parameters<AiDraftingPort['draftBid']>[0]['evidence'])=>Promise<Array<{label:string;url:string}>>;
   now?: () => Date;
   intervalMs?: number;
 };
@@ -89,27 +90,29 @@ export function mondayKey(value: string): string {
   return date.toISOString().slice(0, 10);
 }
 
-function proposalFor(project: ProjectOpportunity, specialties: string[], price: number, durationDays: number): string {
+export function proposalFor(project: ProjectOpportunity, specialties: string[], price: number, durationDays: number, portfolio:Array<{label:string;url:string}>=[]): string {
   const country = project.clientCountry?.trim().toLocaleLowerCase() ?? '';
   const isIndonesianClient = country === 'id' || country === 'idn' || country.includes('indonesia');
   const matched = project.skills.filter((skill) => specialties.some((specialty) => specialty.toLocaleLowerCase() === skill.toLocaleLowerCase()));
-  const scope = project.description.replace(/\s+/g, ' ').trim().slice(0, 420);
+  const skills=matched.slice(0,3).join(', ');
   const clientName = project.clientName && project.clientName !== 'Klien Freelancer' ? project.clientName : undefined;
 
   if (isIndonesianClient) {
     return [
       clientName ? `Halo ${clientName},` : 'Halo,',
-      `Saya tertarik mengerjakan “${project.title}”.${matched.length ? ` Keahlian profil saya yang relevan: ${matched.join(', ')}.` : ''}`,
-      scope ? `Dari brief, saya memahami ruang lingkupnya sebagai berikut: ${scope}` : 'Saya akan mengikuti ruang lingkup yang tercantum dan mengonfirmasi kriteria hasil sebelum mulai.',
-      `Penawaran saya ${project.currency} ${price} dengan estimasi ${durationDays} hari. Jika ada tenggat khusus, saya akan mengonfirmasi jadwal, akses yang diperlukan, dan kriteria penerimaan sebelum pekerjaan dimulai.`,
+      `Untuk “${project.title}”, saya mengusulkan implementasi bertahap agar hasilnya bisa Anda tinjau sebelum serah terima.${skills?` Keahlian profil yang sesuai: ${skills}.`:''}`,
+      'Rencana pengerjaan:\n1. Konfirmasi alur utama, akses, dan kriteria penerimaan.\n2. Implementasikan ruang lingkup yang disepakati, lalu periksa alur utama dan penanganan kesalahan.\n3. Serahkan kode, petunjuk menjalankan, dan ringkasan hasil pemeriksaan.',
+      ...(portfolio.length?[`Contoh kode publik yang relevan untuk ditinjau:\n${portfolio.map(p=>`${p.label}: ${p.url}`).join('\n')}`]:[]),
+      `Penawaran ${project.currency} ${price} dengan estimasi ${durationDays} hari untuk cakupan yang disepakati. Alur atau hasil mana yang paling penting untuk Anda prioritaskan?`,
     ].join('\n\n').slice(0, 4_000);
   }
 
   return [
     clientName ? `Hello ${clientName},` : 'Hello,',
-    `I would be glad to work on “${project.title}”.${matched.length ? ` Relevant skills from my profile include ${matched.join(', ')}.` : ''}`,
-    scope ? `Based on your brief, I understand the scope to be: ${scope}` : 'I will follow the scope in your brief and confirm the acceptance criteria before starting.',
-    `My bid is ${project.currency} ${price}, with an estimated delivery time of ${durationDays} days. If you have a specific deadline, I will confirm the schedule, required access, and acceptance criteria before work begins.`,
+    `For “${project.title}”, I propose a staged implementation so you can review the result before handover.${skills?` Relevant skills from my profile: ${skills}.`:''}`,
+    'My plan:\n1. Confirm the main workflow, required access, and acceptance criteria.\n2. Implement the agreed scope, then check the main paths and error handling.\n3. Deliver the code, setup instructions, and a summary of the checks performed.',
+    ...(portfolio.length?[`Relevant public code for your review:\n${portfolio.map(p=>`${p.label}: ${p.url}`).join('\n')}`]:[]),
+    `My bid is ${project.currency} ${price}, with an estimated delivery time of ${durationDays} days for the agreed scope. Which workflow or outcome should I prioritize for you?`,
   ].join('\n\n').slice(0, 4_000);
 }
 
@@ -251,12 +254,14 @@ export class FreelancerAutopilot {
   }
 
   private async writeProposal(project: ProjectOpportunity, policy: AutonomyPolicy, bid: { amount: number; period: number }, score: number) {
+    const { draftProposal, repository } = this.dependencies;
+    const evidence=(await repository.searchKnowledge(`${project.title} ${project.skills.join(' ')}`,4)).map(item=>({label:item.path,source:item.url,content:item.content}));
+    const publicPortfolio=await this.dependencies.publicPortfolio?.(evidence).catch(()=>[]) ?? [];
     const template = {
-      proposal: proposalFor(project, policy.specializations, bid.amount, bid.period),
-      evidence: [{ label: 'Ringkasan publik Freelancer', source: 'Profil Freelancer akun sendiri' }],
+      proposal: proposalFor(project, policy.specializations, bid.amount, bid.period,publicPortfolio),
+      evidence: [{ label: 'Ringkasan publik Freelancer', source: 'Profil Freelancer akun sendiri' },...publicPortfolio.map(p=>({label:p.label,source:p.url}))],
       assumptions: ['Proposal memakai template bawaan dari ringkasan proyek dan keahlian profil Freelancer; klaim pengalaman tambahan tidak dibuat.'],
     };
-    const { draftProposal, repository } = this.dependencies;
     if (!draftProposal) return template;
     const fallback = async (reason: string) => {
       await repository.appendAudit({ type: 'autopilot.draft_fallback', resourceId: project.id, status: 'recorded', reason: `Proposal Hermes tidak dipakai: ${reason} Template bawaan digunakan.`, policyVersion: policy.version, payloadHash: null });
@@ -267,7 +272,7 @@ export class FreelancerAutopilot {
     try {
       const output = await draftProposal({
         project, profileFacts: profile.facts, score,
-        evidence: (await repository.searchKnowledge(`${project.title} ${project.skills.join(' ')}`, 4)).map((item) => ({ label: item.path, source: item.url, content: item.content })),
+        evidence,publicPortfolio,
         profileRate: { min: profile.minPrice, max: profile.maxPrice },
         fixedBid: { amount: bid.amount, currency: project.currency, durationDays: bid.period },
       });

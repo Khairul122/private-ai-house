@@ -9,6 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@fvh/domain": "workspace:*",
     "@react-three/fiber": "latest",
     "@tanstack/react-query": "latest",
     "react": "latest",

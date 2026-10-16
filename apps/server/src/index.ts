@@ -15,6 +15,12 @@ import { readLinkedInProfile, syncLinkedInProfile } from './linkedin-api.js';
 import { createApp } from './app.js';
 import { FreelancerAutopilot } from './autopilot.js';
 import { BusinessSync } from './business-sync.js';
+import { OperationsService } from './operations.js';
+import { OperationsRepository } from '@fvh/persistence';
+import { DpapiIntegrationVault } from './integration-vault.js';
+import { WhatsAppService } from './whatsapp.js';
+import { GoogleCalendarService } from './google-calendar.js';
+import { PublicPortfolioResolver } from './portfolio.js';
 
 function findProjectRoot(start: string): string {
   let directory = resolve(start);
@@ -78,7 +84,9 @@ const drafting = hermesEnabled ? new HermesCliDraftingAdapter({
   // ComboHermes via 9router takes 40-95 s for a full proposal context; 90 s was cutting real drafts off.
   timeoutMs: 180_000,
 }) : undefined;
+const portfolio = new PublicPortfolioResolver();
 const autopilot = new FreelancerAutopilot({
+  publicPortfolio:(evidence)=>portfolio.select(evidence),
   repository,
   readProfile: async () => (await createFreelancerReader()).readOwnProfile(),
   readProjects: async (query, limit) => (await createFreelancerReader()).searchActiveProjects(query, limit),
@@ -94,8 +102,14 @@ const draftingReason = !draftingConfig.valid
       ? 'Hermes sudah dipilih, tetapi persetujuan pengiriman data belum diberikan. Tidak ada draf sintetis yang digunakan.'
       : 'Hermes belum tersedia. Periksa instalasi profile private-ai-house dan jalankan ulang server.';
 const webBuild = resolve(projectRoot, 'apps/web/dist');
+const integrationVault = new DpapiIntegrationVault(dataDirectory,resolve(projectRoot,'apps/server/src/integration-vault.ps1'));
+const whatsapp = new WhatsAppService(integrationVault);
+const googleCalendar = new GoogleCalendarService(integrationVault,new OperationsRepository(repository.sql));
+const operations = new OperationsService({repository,messenger:whatsapp,calendar:googleCalendar,...(drafting?{review:(facts:string[])=>drafting.reviewOperations(facts)}:{})});
 const hasWebBuild = existsSync(webBuild);
 const app = await createApp({
+  publicPortfolio:(evidence)=>portfolio.select(evidence),
+  operations,whatsapp,googleCalendar,
   repository,
   getGitHubToken: () => readGitHubEnvironment(projectRoot).token ?? undefined,
   getCredentialStatus: () => {
@@ -178,6 +192,7 @@ const app = await createApp({
 if (hasWebBuild) {
   await app.register(fastifyStatic, { root: webBuild, prefix: '/' });
 }
+app.addHook('onClose',async()=>{whatsapp.close();await operations.close();});
 
 if (!['127.0.0.1', 'localhost', '::1'].includes(host)) throw new Error('FVH_HOST must stay on loopback for the local single-user app.');
 await app.listen({ host, port });
@@ -185,5 +200,8 @@ app.log.info({ host, port }, 'Freelancer Virtual House API is ready');
 void (async () => {
   await app.inject({ method: 'POST', url: '/api/freelancer/verify' });
   businessSync.start();
+  await googleCalendar.restore().catch(()=>undefined);
+  await whatsapp.restore().catch(()=>undefined);
+  await operations.start();
   void autopilot.start();
 })();

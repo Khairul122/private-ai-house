@@ -28,6 +28,16 @@ function resultEvent(value: unknown) {
 }
 
 describe('HermesCliDraftingAdapter', () => {
+  it('rejects invented or private portfolio links and keeps manager reviews tool-free',async()=>{
+    const bad:ProcessRunner=async()=>({stdout:resultEvent({...output,proposal:`${output.proposal} Portfolio https://example.com/invented`}),stderr:'',exitCode:0});
+    const adapter=new HermesCliDraftingAdapter({executable:'hermes.exe',profile:'private-ai-house',workspaceRoot:'D:/private-ai-house',runner:bad});
+    await expect(adapter.draftBid(input)).rejects.toMatchObject({code:'unverified_portfolio'});
+    const reviewer:ProcessRunner=async(_command,args)=>{
+      const prompt=await readFile(args[args.indexOf('--query-file')+1]!,'utf8');expect(prompt).toContain('Jangan mengarang progres');
+      return {stdout:resultEvent({review:'Prioritaskan pencatatan tugas dan bukti pembayaran yang masih belum tersedia.'}),stderr:'',exitCode:0};
+    };
+    await expect(new HermesCliDraftingAdapter({executable:'hermes.exe',profile:'private-ai-house',workspaceRoot:'D:/private-ai-house',runner:reviewer}).reviewOperations(['Proyek aktif: 0.'])).resolves.toContain('Prioritaskan');
+  });
   it('uses the configured profile, query-file transport, no shell, and validates structured output', async () => {
     let captured: { command: string; args: string[]; options: { shell: false; env: NodeJS.ProcessEnv } } | undefined;
     const runner: ProcessRunner = vi.fn(async (command, args, options) => {

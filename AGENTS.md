@@ -258,14 +258,14 @@ Tes penting: `office-state.test.ts` (aturan status), `office-layout.test.ts` (ku
 - Proposal bid otomatis **ditulis Hermes**; consent pengiriman data ke Hermes **sudah diberikan**.
 - **Lead Agent (Hermes)** ditampilkan di kantor dengan status nyata.
 - LinkedIn: API tidak memberi riwayat kerja/skill → gunakan **impor file ekspor LinkedIn** (CSV) di Knowledge Hub.
-- **Tidak menambah ruangan** Sales/Finance/Marketing (dinilai dekoratif). Tidak ada modul marketing, tidak ada pengiriman pesan otomatis, tidak ada antrean persetujuan bid.
+- **Keputusan 16 Oktober 2026:** lantai 2 menangani progres klien, invoice, pembayaran dan jadwal pemilik; setiap lantai memiliki manajer yang melapor ke Lead. Pesan WhatsApp otomatis hanya untuk klien/proyek serta jenis pesan yang diaktifkan pemilik. Modul marketing dan antrean persetujuan bid tetap tidak digunakan.
 - Tampilan **full 3D**: tanpa sidebar; halaman hanya sebagai kartu yang dibuka dari papan.
 
 ---
 
 ## 14. Batasan yang diketahui & ide berikutnya
 
-- Hanya autopilot, BusinessSync, dan Hermes yang memberi sinyal kerja nyata; persona lain on-demand.
+- Sinyal kerja: autopilot, BusinessSync, Hermes, sinkronisasi Knowledge Hub dan worker operasional. Untuk perubahan invoice, WhatsApp QR, Google OAuth/Calendar, antrean pesan atau manajer lantai, baca `docs/floor-two-operations.md` sebelum mengedit. Persona yang tidak mempunyai job aktif tetap idle/on-demand.
 - Deteksi menang/kalah belum pernah teramati pada data nyata (belum ada bid diputuskan).
 - Kanal/sesi Hermes (mis. Telegram) tidak dilaporkan → ditampilkan "Tidak tersedia".
 - API lokal tanpa autentikasi (dilindungi loopback + Host + Origin) — cukup untuk lokal satu pengguna.

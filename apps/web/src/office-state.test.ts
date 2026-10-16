@@ -63,7 +63,16 @@ describe('office state', () => {
 
   it('summarizes derived states', () => {
     const agents = deriveOfficeAgents(autopilot({ cycleInProgress: true }), []);
-    expect(summarize(agents)).toEqual({ working: 3, idle: 4, offline: 1, unknown: 2 });
-    expect(summarize(deriveOfficeAgents(undefined, []))).toEqual({ working: 0, idle: 0, offline: 1, unknown: 9 });
+    expect(summarize(agents)).toEqual({ working: 3, idle: 4, offline: 1, unknown: 11 });
+    expect(summarize(deriveOfficeAgents(undefined, []))).toEqual({ working: 0, idle: 0, offline: 1, unknown: 18 });
+  });
+  it('shows dedicated floor staff only from actual operation signals',()=>{
+    const operations={runtime:{running:true,jobs:{'delivery-manager':{busy:true,lastRunAt:null,error:null,reason:'Mengirim laporan ke Lead'},'lead-operations':{busy:true,lastRunAt:null,error:null,reason:'Meninjau'}}},whatsapp:{state:'disconnected',reason:'Belum terhubung',provider:'Baileys'},google:{connected:false,configured:false,reason:'Belum terhubung',redirectUri:''}};
+    const agents=deriveOfficeAgents(autopilot(),[],{operations});
+    expect(agent(agents,'delivery-manager')).toMatchObject({floor:2,state:'collaborating',room:'meeting'});
+    expect(agent(agents,'lead-agent')).toMatchObject({state:'reviewing'});
+    expect(agent(agents,'whatsapp-operator')).toMatchObject({state:'offline'});
+    expect(agent(agents,'invoice-specialist')).toMatchObject({state:'idle'});
+    expect(agent(deriveOfficeAgents(autopilot(),[]),'delivery-manager')).toMatchObject({state:'unknown'});
   });
 });

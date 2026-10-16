@@ -17,6 +17,10 @@ import type { LinkedInOAuthService } from './linkedin-oauth.js';
 import { localDateKey, mondayKey } from './autopilot.js';
 import type { FreelancerAutopilot } from './autopilot.js';
 import type { BusinessSync } from './business-sync.js';
+import { OperationsService } from './operations.js';
+import { registerOperationsRoutes } from './operations-routes.js';
+import type { WhatsAppService } from './whatsapp.js';
+import type { GoogleCalendarService } from './google-calendar.js';
 
 const paramsSchema = z.object({ id: z.string().min(1).max(150) });
 const FOLLOW_UP_DAYS = 3;
@@ -40,6 +44,9 @@ type FreelancerSandboxWriteCheck = { statusCode: number | null; checkedAt: strin
 type FreelancerProductionWriteCheck = FreelancerSandboxWriteCheck;
 
 export type AppOptions = {
+  operations?: OperationsService;
+  whatsapp?: WhatsAppService;
+  googleCalendar?: GoogleCalendarService;
   repository?: WorkspaceRepository;
   githubToken?: string;
   getGitHubToken?: () => string | undefined;
@@ -60,6 +67,7 @@ export type AppOptions = {
   drafting?: AiDraftingPort;
   draftingMode?: 'disabled' | 'fixture' | 'hermes';
   draftingReason?: string;
+  publicPortfolio?: (evidence:Parameters<AiDraftingPort['draftBid']>[0]['evidence'])=>Promise<Array<{label:string;url:string}>>;
   spaFallback?: boolean;
 };
 
@@ -117,6 +125,7 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
   // Lets the office show the Hermes lead as working only while a draft request is actually running.
   let draftsInProgress = 0;
   const app = Fastify({ logger: false, bodyLimit: 2_500_000, trustProxy: false });
+  const operations = options.operations ?? new OperationsService({ repository });
   let freelancerVerification: FreelancerVerification | null = null;
   const freelancerSandboxWriteChecks = new Map<FreelancerSandboxWriteOperation, FreelancerSandboxWriteCheck>();
   const freelancerProductionWriteChecks = await readProductionWriteChecks(repository);
@@ -154,6 +163,7 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     state: 'blocked', lastRunAt: null, nextRunAt: null, lastMessage: 'Autopilot belum tersedia pada server ini.', lastImported: 0, lastSubmitted: 0, specializations: [],
   });
   app.get('/api/business-sync', async () => options.businessSync?.getStatus() ?? null);
+  registerOperationsRoutes(app, {repository,operations,whatsapp:options.whatsapp,google:options.googleCalendar});
   // Thread project ids are bare Freelancer ids; local project ids are 'freelancer:<id>'.
   const threadProjectIds = async () => new Set((await repository.listClientThreads()).map((thread) => thread.projectId).filter((id): id is string => id !== null).map((id) => `freelancer:${id}`));
   const dayDiff = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
@@ -679,10 +689,11 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     let generated;
     draftsInProgress += 1;
     try {
+      const evidence=(await repository.searchKnowledge(`${project.title} ${project.skills.join(' ')}`,4)).map(item=>({label:item.path,source:item.url,content:item.content}));
       generated = await drafting.draftBid({
         project,
         profileFacts: profile.facts,
-        evidence: (await repository.searchKnowledge(`${project.title} ${project.skills.join(' ')}`, 4)).map((item) => ({ label: item.path, source: item.url, content: item.content })),
+        evidence,publicPortfolio:await options.publicPortfolio?.(evidence).catch(()=>[]) ?? [],
         profileRate: { min: profile.minPrice, max: profile.maxPrice },
         score,
       });
@@ -985,7 +996,9 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     };
   });
 
-  app.setErrorHandler((_error, _request, reply) => reply.code(500).send({ error: 'Permintaan tidak dapat diproses.' }));
+  app.setErrorHandler((error, _request, reply) => error instanceof z.ZodError
+    ? reply.code(400).send({error:'Data tidak valid.',issues:error.issues.map(issue=>`${issue.path.join('.') || 'body'}: ${issue.message}`)})
+    : reply.code(500).send({ error: 'Permintaan tidak dapat diproses.' }));
   app.setNotFoundHandler((request, reply) => {
     const pathname = request.url.split('?')[0] ?? request.url;
     if (options.spaFallback && ['GET', 'HEAD'].includes(request.method) && pathname !== '/api' && !pathname.startsWith('/api/')) {
