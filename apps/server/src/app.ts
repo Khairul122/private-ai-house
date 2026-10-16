@@ -8,13 +8,13 @@ import { GitHubReadAdapter, GitHubReadError } from '@fvh/adapter-github';
 import { assessProject, createId, decideBid, hashPayload, UnavailableDraftingAdapter } from '@fvh/application';
 import type { AiDraftingPort } from '@fvh/application';
 import { activatePolicySchema, createClientProjectSchema, createPaymentSchema, knowledgeImportSchema, knowledgeSearchSchema, updateClientProjectSchema, updatePolicySchema, updateProfileSchema } from '@fvh/contracts';
-import { transitionPipeline } from '@fvh/domain';
+import { CODING_KEYWORD_GROUPS, CODING_KEYWORDS, transitionPipeline } from '@fvh/domain';
 import type { AutonomyPolicy, BidDraft, ProjectOpportunity } from '@fvh/domain';
 import { prepareKnowledgeFile } from '@fvh/knowledge';
 import { WorkspaceRepository } from '@fvh/persistence';
 import type { CredentialStatus, FreelancerVerification } from './credential-store.js';
 import type { LinkedInOAuthService } from './linkedin-oauth.js';
-import { readLinkedInProfile, syncLinkedInProfile } from './linkedin-api.js';
+import { localDateKey, mondayKey } from './autopilot.js';
 import type { FreelancerAutopilot } from './autopilot.js';
 import type { BusinessSync } from './business-sync.js';
 
@@ -54,6 +54,7 @@ export type AppOptions = {
   businessSync?: BusinessSync;
   linkedinOAuth?: Pick<LinkedInOAuthService, 'redirectUri' | 'start' | 'handleCallback' | 'close'>;
   disconnectLinkedIn?: () => Promise<void>;
+  syncLinkedIn?: () => Promise<{ sourceId: string; chunks: number }>;
   fetcher?: typeof fetch;
   clock?: () => Date;
   drafting?: AiDraftingPort;
@@ -504,6 +505,15 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
       .redirect(destination.toString());
   });
 
+  app.post('/api/linkedin/sync', async (_request, reply) => {
+    if (!options.syncLinkedIn) return reply.code(503).send({ error: 'Sinkronisasi LinkedIn API belum tersedia.' });
+    try {
+      return { synced: true, ...(await options.syncLinkedIn()) };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'LinkedIn API tidak dapat dibaca.';
+      return reply.code(502).send({ error: message });
+    }
+  });
   app.post('/api/linkedin/disconnect', async (_request, reply) => {
     if (!options.disconnectLinkedIn) return reply.code(503).send({ error: 'Pemutusan LinkedIn belum tersedia di server ini.' });
     try {
@@ -574,41 +584,50 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
   });
 
   app.get('/api/policy', async () => await repository.getPolicy());
+  app.get('/api/policy/presets', async () => ({ groups: CODING_KEYWORD_GROUPS, keywords: CODING_KEYWORDS, searchTermsPerCycle: 8, supportedBids: 'Harga tetap, USD', storage: 'supabase' }));
   app.put('/api/policy', async (request, reply) => {
     const parsed = parseBody(updatePolicySchema, request.body);
     if ('issues' in parsed) return reply.code(400).send({ error: 'Kebijakan tidak valid.', issues: parsed.issues });
     const previous = await repository.getPolicy();
+    if (parsed.value.expectedVersion !== undefined && parsed.value.expectedVersion !== previous.version) return reply.code(409).send({ error: 'Kebijakan sudah berubah. Muat ulang sebelum menyimpan.' });
     const profile = await repository.getProfile();
-    // A live policy stays live when the owner edits its limits (the autopilot reads the saved policy every cycle); anything else returns to draft.
+    const { expectedVersion: _expectedVersion, validityDays, ...changes } = parsed.value;
+    void _expectedVersion;
     const keepLive = previous.state === 'active' && !previous.simulationOnly;
     const next: AutonomyPolicy = {
       ...previous,
-      ...parsed.value,
+      ...changes,
+      ...(validityDays === undefined ? {} : { expiresAt: new Date(now().getTime() + validityDays * 86_400_000).toISOString() }),
       version: previous.version + 1,
-      state: keepLive ? 'active' : 'draft',
+      state: previous.state,
       primaryField: profile.primaryField,
       specializations: profile.specializations,
-      simulationOnly: !keepLive,
+      simulationOnly: previous.simulationOnly,
     };
-    await repository.savePolicy(next);
+    if (!await repository.savePolicyIfVersion(next, previous.version)) return reply.code(409).send({ error: 'Kebijakan berubah saat penyimpanan. Muat ulang sebelum menyimpan.' });
     await repository.appendAudit({ type: 'policy.updated', resourceId: 'policy', status: 'recorded', reason: keepLive ? 'Batas kebijakan live diperbarui; langsung berlaku di siklus berikutnya.' : 'Batas kebijakan diperbarui; perlu aktivasi ulang.', policyVersion: next.version, payloadHash: hashPayload(next) });
     return next;
   });
   app.post('/api/policy/activate', async (request, reply) => {
     const parsed = parseBody(activatePolicySchema, request.body);
-    if ('issues' in parsed) return reply.code(400).send({ error: 'Aktivasi memerlukan konfirmasi simulasi lokal.', issues: parsed.issues });
+    if ('issues' in parsed) return reply.code(400).send({ error: 'Pilih dan konfirmasikan mode simulasi atau bid live.', issues: parsed.issues });
     const policy = await repository.getPolicy();
+    if (policy.state === 'paused') return reply.code(409).send({ error: 'Kebijakan dijeda. Gunakan tindakan lanjutkan oleh pemilik.' });
+    if (!Number.isFinite(Date.parse(policy.expiresAt)) || Date.parse(policy.expiresAt) <= now().getTime()) return reply.code(409).send({ error: 'Perbarui masa berlaku sebelum aktivasi.' });
+    const live = 'confirmLive' in parsed.value;
+    if (live && (!options.autopilot || !(options.getCredentialStatus?.() ?? options.credentialStatus)?.freelancerAccessTokenConfigured)) return reply.code(409).send({ error: 'Autopilot dan kredensial Freelancer harus tersedia sebelum aktivasi live.' });
     const profile = await repository.getProfile();
     if (!profile.primaryField.trim() || profile.specializations.length === 0) return reply.code(409).send({ error: 'Isi bidang utama dan minimal satu spesialisasi sebelum mengaktifkan kebijakan.' });
     if (!policy.allowedActions.includes('bid.submit')) return reply.code(409).send({ error: 'Pilih tindakan bid simulasi yang tercakup kebijakan.' });
-    const activated: AutonomyPolicy = { ...policy, state: 'active', primaryField: profile.primaryField, specializations: profile.specializations, simulationOnly: true };
+    const activated: AutonomyPolicy = { ...policy, version: policy.version + 1, state: 'active', primaryField: profile.primaryField, specializations: profile.specializations, simulationOnly: !live };
     await repository.savePolicy(activated);
-    await repository.appendAudit({ type: 'policy.activated', resourceId: 'policy', status: 'recorded', reason: 'Pemilik mengaktifkan satu kebijakan simulasi lokal.', policyVersion: activated.version, payloadHash: hashPayload(activated) });
-    return { policy: activated, externalWrites: false };
+    await repository.appendAudit({ type: 'policy.activated', resourceId: 'policy', status: 'recorded', reason: live ? 'Pemilik mengaktifkan bid live dalam batas kebijakan tersimpan.' : 'Pemilik mengaktifkan satu kebijakan simulasi lokal.', policyVersion: activated.version, payloadHash: hashPayload(activated) });
+    if (live) void options.autopilot?.start();
+    return { policy: activated, externalWrites: live };
   });
   app.post('/api/policy/pause', async () => {
     const policy = await repository.getPolicy();
-    const paused: AutonomyPolicy = { ...policy, state: 'paused' };
+    const paused: AutonomyPolicy = { ...policy, state: 'paused', version: policy.version + 1 };
     await repository.savePolicy(paused);
     await repository.appendAudit({ type: 'policy.paused', resourceId: 'policy', status: 'recorded', reason: 'Jeda darurat diaktifkan dari dashboard.', policyVersion: paused.version, payloadHash: null });
     return paused;
@@ -616,8 +635,8 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
   app.post('/api/policy/resume', async (_request, reply) => {
     const policy = await repository.getPolicy();
     if (policy.state !== 'paused') return reply.code(409).send({ error: 'Kebijakan tidak sedang dijeda.' });
-    if (Date.parse(policy.expiresAt) <= now().getTime()) return reply.code(409).send({ error: 'Kebijakan kedaluwarsa dan perlu dikonfigurasi ulang.' });
-    const resumed = { ...policy, state: 'active' as const };
+    if (!Number.isFinite(Date.parse(policy.expiresAt)) || Date.parse(policy.expiresAt) <= now().getTime()) return reply.code(409).send({ error: 'Kebijakan kedaluwarsa dan perlu dikonfigurasi ulang.' });
+    const resumed = { ...policy, state: 'active' as const, version: policy.version + 1 };
     await repository.savePolicy(resumed);
     await repository.appendAudit({ type: 'policy.resumed', resourceId: 'policy', status: 'recorded', reason: 'Kebijakan dilanjutkan oleh pemilik.', policyVersion: resumed.version, payloadHash: null });
     void options.autopilot?.start();
@@ -642,6 +661,11 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     const project = await repository.getProject(params.data.id);
     if (!project) return reply.code(404).send({ error: 'Peluang tidak ditemukan.' });
     return project;
+  });
+  app.get('/api/projects/:id/draft', async (request, reply) => {
+    const params = paramsSchema.safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: 'ID peluang tidak valid.' });
+    return { draft: await repository.getLatestDraft(params.data.id) ?? null };
   });
   app.post('/api/projects/:id/draft', async (request, reply) => {
     const params = paramsSchema.safeParse(request.params);
@@ -726,13 +750,9 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     const projects = await repository.listProjects();
     const draftCount = (await repository.latestDrafts()).size;
     const activity = await repository.listAudit(8);
-    const audits = await repository.listAudit(5_000);
     const sources = await repository.listKnowledgeSources();
     const policy = await repository.getPolicy();
     const profile = await repository.getProfile();
-    const currentDate = localDateKey(now(), policy.timezone);
-    const currentWeek = mondayKey(currentDate);
-    const bidAudits = audits.filter((event) => event.type === 'marketplace.production.submit_bid' && event.status === 'recorded');
     return {
       mode: 'workspace lokal',
       counts: {
@@ -743,20 +763,44 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
         knowledgeSources: sources.length,
       },
       policy: { state: policy.state, version: policy.version, simulationOnly: policy.simulationOnly },
-      bidUsage: {
-        today: bidAudits.filter((event) => localDateKey(new Date(event.createdAt), policy.timezone) === currentDate).length,
-        week: bidAudits.filter((event) => mondayKey(localDateKey(new Date(event.createdAt), policy.timezone)) === currentWeek).length,
-      },
+      bidUsage: await repository.bidUsage(now(), policy.timezone),
       profileComplete: Boolean(profile.primaryField && profile.specializations.length),
       projects: projects.slice(0, 4),
       activity,
       externalWrites: policy.state === 'active' && !policy.simulationOnly,
     };
   });
+  const agendaSchema = z.object({ days: z.coerce.number().int().min(1).max(366).default(120), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() });
+  const agendaCategory = (type: string, status: string): string | null => {
+    if (type === 'marketplace.production.submit_bid') return status === 'recorded' ? 'bidSent' : status === 'failed' ? 'bidFailed' : null;
+    if (type === 'autopilot.cycle') return 'cycles';
+    if (type === 'autopilot.bid_skipped') return 'skipped';
+    if (type.startsWith('policy.') || type === 'autopilot.policy_bootstrapped') return 'policy';
+    if (type.startsWith('bid.draft') || type === 'autopilot.draft_fallback') return 'drafts';
+    if (type.startsWith('knowledge.')) return 'knowledge';
+    if (type.startsWith('business.') || type.startsWith('marketplace.')) return 'sync';
+    return 'other';
+  };
+  // Past activity for the calendar: per-day counts, or the events of one day when ?date= is given.
+  app.get('/api/agenda/activity', async (request, reply) => {
+    const parsed = agendaSchema.safeParse(request.query);
+    if (!parsed.success) return reply.code(400).send({ error: 'Parameter agenda tidak valid.' });
+    const timezone = (await repository.getPolicy()).timezone;
+    if (parsed.data.date) return { date: parsed.data.date, events: await repository.auditForDay(timezone, parsed.data.date) };
+    const rows = await repository.auditDailySummary(timezone, new Date(now().getTime() - parsed.data.days * 86_400_000).toISOString());
+    const days: Record<string, Record<string, number>> = {};
+    for (const row of rows) {
+      const category = agendaCategory(row.type, row.status);
+      if (!category) continue;
+      const day = (days[row.day] ??= {});
+      day[category] = (day[category] ?? 0) + row.total;
+    }
+    return { timezone, days };
+  });
   app.get('/api/activity', async (request) => {
-    const query = request.query as { limit?: string };
-    const limit = Math.max(1, Math.min(100, Number.parseInt(query.limit ?? '50', 10) || 50));
-    return await repository.listAudit(limit);
+    const query = request.query as { limit?: string; type?: string };
+    const limit = Math.max(1, Math.min(500, Number.parseInt(query.limit ?? '50', 10) || 50));
+    return query.type ? await repository.listAuditForType(query.type.slice(0, 120), limit) : await repository.listAudit(limit);
   });
 
   app.get('/api/knowledge', async () => ({
@@ -788,10 +832,17 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
   };
   // Re-syncing a repository replaces its previous source instead of indexing it twice.
   const syncGitHubRepository = async (adapter: GitHubReadAdapter, name: string) => {
-    const result = await adapter.readRepository(name);
-    const sourceId = createId('source');
+    const existing = (await repository.listKnowledgeSources()).find((item) => item.provider === 'github' && item.label.toLowerCase() === name.toLowerCase());
+    const knownRef = existing ? await repository.knowledgeSourceRef(existing.id) : undefined;
+    const result = await adapter.readRepository(name, knownRef);
+    const sourceId = existing?.id ?? `github:${hashPayload(result.repository.toLowerCase()).slice(0, 32)}`;
     const updatedAt = now().toISOString();
     const repositoryUrl = `https://github.com/${result.repository}`;
+    if (result.unchanged && existing) {
+      await repository.markKnowledgeChecked(existing.id, updatedAt);
+      await repository.appendAudit({ type: 'knowledge.github_sync', resourceId: existing.id, status: 'recorded', reason: `${result.repository}: snapshot ${result.ref} tetap sama; ${existing.chunkCount} potongan dipertahankan tanpa mengunduh ulang.`, policyVersion: (await repository.getPolicy()).version, payloadHash: null });
+      return { result, chunks: existing.chunkCount, rejected: 0, source: { ...existing, updatedAt } };
+    }
     const chunks = [];
     let rejected = 0;
     for (const file of result.files) {
@@ -800,11 +851,60 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
       else rejected += 1;
     }
     if (!chunks.length) return { result, chunks: 0, rejected, source: null };
-    for (const old of await repository.listKnowledgeSources()) if (old.provider === 'github' && old.label === result.repository) await repository.deleteKnowledgeSource(old.id);
-    const source = await repository.createKnowledgeSource({ id: sourceId, provider: 'github', label: result.repository, referenceUrl: repositoryUrl, updatedAt }, chunks);
+    await repository.replaceKnowledgeSource({ id: sourceId, provider: 'github', label: result.repository, referenceUrl: repositoryUrl, updatedAt }, chunks);
+    const source = (await repository.listKnowledgeSources()).find((item) => item.id === sourceId)!;
     await repository.appendAudit({ type: 'knowledge.github_sync', resourceId: sourceId, status: 'recorded', reason: `${result.repository}: ${result.fetched} file dibaca pada ${result.ref}; ${rejected + result.skipped} file dilewati.`, policyVersion: (await repository.getPolicy()).version, payloadHash: null });
     return { result, chunks: chunks.length, rejected, source };
   };
+
+  type SyncJob = { id: string; provider: 'github' | 'linkedin'; state: 'running' | 'completed' | 'failed'; startedAt: string; finishedAt: string | null; current: string | null; total: number; completed: number; chunks: number; results: Array<{ label: string; chunks: number; error: string | null; note?: string }>; error: string | null };
+  let knowledgeJob: SyncJob | null = null;
+  let knowledgeTask: Promise<void> | null = null;
+  app.addHook('onClose', async () => { await knowledgeTask; });
+  app.get('/api/knowledge/sync-status', async () => ({ job: knowledgeJob }));
+  app.post('/api/knowledge/sync', async (request, reply) => {
+    const parsed = z.object({ provider: z.enum(['github', 'linkedin']), repository: z.string().regex(/^[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+$/).optional() }).safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'Pilih GitHub atau LinkedIn dan format repositori yang valid.' });
+    if (knowledgeJob?.state === 'running') return reply.code(409).send({ error: 'Sinkronisasi lain masih berjalan. Tunggu hingga selesai.' });
+    if (parsed.data.provider === 'linkedin' && !options.syncLinkedIn) return reply.code(409).send({ error: 'Sinkronisasi LinkedIn belum tersedia.' });
+    if (parsed.data.provider === 'github' && !parsed.data.repository && !(options.getGitHubToken?.() ?? options.githubToken)) return reply.code(400).send({ error: 'Token GitHub diperlukan untuk membaca daftar repo milik Anda.' });
+    const job: SyncJob = { id: createId('sync'), provider: parsed.data.provider, state: 'running', startedAt: now().toISOString(), finishedAt: null, current: 'Membaca sumber API', total: 0, completed: 0, chunks: 0, results: [], error: null };
+    knowledgeJob = job;
+    knowledgeTask = (async () => {
+      try {
+        if (parsed.data.provider === 'linkedin') {
+          job.total = 1; job.current = 'LinkedIn /userinfo';
+          const result = await options.syncLinkedIn!();
+          job.chunks = result.chunks; job.completed = 1;
+          job.results.push({ label: 'LinkedIn API userinfo', chunks: result.chunks, error: null });
+        } else {
+          const adapter = githubAdapter();
+          const names = parsed.data.repository ? [parsed.data.repository] : await adapter.listOwnRepositories();
+          job.total = names.length;
+          for (const name of names) {
+            job.current = name;
+            try {
+              const result = await syncGitHubRepository(adapter, name);
+              job.results.push({ label: name, chunks: result.chunks, error: null, ...(!result.chunks ? { note: 'Dilewati: tidak ada berkas teks yang lolos pemeriksaan.' } : result.result.limited > 0 || result.rejected > 0 ? { note: `Cakupan parsial: ${result.result.limited} berkas layak belum diambil, ${result.rejected} ditolak pemeriksaan konten.` } : {}) });
+              job.chunks += result.chunks;
+            } catch (error) {
+              const message = error instanceof GitHubReadError ? error.message : 'Repositori tidak dapat diindeks; sumber sebelumnya dipertahankan.';
+              job.results.push({ label: name, chunks: 0, error: error instanceof GitHubReadError && error.code === 'repository_empty' ? null : message, ...(error instanceof GitHubReadError && error.code === 'repository_empty' ? { note: 'Dilewati: repositori kosong.' } : {}) });
+              if (error instanceof GitHubReadError && error.code === 'rate_limited') throw error;
+            }
+            job.completed += 1;
+          }
+        }
+        job.state = job.results.some((item) => item.error) ? 'failed' : 'completed';
+        job.error = job.state === 'failed' ? 'Sebagian sumber gagal. Periksa hasil per sumber; sumber yang berhasil sudah tersimpan.' : null;
+      } catch (error) {
+        job.state = 'failed'; job.error = error instanceof GitHubReadError ? error.message : 'API tidak dapat disinkronkan. Periksa koneksi dan izin akun di Status Integrasi.';
+      } finally {
+        job.finishedAt = now().toISOString(); job.current = null;
+      }
+    })();
+    return reply.code(202).send({ job });
+  });
 
   app.post('/api/knowledge/github/sync', async (request, reply) => {
     const parsed = parseBody(githubSyncSchema, request.body);
@@ -812,7 +912,7 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     try {
       const { result, chunks, rejected, source } = await syncGitHubRepository(githubAdapter(), parsed.value.repository);
       if (!source) return reply.code(422).send({ error: 'Tidak ada file yang lolos pemeriksaan sebelum indeks.', filesSeen: result.fetched, rejected });
-      return reply.code(201).send({ source, branch: result.branch, ref: result.ref, filesSeen: result.fetched, chunks, rejected: rejected + result.skipped, complete: result.skipped === 0 });
+      return reply.code(201).send({ source, branch: result.branch, ref: result.ref, filesSeen: result.fetched, chunks, rejected: rejected + result.skipped, eligible: result.eligible, limited: result.limited, complete: result.limited === 0 && rejected === 0 });
     } catch (error) {
       if (error instanceof GitHubReadError) return reply.code(error.code === 'permission_denied' ? 403 : error.code === 'repository_not_found' ? 404 : 502).send({ error: error.message, code: error.code });
       return reply.code(502).send({ error: 'Sinkronisasi GitHub gagal; tidak ada data yang ditambahkan.' });

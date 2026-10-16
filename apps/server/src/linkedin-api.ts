@@ -1,21 +1,10 @@
 import { createHash } from 'node:crypto';
 import { prepareKnowledgeFile } from '@fvh/knowledge';
 import type { WorkspaceRepository } from '@fvh/persistence';
+import { z } from 'zod';
 
-export type LinkedInApiProfile = {
-  sub: string;
-  name?: string;
-  given_name?: string;
-  family_name?: string;
-  picture?: string;
-  locale?: string | { country: string; language: string };
-  email?: string;
-  email_verified?: boolean;
-};
-
-function isProfile(value: unknown): value is LinkedInApiProfile {
-  return typeof value === 'object' && value !== null && typeof (value as { sub?: unknown }).sub === 'string' && (value as { sub: string }).sub.length > 0;
-}
+const profileSchema = z.object({ sub: z.string().min(1).max(300), name: z.string().max(500).optional(), given_name: z.string().max(300).optional(), family_name: z.string().max(300).optional(), picture: z.string().url().startsWith('https://').optional(), locale: z.union([z.string().max(100), z.object({ country: z.string().max(100), language: z.string().max(100) })]).optional(), email: z.string().email().max(320).optional(), email_verified: z.boolean().optional() });
+export type LinkedInApiProfile = z.infer<typeof profileSchema>;
 
 export async function readLinkedInProfile(accessToken: string, fetcher: typeof fetch = fetch): Promise<LinkedInApiProfile> {
   const response = await fetcher('https://api.linkedin.com/v2/userinfo', {
@@ -24,8 +13,9 @@ export async function readLinkedInProfile(accessToken: string, fetcher: typeof f
   });
   if (!response.ok) throw new Error(`LinkedIn API userinfo merespons HTTP ${response.status}.`);
   const payload: unknown = await response.json();
-  if (!isProfile(payload)) throw new Error('LinkedIn API userinfo mengembalikan data tidak valid.');
-  return payload;
+  const parsed = profileSchema.safeParse(payload);
+  if (!parsed.success) throw new Error('LinkedIn API userinfo mengembalikan data tidak valid.');
+  return parsed.data;
 }
 
 export async function syncLinkedInProfile(repository: WorkspaceRepository, profile: LinkedInApiProfile, now = new Date()): Promise<{ sourceId: string; chunks: number }> {
@@ -34,5 +24,6 @@ export async function syncLinkedInProfile(repository: WorkspaceRepository, profi
   const prepared = prepareKnowledgeFile({ sourceId, provider: 'linkedin', label: 'LinkedIn API userinfo', referenceUrl: 'https://api.linkedin.com/v2/userinfo', sourceRef: `api:userinfo:${profile.sub}`, updatedAt: now.toISOString(), path: 'userinfo.json', content });
   if (!prepared.ok) throw new Error(`Data LinkedIn ditolak: ${prepared.reason}`);
   await repository.replaceKnowledgeSource({ id: sourceId, provider: 'linkedin', label: 'LinkedIn API userinfo', referenceUrl: 'https://api.linkedin.com/v2/userinfo', updatedAt: now.toISOString() }, prepared.chunks);
+  await repository.appendAudit({ type: 'knowledge.linkedin_sync', resourceId: sourceId, status: 'recorded', reason: 'Profil ringan diperbarui dari LinkedIn API /userinfo. Riwayat kerja dan skill tidak disediakan oleh izin OIDC.', policyVersion: (await repository.getPolicy()).version, payloadHash: null });
   return { sourceId, chunks: prepared.chunks.length };
 }

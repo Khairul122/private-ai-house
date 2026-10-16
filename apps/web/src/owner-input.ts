@@ -25,13 +25,11 @@ export function createOwnerInput() {
 
 export type OwnerInput = ReturnType<typeof createOwnerInput>;
 
-function directionFor(code: string): OwnerDirection | undefined {
-  return ({ KeyW: 'up', KeyA: 'left', KeyS: 'down', KeyD: 'right', ArrowUp: 'up', ArrowLeft: 'left', ArrowDown: 'down', ArrowRight: 'right' } as const)[code as 'KeyW'];
-}
+const DIRECTIONS: Readonly<Record<string, OwnerDirection>> = { KeyW: 'up', KeyA: 'left', KeyS: 'down', KeyD: 'right', ArrowUp: 'up', ArrowLeft: 'left', ArrowDown: 'down', ArrowRight: 'right' };
 
 function ownsKeyboard(target: EventTarget | null) {
   return typeof Element !== 'undefined' && target instanceof Element
-    && Boolean(target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="tablist"], [role="menu"], details[open]'));
+    && Boolean(target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="menu"], details[open]'));
 }
 
 export function bindOwnerKeyboard(input: OwnerInput, surface: EventTarget, document: EventTarget & { visibilityState: string }) {
@@ -39,7 +37,7 @@ export function bindOwnerKeyboard(input: OwnerInput, surface: EventTarget, docum
     const event = raw as KeyboardEvent;
     if (event.key === 'Escape') { input.stop(); return; }
     if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || ownsKeyboard(event.target)) { input.clear(); return; }
-    const direction = directionFor(event.code);
+    const direction = DIRECTIONS[event.code];
     if (!direction || !input.enabled) return;
     event.preventDefault();
     // A held key must be released before it can restart movement after Stop or blur.
@@ -48,7 +46,7 @@ export function bindOwnerKeyboard(input: OwnerInput, surface: EventTarget, docum
   const onUp = (event: Event) => input.release(`key:${(event as KeyboardEvent).code}`);
   const onBlur = () => input.setActive(false);
   const onFocus = () => input.setActive(document.visibilityState !== 'hidden');
-  const onVisibility = () => { if (document.visibilityState === 'hidden') input.setActive(false); };
+  const onVisibility = () => input.setActive(document.visibilityState !== 'hidden');
   const onFocusIn = (event: Event) => { if (ownsKeyboard(event.target)) input.clear(); };
   surface.addEventListener('keydown', onDown);
   surface.addEventListener('keyup', onUp);

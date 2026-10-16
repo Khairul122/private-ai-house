@@ -50,7 +50,11 @@ export type AutonomyPolicy = {
   activeHours: { start: number; end: number };
   noNegotiationTerms: string[];
   simulationOnly: boolean;
-  allowUnknownDeadline?: boolean;
+  allowUnknownDeadline?: boolean | undefined;
+  activeDays?: number[] | undefined;
+  scanIntervalMinutes?: number | undefined;
+  maxRiskScore?: number | undefined;
+  requireSpecializationMatch?: boolean | undefined;
 };
 
 export type BidDraft = {

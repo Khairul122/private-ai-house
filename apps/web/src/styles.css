@@ -847,8 +847,9 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .vo3d-owner-hint { margin: 0 0 8px; color: var(--vo-muted); font-size: 12px; line-height: 1.45; }
 .vo3d-owner-controls { margin: 4px 0 16px; padding: 10px 11px 12px; border: 1px solid var(--vo-line); border-radius: 9px; background: #f7f8f6; }
 .vo3d-owner-controls .vo3d-owner-hint { margin-bottom: 8px; }
+.vo3d-owner-motion { margin: 0 0 6px; color: var(--vo-ink); font-size: 13px; font-weight: 650; }
 .vo3d-owner-dpad { display: grid; width: 148px; grid-template-columns: repeat(3, 44px); grid-template-rows: repeat(3, 44px); gap: 4px; margin: 0 auto; }
-.vo3d-owner-dpad button { min-width: 44px; min-height: 44px; border: 1px solid var(--vo-line); border-radius: 8px; background: #fff; color: var(--vo-ink); font: 700 13px/1 inherit; touch-action: none; }
+.vo3d-owner-dpad button { min-width: 44px; min-height: 44px; border: 1px solid #79838d; border-radius: 8px; background: #fff; color: var(--vo-ink); font-family: inherit; font-size: 13px; font-weight: 700; line-height: 1; touch-action: none; user-select: none; }
 .vo3d-owner-dpad button:hover { border-color: var(--vo-ink); }
 .vo3d-owner-dpad button:active { background: var(--vo-accent); border-color: var(--vo-accent); color: #fff; }
 .vo3d-owner-dpad button:focus-visible { outline: 2px solid var(--vo-ink); outline-offset: 2px; }
@@ -893,6 +894,64 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .vo3d-sheet-body :is(p, code, strong, span, h2, h3, dd, small, a, li) { overflow-wrap: anywhere; }
 .vo3d-sheet-body :is(.capability-grid, .capability-row, .policy-summary-grid, .form-section) > * { min-width: 0; }
 .vo3d-sheet-body code { white-space: normal; word-break: break-all; }
+
+/* Cards share readable controls and spacing inside the full-screen office. */
+.vo3d-sheet { --focus: #1768ad; --copper: #1768ad; --muted: #536171; font-size: 14px; }
+.vo3d-sheet .button-primary { background: #1768ad; color: #fff; }
+.vo3d-sheet-body.page-content { overscroll-behavior: contain; scrollbar-gutter: stable; }
+.vo3d-sheet-body :is(.intro-copy, .form-help, .button, .form-field, .item-sub, .agent-role, .agent-boundary, .capability-row p, .policy-details, .skill-tag) { font-size: 14px; }
+.vo3d-sheet-body :is(.section-heading h2, .form-card h2) { font-size: 18px; line-height: 1.4; }
+.vo3d-sheet-body :is(.form-field input, .form-field textarea, .form-field select, .search-field input) { width: 100%; min-width: 0; font-size: 16px; }
+.vo3d-sheet-body :is(.form-card, .activity-preview, .policy-card, .calendar-card) { padding: clamp(16px, 2.3vw, 24px); }
+.vo3d-sheet-body :is(.form-grid, .form-grid-three, .form-section, .knowledge-grid, .policy-summary-grid, .overview-grid) > * { min-width: 0; }
+.vo3d-sheet-body .policy-summary-grid { grid-template-columns: minmax(0, 1fr); }
+.vo3d-sheet-body .policy-form { gap: 20px; }
+.vo3d-sheet-body .check-row { align-items: flex-start; min-height: 44px; gap: 10px; }
+.vo3d-sheet-body .check-row input { flex: 0 0 20px; width: 20px; height: 20px; margin-top: 3px; }
+.vo3d-sheet-body .form-actions { align-items: center; }
+.vo3d-sheet-body details { margin-top: 16px; }
+.vo3d-sheet-body summary { width: fit-content; max-width: 100%; padding: 10px 0; cursor: pointer; font-weight: 600; color: var(--accent-text); }
+.vo3d-sheet-body summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+.sheet-tools { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; padding: 12px 24px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.sheet-tools label { display: flex; flex: 1 1 200px; align-items: center; gap: 12px; color: var(--muted); font-size: 13px; }
+.sheet-tools select { flex: 1; min-width: 0; min-height: 44px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; color: var(--ink); background: #fff; font-size: 16px; }
+.sheet-tools .button { min-height: 44px; }
+.operation-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); gap: 16px; margin: 20px 0; }
+.operation-facts dt { color: var(--muted); font-size: 13px; }
+.operation-facts dd { margin: 4px 0 0; font-weight: 600; }
+.operation-status .notice { display: block; padding: 16px; }
+.operation-status .notice strong { display: block; font-size: 15px; }
+.operation-status .notice p { margin: 8px 0; font-size: 14px; line-height: 1.6; }
+.operation-status .notice small { display: block; font-size: 13px; line-height: 1.6; }
+.reason-breakdown, .sync-results { list-style: none; padding: 0; }
+.reason-breakdown li, .sync-results li { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-top: 1px solid var(--line); }
+.reason-breakdown li > span { flex: 1; }
+.reason-breakdown strong { flex: 0 0 auto; }
+.day-options { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 10px 0; }
+.calendar-date-jump { max-width: 260px; margin-bottom: 16px; }
+.day-options .check-row { align-items: center; }
+.keyword-catalog { padding: 0 14px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-muted); }
+.source-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.vo3d-sheet-body .agent-foot { display: grid; gap: 12px; }
+.vo3d-sheet-body progress { width: 100%; height: 14px; accent-color: var(--accent-text); }
+.proposal-panel textarea { line-height: 1.7; }
+.vo3d-sheet-body .filter-bar { flex-wrap: wrap; align-items: end; }
+.vo3d-sheet-body .filter-bar .search-field { flex: 1 1 250px; min-width: 0; }
+@media (max-width: 640px) {
+  .sheet-tools { padding: 10px 16px; gap: 8px; }
+  .sheet-tools label { flex-basis: 100%; }
+  .sheet-tools label > span { flex: 0 0 70px; }
+  .sheet-tools > .button { width: 100%; }
+  .vo3d-sheet-body .metrics-row { grid-template-columns: minmax(0, 1fr); }
+  .vo3d-sheet-body .section-heading { flex-wrap: wrap; }
+  .vo3d-sheet-body :is(.knowledge-grid, .form-grid-three, .form-grid, .policy-facts) { grid-template-columns: minmax(0, 1fr); }
+  .vo3d-sheet-body .source-row { flex-direction: column; align-items: stretch; gap: 14px; }
+  .source-actions { justify-content: flex-start; }
+  .sync-results li { flex-direction: column; gap: 4px; }
+  .vo3d-sheet-body .calendar-navigation { align-items: stretch; flex-direction: column; }
+  .vo3d-sheet-body .calendar-period-controls { justify-content: space-between; }
+  .vo3d-sheet-body .calendar-today-button { align-self: flex-start; white-space: nowrap; }
+}
 .vo3d-sheet-body .button-primary:hover:not(:disabled) { background: #1864ab; }
 /* Baris integrasi: teks di kiri, label status selalu utuh di kanan (tidak mengecil/menembus kartu). */
 .vo3d-sheet-body .capability-row { display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: start; gap: 8px 14px; }
@@ -903,3 +962,8 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
   .vo3d-sheet-body .capability-row { grid-template-columns: minmax(0, 1fr); }
   .vo3d-sheet-body .capability-row > :last-child { justify-self: start; grid-row: 1; }
 }
+
+/* Agenda: aktivitas yang sudah terjadi */
+.calendar-event-activity { border-left-color: var(--accent-text); }
+.calendar-day-log { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.calendar-day-log h4 { margin: 0 0 8px; font-size: 14px; }

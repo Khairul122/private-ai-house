@@ -19,11 +19,12 @@ describe('FreelancerAutopilot', () => {
   let repository: WorkspaceRepository | undefined;
   let autopilot: FreelancerAutopilot | undefined;
 
-  afterEach(() => {
+  afterEach(async () => {
     autopilot?.stop();
-    repository?.close();
+    await repository?.close();
     autopilot = undefined;
     repository = undefined;
+    vi.useRealTimers();
   });
 
   it('bootstraps from public profile data and submits an eligible fixed price bid once', async () => {
@@ -67,7 +68,7 @@ describe('FreelancerAutopilot', () => {
     expect(await repository.getProfile()).toMatchObject({ primaryField: 'Backend Engineer', specializations: ['Laravel', 'Python'], facts: [{ value: 'Isi pemilik' }] });
   });
 
-  it('keeps the owner-saved policy limits when the policy is bootstrapped again on restart', async () => {
+  it('keeps owner-saved draft limits and requires activation instead of enabling live bids on restart', async () => {
     repository = await WorkspaceRepository.open();
     await repository.savePolicy({ ...(await repository.getPolicy()), keywords: ['PHP'], minPrice: 150, maxPrice: 900, activeHours: { start: 8, end: 20 } });
     await repository.appendAudit({ type: 'policy.updated', resourceId: 'policy', status: 'recorded', reason: 'Batas kebijakan diperbarui; perlu aktivasi ulang.', policyVersion: 1, payloadHash: null });
@@ -78,7 +79,8 @@ describe('FreelancerAutopilot', () => {
 
     await autopilot.start();
 
-    expect(await repository.getPolicy()).toMatchObject({ state: 'active', simulationOnly: false, keywords: ['PHP'], minPrice: 150, maxPrice: 900, activeHours: { start: 8, end: 20 } });
+    expect(await repository.getPolicy()).toMatchObject({ state: 'draft', simulationOnly: true, keywords: ['PHP'], minPrice: 150, maxPrice: 900, activeHours: { start: 8, end: 20 } });
+    expect((await autopilot.getStatus()).state).toBe('blocked');
   });
 
   it.each([
@@ -137,5 +139,96 @@ describe('FreelancerAutopilot', () => {
 
     expect(submitBid).not.toHaveBeenCalled();
     expect(await autopilot.getStatus()).toMatchObject({ state: 'running', lastSubmitted: 0 });
+    expect((await autopilot.getStatus()).summary?.reasons).toMatchObject({ 'Tipe proyek bukan harga tetap': 1 });
+  });
+
+  it('rechecks a project after an outside-hours rejection without needing a policy edit', async () => {
+    repository = await WorkspaceRepository.open();
+    let currentTime = new Date('2026-10-15T16:00:00Z');
+    await repository.savePolicy({ ...(await repository.getPolicy()), state: 'active', simulationOnly: false, allowedActions: ['bid.submit'], specializations: ['Python'], minimumConfidence: 0.5, activeHours: { start: 8, end: 19 }, allowUnknownDeadline: true });
+    const submitBid = vi.fn(async () => ({ statusCode: 200, resultId: '9002' }));
+    autopilot = new FreelancerAutopilot({ repository, now: () => currentTime, readProfile: async () => profile, readProjects: async () => ({ projects: [project], skipped: 0 }), submitBid });
+    await autopilot.runCycle();
+    expect(submitBid).not.toHaveBeenCalled();
+    expect((await autopilot.getStatus()).waitingReason).toContain('jadwal');
+    currentTime = new Date('2026-10-16T04:00:00Z');
+    await autopilot.runCycle();
+    expect(submitBid).toHaveBeenCalledTimes(1);
+  });
+
+  it('respects an owner deadline restriction on restart and rotates saved search terms', async () => {
+    repository = await WorkspaceRepository.open();
+    await repository.savePolicy({ ...(await repository.getPolicy()), state: 'active', simulationOnly: false, allowedActions: ['bid.submit'], specializations: ['Python'], keywords: ['React', 'Laravel', 'Flutter', 'Java', 'PHP', 'Rust', 'SQL', 'Docker', 'Linux'], allowUnknownDeadline: false });
+    await repository.appendAudit({ type: 'autopilot.policy_bootstrapped', resourceId: 'policy', status: 'recorded', reason: 'test', policyVersion: 1, payloadHash: null });
+    const readProjects = vi.fn(async () => ({ projects: [project], skipped: 0 }));
+    const submitBid = vi.fn();
+    autopilot = new FreelancerAutopilot({ repository, now: () => now, readProfile: async () => profile, readProjects, submitBid });
+    await autopilot.start();
+    await autopilot.runCycle();
+    expect(submitBid).not.toHaveBeenCalled();
+    expect((await repository.getPolicy()).allowUnknownDeadline).toBe(false);
+    expect(readProjects.mock.calls).toHaveLength(16);
+    expect((await autopilot.getStatus()).searchTerms).toContain('Docker');
+  });
+
+  it('does not submit when the owner changes policy while Hermes is writing', async () => {
+    repository = await WorkspaceRepository.open();
+    const submitBid = vi.fn();
+    const repo = repository;
+    autopilot = new FreelancerAutopilot({ repository, now: () => now, readProfile: async () => profile, readProjects: async () => ({ projects: [project], skipped: 0 }), submitBid,
+      draftProposal: async () => {
+        const policy = await repo.getPolicy();
+        await repo.savePolicy({ ...policy, minPrice: 500, version: policy.version + 1 });
+        return { proposal: 'I will build and document your Python API for USD 100 over 14 days.', proposedPrice: 100, durationDays: 14, confidence: 0.9, evidence: [], assumptions: [] };
+      },
+    });
+    await autopilot.start();
+    expect(submitBid).not.toHaveBeenCalled();
+    expect(await repo.hasAudit('marketplace.production.submit_bid', project.id)).toBe(false);
+  });
+
+  it('keeps its scheduler alive when a policy read fails temporarily', async () => {
+    repository = await WorkspaceRepository.open();
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    let tickTime = now;
+    autopilot = new FreelancerAutopilot({ repository, now: () => tickTime, intervalMs: 1_000, readProfile: async () => profile, readProjects: async () => ({ projects: [], skipped: 0 }), submitBid: vi.fn() });
+    await autopilot.start();
+    vi.spyOn(repository, 'getPolicy').mockRejectedValueOnce(new Error('temporary storage failure'));
+    tickTime = new Date(now.getTime() + 1_001);
+    await vi.advanceTimersByTimeAsync(1_001);
+    expect((await autopilot.getStatus()).state).toBe('error');
+    tickTime = new Date(now.getTime() + 2_002);
+    await vi.advanceTimersByTimeAsync(1_001);
+    expect((await autopilot.getStatus()).state).toBe('running');
+  });
+
+  it('keeps scanning but pauses new drafting for one hour after an API bid-quota rejection', async () => {
+    repository = await WorkspaceRepository.open();
+    await repository.savePolicy({ ...(await repository.getPolicy()), state: 'active', simulationOnly: false, allowedActions: ['bid.submit'], specializations: ['Python'], allowUnknownDeadline: true });
+    await repository.appendAudit({ type: 'marketplace.production.submit_bid', resourceId: 'previous-project', status: 'failed', reason: 'HTTP 400: BID_LIMIT_EXCEEDED: You have used all of your bids.', policyVersion: 1, payloadHash: null, createdAt: now.toISOString() });
+    let cycleTime = now;
+    const draftProposal = vi.fn(async () => ({ proposal: 'I can build and document your Python API for USD 100 in 14 days.', proposedPrice: 100, durationDays: 14, confidence: 0.9, evidence: [], assumptions: [] }));
+    const readProjects = vi.fn(async () => ({ projects: [project], skipped: 0 }));
+    const submitBid = vi.fn(async () => ({ statusCode: 200, resultId: 'quota-recovered' }));
+    autopilot = new FreelancerAutopilot({ repository, now: () => cycleTime, readProfile: async () => profile, readProjects, draftProposal, submitBid });
+    await autopilot.start();
+    expect(readProjects).toHaveBeenCalled();
+    expect(draftProposal).not.toHaveBeenCalled();
+    expect(submitBid).not.toHaveBeenCalled();
+    expect((await autopilot.getStatus()).marketplaceNotice).toMatchObject({ quotaExhausted: true, retryAt: '2026-10-15T12:00:00.000Z' });
+    cycleTime = new Date(now.getTime() + 61 * 60_000);
+    await autopilot.runCycle();
+    expect(submitBid).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops a pending draft before any live claim when the server shuts down', async () => {
+    repository = await WorkspaceRepository.open();
+    const submitBid = vi.fn();
+    autopilot = new FreelancerAutopilot({ repository, now: () => now, readProfile: async () => profile, readProjects: async () => ({ projects: [project], skipped: 0 }), submitBid,
+      draftProposal: async () => { autopilot!.stop(); return { proposal: 'I will document and build your Python API for USD 100 in 14 days.', proposedPrice: 100, durationDays: 14, confidence: 0.9, evidence: [], assumptions: [] }; },
+    });
+    await autopilot.start();
+    expect(submitBid).not.toHaveBeenCalled();
+    expect(await repository.hasAudit('marketplace.production.submit_bid', project.id)).toBe(false);
   });
 });

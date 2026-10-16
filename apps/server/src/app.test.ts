@@ -35,6 +35,39 @@ async function configureAndActivatePolicy() {
 }
 
 describe('local API', () => {
+  it('saves flexible policy options, preserves pause, and rejects stale edits or invalid schedules', async () => {
+    const saved = await repository.getPolicy();
+    await repository.savePolicy({ ...saved, state: 'paused', simulationOnly: false });
+    const input = { ...saved, allowedActions: ['bid.submit'], keywords: ['React', ' react ', 'C#'], minimumConfidence: 0.2, activeHours: { start: 22, end: 6 }, activeDays: [1, 2], scanIntervalMinutes: 5, maxRiskScore: 0.8, requireSpecializationMatch: false, allowUnknownDeadline: true, validityDays: 90, expectedVersion: saved.version };
+    const updated = await app.inject({ method: 'PUT', url: '/api/policy', payload: input });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json()).toMatchObject({ state: 'paused', simulationOnly: false, keywords: ['react', 'C#'], scanIntervalMinutes: 5, activeDays: [1, 2], expiresAt: '2027-01-12T04:00:00.000Z' });
+    expect(updated.json()).not.toHaveProperty('expectedVersion');
+    expect((await app.inject({ method: 'PUT', url: '/api/policy', payload: input })).statusCode).toBe(409);
+    expect((await app.inject({ method: 'PUT', url: '/api/policy', payload: { ...input, timezone: 'Bad/Zone' } })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'PUT', url: '/api/policy', payload: { ...input, activeDays: [] } })).statusCode).toBe(400);
+    const presets = (await app.inject({ method: 'GET', url: '/api/policy/presets' })).json();
+    expect(presets.keywords).toContain('React');
+    expect(presets.keywords.length).toBeGreaterThan(150);
+  });
+
+  it('counts real bid usage by the policy day and week without counting failures', async () => {
+    for (const [status, at] of [['recorded', '2026-10-14T01:00:00Z'], ['recorded', '2026-10-12T01:00:00Z'], ['recorded', '2026-10-11T01:00:00Z'], ['failed', '2026-10-14T02:00:00Z']] as const) await repository.appendAudit({ type: 'marketplace.production.submit_bid', resourceId: at + status, status, createdAt: at, reason: 'test', policyVersion: 1, payloadHash: null });
+    expect(await repository.bidUsage(fixedNow, 'Asia/Jakarta')).toEqual({ today: 1, week: 2 });
+    const activity = (await app.inject({ method: 'GET', url: '/api/activity?type=marketplace.production.submit_bid&limit=3' })).json() as Array<{ type: string }>;
+    expect(activity).toHaveLength(3);
+    expect(activity.every((event) => event.type === 'marketplace.production.submit_bid')).toBe(true);
+  });
+
+  it('exposes the saved proposal and reports async LinkedIn sync completion', async () => {
+    expect((await app.inject({ method: 'GET', url: `/api/projects/${testOpportunity.id}/draft` })).json()).toEqual({ draft: null });
+    await app.close();
+    app = await createApp({ repository, syncLinkedIn: async () => ({ sourceId: 'linkedin:test', chunks: 3 }) });
+    const started = await app.inject({ method: 'POST', url: '/api/knowledge/sync', payload: { provider: 'linkedin' } });
+    expect(started.statusCode).toBe(202);
+    await vi.waitFor(async () => { expect((await app.inject({ method: 'GET', url: '/api/knowledge/sync-status' })).json().job).toMatchObject({ state: 'completed', completed: 1, chunks: 3 }); });
+    expect(started.json().job.provider).toBe('linkedin');
+  });
   it('rejects untrusted hosts while accepting localhost', async () => {
     const evil = await app.inject({ method: 'GET', url: '/api/health', headers: { host: 'evil.example:3001' } });
     const normal = await app.inject({ method: 'GET', url: '/api/health' });
@@ -320,6 +353,18 @@ describe('local API', () => {
     expect(callback.headers.location).toBe('http://localhost:5173/capabilities?linkedin=connected');
     expect(handleCallback).toHaveBeenCalledWith({ state: 'opaque', code: 'temporary' });
     await credentialApp.close();
+  });
+
+  it('summarizes past activity per local day for the agenda', async () => {
+    await repository.appendAudit({ type: 'marketplace.production.submit_bid', resourceId: 'freelancer:1', status: 'recorded', reason: 'Bid otomatis menghasilkan HTTP 200.', policyVersion: 1, payloadHash: null });
+    await repository.appendAudit({ type: 'autopilot.bid_skipped', resourceId: 'freelancer:2', status: 'blocked', reason: 'Dilewati.', policyVersion: 1, payloadHash: null });
+    const summary = (await app.inject({ method: 'GET', url: '/api/agenda/activity?days=2' })).json() as { days: Record<string, Record<string, number>> };
+    const today = Object.values(summary.days).reduce((total, day) => ({ bidSent: total.bidSent + (day.bidSent ?? 0), skipped: total.skipped + (day.skipped ?? 0) }), { bidSent: 0, skipped: 0 });
+    expect(today).toEqual({ bidSent: 1, skipped: 1 });
+    const day = Object.keys(summary.days)[0] as string;
+    const detail = (await app.inject({ method: 'GET', url: '/api/agenda/activity?date=' + day })).json() as { events: Array<{ type: string }> };
+    expect(detail.events.map((event) => event.type)).toEqual(['marketplace.production.submit_bid']);
+    expect((await app.inject({ method: 'GET', url: '/api/agenda/activity?date=bukan-tanggal' })).statusCode).toBe(400);
   });
 
   it('rejects untrusted browser origins and malformed policy updates', async () => {

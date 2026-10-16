@@ -4,7 +4,8 @@ import { Link, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 
 import { api, jsonRequest, type AuditEvent, type Autopilot, type BidDraft, type BusinessSyncStatus, type Capabilities, type ClientProject, type Inbox, type Insights, type Opportunity, type Policy, type Profile, type Work } from './api.js';
 import { deriveOfficeAgents, ROOM_LABELS, STATE_COLORS, STATE_LABELS, summarize, type AgentState } from './office-state.js';
 import { BOARDS, dayPhase, FLOOR, PODS, spotsFor, ZONES, type BoardId, type Spot } from './office-layout.js';
-import type { BoardContent, CameraCommand, OwnerMoveInput } from './VisualOffice.js';
+import type { BoardContent, CameraCommand } from './VisualOffice.js';
+import { bindOwnerKeyboard, createOwnerInput, type OwnerDirection, type OwnerInput } from './owner-input.js';
 
 const VisualOffice = lazy(() => import('./VisualOffice.js'));
 
@@ -13,13 +14,14 @@ const fields = ['Fullstack Engineer', 'Backend Engineer', 'Android Engineer', 'i
 
 function formatMoney(amount: number, currency: string) {
   try {
-    return new Intl.NumberFormat('id-ID', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amount);
+    return new Intl.NumberFormat('id-ID', { style: 'currency', currency, minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(amount);
   } catch {
     return `${currency} ${amount.toLocaleString('id-ID')}`;
   }
 }
 
 function formatDate(value: string) {
+  if (!Number.isFinite(Date.parse(value))) return 'Tidak tersedia';
   return new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 }
 
@@ -29,7 +31,7 @@ type CalendarEvent = {
   dateKey: string;
   title: string;
   detail: string;
-  kind: 'operation' | 'deadline' | 'payment' | 'policy';
+  kind: 'operation' | 'deadline' | 'payment' | 'policy' | 'activity';
   time: string | null;
   href: string | null;
 };
@@ -109,10 +111,10 @@ function calendarMonthCells(year: number, month: number) {
 
 function StateLabel({ state }: { state: string }) {
   const labels: Record<string, string> = {
-    active: 'Aktif', running: 'Berjalan', starting: 'Menyiapkan', connected: 'Terhubung', supported: 'Didukung API', unknown: 'Belum diverifikasi', unverified: 'Belum diuji', invalid: 'Token tidak valid', unavailable: 'Tidak dapat diperiksa', expired: 'Kedaluwarsa', paused: 'Dijeda', draft: 'Belum aktif', recorded: 'Tercatat', blocked: 'Dilewati', failed: 'Gagal',
+    active: 'Aktif', running: 'Berjalan', starting: 'Menyiapkan', connected: 'Terhubung', supported: 'Didukung API', unknown: 'Tidak diketahui', unverified: 'Belum diuji', invalid: 'Token tidak valid', unavailable: 'Tidak dapat diperiksa', expired: 'Kedaluwarsa', paused: 'Dijeda', draft: 'Belum aktif', recorded: 'Tercatat', blocked: 'Dilewati', failed: 'Gagal',
     new: 'Baru', scored: 'Dinilai', draft_ready: 'Draf siap', policy_check: 'Pemeriksaan kebijakan', submitted: 'Terkirim',
     in_conversation: 'Percakapan', won: 'Berhasil', lost: 'Tidak lanjut', skipped: 'Dilewati',
-    reconciliation_required: 'Perlu rekonsiliasi', error: 'Kesalahan',
+    reconciliation_required: 'Perlu rekonsiliasi', error: 'Kesalahan', allowed: 'Diizinkan',
   };
   return <span className={`state-label state-${state}`}>{labels[state] ?? state}</span>;
 }
@@ -183,6 +185,7 @@ function OverviewPage() {
   const projects = useQuery({ queryKey: ['projects', 'overview'], queryFn: () => api<Opportunity[]>('/projects') });
   const pipeline = useQuery({ queryKey: ['pipeline'], queryFn: () => api<Array<Opportunity & { latestDraft: BidDraft | null }>>('/pipeline') });
   const insights = useQuery({ queryKey: ['insights', 'bids'], queryFn: () => api<Insights>('/insights/bids'), refetchInterval: 60_000 });
+  const operation = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 15_000 });
 
   if (query.isPending || projects.isPending) return <LoadingPanel />;
   if (query.isError || projects.isError) return <ErrorNotice message="Ringkasan belum dapat dimuat." onRetry={() => { queryClient.invalidateQueries({ queryKey: ['dashboard'] }); queryClient.invalidateQueries({ queryKey: ['projects'] }); }} />;
@@ -190,6 +193,7 @@ function OverviewPage() {
 
   return <>
     <PageIntro eyebrow={`${new Intl.DateTimeFormat('id-ID', { dateStyle: 'long' }).format(new Date())} / ruang operasi`} title="Kerja yang baik dimulai dari konteks yang jelas." description="Autopilot memantau peluang Freelancer, menyusun penawaran, dan menjalankan batas operasi tersimpan." action={<Link to="/opportunities" className="button button-primary">Buka antrean peluang</Link>} />
+    <OperationStatus data={operation.isError ? undefined : operation.data} unavailable={operation.isError} />
     <section className="metrics-row" aria-label="Ringkasan ruang kerja">
       <Metric label="Peluang terbuka" value={data.counts.openProjects} note="Dipindai otomatis" tone="primary" to="/opportunities" />
       <Metric label="Bid terkirim" value={data.counts.submittedBids} note="Dikonfirmasi Freelancer" to="/pipeline" />
@@ -198,7 +202,7 @@ function OverviewPage() {
     </section>
     {insights.isPending && <LoadingPanel label="Memuat hasil bid..." />}
     {insights.isError && <ErrorNotice message="Hasil bid belum dapat dimuat." onRetry={() => insights.refetch()} />}
-    {insights.data && <section className="activity-preview" aria-labelledby="bid-results-title">
+    {!insights.isError && insights.data && <section className="activity-preview" aria-labelledby="bid-results-title">
       <div className="section-heading"><div><p className="eyebrow">Hasil penawaran</p><h2 id="bid-results-title">Hasil bid</h2></div><Link to="/inbox" className="text-link">Kotak masuk</Link></div>
       <div className="metrics-row">
         <Metric label="Menang" value={insights.data.outcomes.won} note={`dari ${insights.data.outcomes.submitted} bid terkirim`} tone="primary" to="/pipeline" />
@@ -208,7 +212,7 @@ function OverviewPage() {
       </div>
       <p className="form-help">{insights.data.lastCheck.ok === false ? `Pengecekan status bid gagal: ${insights.data.lastCheck.error ?? 'tidak diketahui'}` : insights.data.lastCheck.at ? `Status bid dicek dari Freelancer ${formatDate(insights.data.lastCheck.at)}.` : 'Status bid belum pernah dicek.'}</p>
     </section>}
-    {insights.data && <section className="activity-preview" aria-labelledby="skip-reasons-title">
+    {!insights.isError && insights.data && <section className="activity-preview" aria-labelledby="skip-reasons-title">
       <div className="section-heading"><div><p className="eyebrow">{insights.data.skips.total} keputusan · {insights.data.skips.recent7d} dalam 7 hari</p><h2 id="skip-reasons-title">Kenapa peluang dilewati</h2></div><Link to="/policy" className="text-link">Tinjau kebijakan</Link></div>
       {insights.data.skips.reasons.length ? <ul className="reason-list">
         {insights.data.skips.reasons.slice(0, 5).map(({ reason, total, recent }) => <li className="reason-item" key={reason}>
@@ -218,7 +222,7 @@ function OverviewPage() {
         </li>)}
       </ul> : <p className="form-help">Belum ada peluang yang dilewati.</p>}
     </section>}
-    {pipeline.data && (
+    {!pipeline.isError && pipeline.data && (
       <nav className="pipeline-overview-bar" aria-label="Ringkasan status pipeline">
         <span className="pipeline-overview-title">Distribusi pipeline</span>
         {PIPELINE_STAGES.map(([key, label]) => <Link className="pipeline-chip" to="/pipeline" key={key}><span>{label}</span><strong>{pipeline.data.filter((p) => p.pipelineStatus === key).length}</strong></Link>)}
@@ -255,7 +259,9 @@ function OverviewPage() {
 function OpportunitiesPage() {
   const location = useLocation();
   const [search, setSearch] = useState('');
-  const query = useQuery({ queryKey: ['projects', 'opportunities', search], queryFn: () => api<Opportunity[]>('/projects?search=' + encodeURIComponent(search)), refetchInterval: 30_000 });
+  const [statusFilter, setStatusFilter] = useState('open');
+  const [shown, setShown] = useState(20);
+  const query = useQuery({ queryKey: ['projects', 'opportunities'], queryFn: () => api<Opportunity[]>('/projects'), refetchInterval: 30_000 });
   const autopilot = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 30_000 });
   useEffect(() => {
     const projectId = new URLSearchParams(location.search).get('project');
@@ -265,27 +271,30 @@ function OpportunitiesPage() {
   }, [location.search, query.data]);
   if (query.isPending) return <LoadingPanel />;
   if (query.isError) return <ErrorNotice message="Peluang belum dapat dimuat." onRetry={() => query.refetch()} />;
-  const status = autopilot.data;
+  const status = autopilot.isError ? undefined : autopilot.data;
   const selectedId = new URLSearchParams(location.search).get('project');
   if (selectedId) return <OpportunityDetail project={query.data.find((item) => item.id === selectedId)} />;
+  const searchText = search.trim().toLowerCase();
+  const visible = query.data.filter((project) => (statusFilter === 'all' || project.status === statusFilter) && `${project.title} ${project.description} ${project.clientName} ${project.skills.join(' ')}`.toLowerCase().includes(searchText));
   return <>
     <PageIntro eyebrow="Antrean peluang" title="Peluang dipindai otomatis." description="Autopilot membaca pencarian yang cocok dengan profil Freelancer dan membuat bid tanpa form per proyek. Daftar ini diperbarui berkala." />
     <section className="filter-bar" aria-label="Filter peluang tersimpan">
-      <label className="search-field"><span>Filter daftar lokal</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Judul atau teknologi" /></label>
+      <label className="search-field"><span>Filter daftar lokal</span><input type="search" value={search} onChange={(event) => { setSearch(event.target.value); setShown(20); }} placeholder="Judul atau teknologi" /></label>
+      <label className="form-field"><span>Status peluang</span><select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setShown(20); }}><option value="open">Terbuka</option><option value="closed">Ditutup</option><option value="expired">Kedaluwarsa</option><option value="all">Semua status</option></select></label>
       <div className="filter-note"><strong>{query.data.length}</strong> peluang tersimpan <span>{status?.lastRunAt ? 'Siklus terakhir ' + formatDate(status.lastRunAt) : 'Autopilot sedang menyiapkan siklus'}</span></div>
     </section>
     <section className="sync-panel form-card" aria-label="Status pemindaian otomatis Freelancer">
-      <div className="section-heading"><div><p className="eyebrow">Freelancer.com</p><h2>Pemindaian otomatis</h2></div><StateLabel state={status?.state ?? 'starting'} /></div>
-      <p className="form-help">{status?.lastMessage ?? 'Menghubungkan profil Freelancer dan memulai siklus.'}</p>
+      <div className="section-heading"><div><p className="eyebrow">Freelancer.com</p><h2>Pemindaian otomatis</h2></div><StateLabel state={status?.state ?? 'unknown'} /></div>
+      <p className="form-help">{autopilot.isError ? 'Status pemindaian tidak tersedia. Coba perbarui data.' : status?.lastMessage ?? 'Memuat status pemindaian dari server.'}</p>
       {status?.specializations.length ? <div className="tag-row">{status.specializations.map((skill) => <span className="skill-tag" key={skill}>{skill}</span>)}</div> : null}
-      <div className="autopilot-metrics"><span>{status?.lastImported ?? 0} proyek terakhir dipindai</span><span>{status?.lastSubmitted ?? 0} bid dikirim pada siklus terakhir</span><span>{status?.nextRunAt ? 'Pindai lagi ' + formatDate(status.nextRunAt) : 'Jadwal berikutnya belum tersedia'}</span></div>
+      <div className="autopilot-metrics"><span>{status?.lastImported ?? 'Tidak diketahui'} proyek terakhir dipindai</span><span>{status?.lastSubmitted ?? 'Tidak diketahui'} bid dikirim pada siklus terakhir</span><span>{status?.nextRunAt ? 'Pindai lagi ' + formatDate(status.nextRunAt) : 'Jadwal berikutnya belum tersedia'}</span></div>
     </section>
     <div className="opportunity-list">
-      {query.data.length === 0 && <div className="empty-state"><h3>Belum ada peluang tersimpan</h3><p>Autopilot akan mengisi daftar ini pada pemindaian berikutnya sesuai keahlian di profil Freelancer.</p></div>}
-      {query.data.map((project) => (
+      {visible.length === 0 && <div className="empty-state"><h3>Tidak ada peluang sesuai filter</h3><p>Ubah pencarian atau status peluang. Daftar diperbarui pada siklus berikutnya.</p></div>}
+      {visible.slice(0, shown).map((project) => (
         <article className="opportunity-row" id={'opportunity-' + project.id} key={project.id}>
           <div className="opportunity-topline"><span className="eyebrow">{project.clientName} / {project.source === 'freelancer' ? 'FREELANCER.COM' : 'FIXTURE PENGUJIAN'}</span><span className="score-mark"><strong>{project.score}</strong><small>skor kecocokan</small></span></div>
-          <h2>{project.title}</h2>
+          <h2><Link to={`/opportunities?project=${encodeURIComponent(project.id)}`}>{project.title}</Link></h2>
           <p className="opportunity-description">{project.description}</p>
           <div className="tag-row">{project.skills.map((skill) => <span className="skill-tag" key={skill}>{skill}</span>)}</div>
           <div className="factor-list" aria-label="Alasan skor">{project.factors.map((factor) => <span key={factor.key}><small>{factor.label}</small><strong>{factor.value}</strong></span>)}</div>
@@ -293,6 +302,7 @@ function OpportunitiesPage() {
         </article>
       ))}
     </div>
+    {visible.length > shown && <button className="button button-secondary" type="button" onClick={() => setShown(shown + 20)}>Tampilkan {Math.min(20, visible.length - shown)} peluang berikutnya ({visible.length - shown} tersisa)</button>}
   </>;
 }
 
@@ -320,28 +330,59 @@ function OpportunityDetail({ project }: { project: Opportunity | undefined }) {
     <section><h3>Deskripsi</h3><p className="opp-description">{project.description}</p></section>
     <section><h3>Skill dibutuhkan</h3><div className="tag-row">{project.skills.map((skill) => <span className="skill-tag" key={skill}>{skill}</span>)}</div></section>
     <section><h3>Alasan skor</h3><ul className="opp-factors">{project.factors.map((factor) => <li key={factor.key}><span>{factor.label}</span><strong>{factor.value}</strong><em>{factor.points > 0 ? '+' : ''}{factor.points}</em></li>)}</ul></section>
+    <ProposalPanel key={project.id} project={project} />
   </article>;
 }
 
+function ProposalPanel({ project }: { project: Opportunity }) {
+  const client = useQueryClient();
+  const query = useQuery({ queryKey: ['draft', project.id], queryFn: () => api<{ draft: BidDraft | null }>(`/projects/${encodeURIComponent(project.id)}/draft`) });
+  const [text, setText] = useState<string | null>(null);
+  const [price, setPrice] = useState<number | null>(null);
+  const [notice, setNotice] = useState('');
+  const refresh = () => { client.invalidateQueries({ queryKey: ['draft', project.id] }); client.invalidateQueries({ queryKey: ['pipeline'] }); client.invalidateQueries({ queryKey: ['projects'] }); };
+  const create = useMutation({ mutationFn: () => api<BidDraft>(`/projects/${encodeURIComponent(project.id)}/draft`, jsonRequest('POST')), onSuccess: (draft) => { client.setQueryData(['draft', project.id], { draft }); setText(null); setPrice(null); setNotice('Draf tersimpan; tidak ada bid yang dikirim.'); refresh(); } });
+  const draft = query.isError ? null : query.data?.draft;
+  const save = useMutation({ mutationFn: () => api<BidDraft>(`/drafts/${encodeURIComponent(draft!.id)}`, jsonRequest('PUT', { proposal: text ?? draft!.proposal, proposedPrice: price ?? draft!.proposedPrice })), onSuccess: (draft) => { client.setQueryData(['draft', project.id], { draft }); setText(null); setPrice(null); setNotice('Perubahan draf tersimpan.'); refresh(); } });
+  const locked = ['submitted', 'in_conversation', 'won', 'lost', 'reconciliation_required'].includes(project.pipelineStatus);
+  return <section className="form-card proposal-panel"><h3>Proposal tersimpan</h3>
+    {notice && <p className="notice notice-success" role="status">{notice}</p>}
+    {(create.isError || save.isError) && <ErrorNotice message={(create.error ?? save.error)?.message ?? 'Draf tidak dapat diproses.'} />}
+    {query.isPending ? <LoadingPanel label="Membaca proposal..." /> : query.isError ? <ErrorNotice message="Proposal tidak dapat dimuat." onRetry={() => query.refetch()} /> : draft ? <>
+      <p className="form-help">Dibuat {formatDate(draft.createdAt)}, durasi {draft.durationDays} hari. {locked ? 'Proposal ini terkait bid yang sudah diproses.' : 'Draf lokal tidak dikirim otomatis oleh autopilot.'}</p>
+      <form className="stack-form" onSubmit={(event) => { event.preventDefault(); save.mutate(); }}><label className="form-field"><span>Isi proposal</span><textarea rows={10} minLength={40} maxLength={4000} required readOnly={locked} value={text ?? draft.proposal} onChange={(event) => setText(event.target.value)} /></label><label className="form-field"><span>Harga ({draft.currency})</span><input type="number" required min="0.01" step="any" readOnly={locked} value={price ?? draft.proposedPrice} onChange={(event) => setPrice(Number(event.target.value))} /></label>{!locked && <button type="submit" className="button button-primary" disabled={save.isPending || (text === null && price === null)}>{save.isPending ? 'Menyimpan…' : 'Simpan perubahan draf'}</button>}</form>
+      <details><summary>Bukti dan asumsi</summary><ul>{draft.evidence.map((item, index) => <li key={index}>{item.label}: {item.source}</li>)}{draft.assumptions.map((item, index) => <li key={`assumption-${index}`}>{item}</li>)}</ul></details>
+    </> : <><p>Belum ada proposal tersimpan. Membuat draf manual akan membuat autopilot melewati proyek ini.</p><button className="button button-secondary" type="button" disabled={create.isPending || locked || project.status !== 'open'} onClick={() => create.mutate()}>{create.isPending ? 'Hermes sedang menulis…' : 'Buat draf manual dengan Hermes'}</button></>}
+  </section>;
+}
+
 function PipelinePage() {
+  const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
+  const [shown, setShown] = useState(30);
   const query = useQuery({ queryKey: ['pipeline'], queryFn: () => api<Array<Opportunity & { latestDraft: BidDraft | null }>>('/pipeline') });
   if (query.isPending) return <LoadingPanel />;
   if (query.isError) return <ErrorNotice message="Pipeline belum dapat dimuat." onRetry={() => query.refetch()} />;
   const projects = query.data;
+  const visible = projects.filter((project) => (filter === 'all' || project.pipelineStatus === filter) && `${project.title} ${project.clientName}`.toLowerCase().includes(search.toLowerCase()));
   return <>
     <PageIntro eyebrow="Pipeline bid" title="Status dari respons marketplace." description="Bid live masuk ke status terkirim hanya setelah Freelancer mengembalikan HTTP 200. Draft dan alasan kebijakan tersimpan di sini." />
     <div className="pipeline-summary"><strong>{projects.filter((project) => project.latestDraft).length}</strong><span>draf lokal</span><span className="pipeline-divider" /><strong>{projects.filter((project) => project.pipelineStatus === 'submitted').length}</strong><span>terkonfirmasi dari marketplace</span></div>
-    <div className="pipeline-list">{projects.map((project) => (
+    <div className="form-grid"><label className="form-field"><span>Cari judul atau klien</span><input type="search" value={search} onChange={(event) => { setSearch(event.target.value); setShown(30); }} /></label><label className="form-field"><span>Tahap pipeline</span><select value={filter} onChange={(event) => { setFilter(event.target.value); setShown(30); }}><option value="all">Semua tahap</option>{[...new Set(projects.map((project) => project.pipelineStatus))].map((stage) => <option key={stage} value={stage}>{PIPELINE_STAGES.find(([key]) => key === stage)?.[1] ?? stage}</option>)}</select></label></div>
+    <p className="form-help">{visible.length} proyek sesuai filter</p>{visible.length === 0 && <div className="empty-state"><h3>Tidak ada proyek sesuai filter</h3><p>Ubah pencarian atau tahap pipeline.</p></div>}
+    <div className="pipeline-list">{visible.slice(0, shown).map((project) => (
       <article className="pipeline-row" key={project.id}>
         <div><p className="eyebrow">{project.clientName}</p><h2>{project.title}</h2><p>{project.latestDraft ? project.latestDraft.proposal.slice(0, 180) : 'Belum ada proposal. Siapkan draf dari antrean peluang.'}</p></div>
         <div className="pipeline-state"><StateLabel state={project.pipelineStatus} /><strong>{project.latestDraft ? formatMoney(project.latestDraft.proposedPrice, project.currency) : 'Belum ada harga'}</strong></div>
-        <Link to={project.latestDraft ? `/opportunities?project=${encodeURIComponent(project.id)}` : '/opportunities'} className="button button-secondary">{project.latestDraft ? 'Buka draf' : 'Lihat peluang'}</Link>
+        <Link to={`/opportunities?project=${encodeURIComponent(project.id)}`} className="button button-secondary">{project.latestDraft ? 'Buka draf' : 'Lihat peluang'}</Link>
       </article>
     ))}</div>
+    {visible.length > shown && <button className="button button-secondary" type="button" onClick={() => setShown(shown + 30)}>Tampilkan 30 proyek berikutnya</button>}
   </>;
 }
 
 function AgentsPage() {
+  const knowledgeSync = useQuery({ queryKey: ['knowledge-sync'], queryFn: () => api<{ job: { state: string; provider: string; current: string | null } | null }>('/knowledge/sync-status'), refetchInterval: 3_000 });
   const dashboard = useQuery({ queryKey: ['dashboard'], queryFn: () => api<{
     policy: { state: Policy['state']; version: number };
     counts: { openProjects: number; drafts: number; policySkips: number; knowledgeSources: number };
@@ -359,7 +400,7 @@ function AgentsPage() {
 
   const inboxWaiting = inbox.isError ? undefined : inbox.data?.needsReply.length;
   const derived = deriveOfficeAgents(autopilot.isError ? undefined : autopilot.data, dashboard.data.activity, {
-    sync: sync.isError ? undefined : sync.data, inboxWaiting, dueSoon: work.isError ? undefined : work.data?.dueSoon, hermes: capabilities.data.hermes,
+    sync: sync.isError ? undefined : sync.data, inboxWaiting, dueSoon: work.isError ? undefined : work.data?.dueSoon, hermes: capabilities.data.hermes, knowledge: knowledgeSync.isError ? undefined : knowledgeSync.data?.job,
   });
   const agents = [
     {
@@ -394,7 +435,7 @@ function AgentsPage() {
       name: 'Bid Strategist',
       dept: 'Sales & Bids',
       role: 'Perumus Proposal & Harga',
-      task: 'Menyusun draf proposal dengan Hermes AI berbasis fakta portofolio terverifikasi, merekomendasikan harga dan durasi.',
+      task: 'Meninjau hasil bid dan mendampingi siklus proposal. Harga serta durasi bid otomatis ditetapkan secara deterministik oleh kebijakan.',
       boundary: 'Menghasilkan draf terstruktur; setiap eksekusi wajib lolos persetujuan deterministik policy engine.',
       metric: `${dashboard.data.counts.drafts} draf proposal lokal disiapkan`,
     },
@@ -404,7 +445,7 @@ function AgentsPage() {
       dept: 'Profile Studio',
       role: 'Kurator Profil & Bukti',
       task: 'Memelihara fakta profil, ringkasan spesialisasi, dan mengusulkan pembaruan berbasis bukti nyata repositori/portofolio.',
-      boundary: 'Hanya menghasilkan diff berversi; tanpa modifikasi langsung pada akun platform eksternal.',
+      boundary: 'Fakta diperbarui saat Anda membuka dan menyimpan kartu Profil. Tidak ada proses penyuntingan profil otomatis.',
       metric: `${profile.data.facts.length} fakta profil tersimpan`,
     },
     {
@@ -440,7 +481,7 @@ function AgentsPage() {
       dept: 'Compliance & Audit',
       role: 'Auditor Kebijakan & Keamanan',
       task: 'Memverifikasi setiap draf terhadap batas harga, kata kunci dilarang, dan ketersediaan bukti sumber.',
-      boundary: 'Read-only deterministik; otomatis memblokir draf tanpa bukti sumber yang sah.',
+      boundary: 'Pemeriksaan deterministik harga, jadwal, risiko, kecocokan, dan kuota. Klaim proposal mengikuti fakta profil dan Knowledge Hub.',
       metric: `${dashboard.data.counts.policySkips} keputusan skip tercatat di audit`,
     },
     {
@@ -458,8 +499,10 @@ function AgentsPage() {
     <PageIntro
       eyebrow="Organisasi virtual"
       title={`${agents.length} peran spesialis, satu kendali pemilik.`}
-      description="Setiap karyawan AI memiliki batas akses yang terisolasi dan bekerja di bawah kebijakan hands-off yang telah Anda setujui."
+      description="Peran virtual mencerminkan proses aplikasi. Autopilot, sinkronisasi bisnis, dan Hermes memberi sinyal kerja nyata; peran lainnya bekerja saat fiturnya dipanggil."
     />
+    <OperationStatus data={autopilot.isError ? undefined : autopilot.data} unavailable={autopilot.isError} />
+    <p className="notice">Bekerja berarti ada proses nyata yang sedang berjalan. Idle berarti siap atau bekerja saat dipanggil. QA Engineer belum memiliki proses runtime.</p>
     <div className="agent-grid">
       {agents.map((agent) => (
         <article className="agent-card" key={agent.id}>
@@ -479,6 +522,7 @@ function AgentsPage() {
           </div>
           <div className="agent-foot">
             <span>{agent.metric}</span>
+            <Link className="button button-secondary" to={agent.id === 'knowledge-curator' ? '/knowledge' : agent.id === 'profile-editor' ? '/profile' : agent.id === 'client-relations' ? '/inbox' : agent.id === 'compliance-auditor' ? '/policy' : agent.id === 'operations-analyst' ? '/work' : agent.id === 'market-scout' ? '/opportunities' : agent.id === 'bid-strategist' || agent.id === 'lead-agent' ? '/pipeline' : agent.id === 'qa-engineer' ? '/capabilities' : '/overview'}>Buka ruang kerja</Link>
           </div>
         </article>
       ))}
@@ -596,11 +640,23 @@ function TaskBoardPage() {
   </>;
 }
 
+type AgendaSummary = { timezone: string; days: Record<string, Partial<Record<'bidSent' | 'bidFailed' | 'cycles' | 'skipped' | 'policy' | 'drafts' | 'knowledge' | 'sync' | 'other', number>>> };
+
+const AGENDA_LABELS: Array<[keyof AgendaSummary['days'][string], (count: number) => string]> = [
+  ['bidSent', (count) => `${count} bid terkirim ke Freelancer`], ['bidFailed', (count) => `${count} percobaan bid gagal atau hasil belum pasti`],
+  ['drafts', (count) => `${count} draf proposal dibuat atau diubah`], ['cycles', (count) => `${count} siklus autopilot selesai`],
+  ['skipped', (count) => `${count} peluang dilewati kebijakan`], ['policy', (count) => `${count} perubahan kebijakan`],
+  ['knowledge', (count) => `${count} pembaruan Knowledge Hub`], ['sync', (count) => `${count} sinkronisasi marketplace dan bisnis`],
+];
+
 function OperationsCalendar({ policy, work, workPending, workError }: { policy: Policy; work: Work | undefined; workPending: boolean; workError: boolean }) {
   const autopilotQuery = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 30_000 });
   const [view, setView] = useState<CalendarView>('month');
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
+  const [logLimit, setLogLimit] = useState(30);
+  const agendaQuery = useQuery({ queryKey: ['agenda', 'summary'], queryFn: () => api<AgendaSummary>('/agenda/activity?days=180'), refetchInterval: 60_000 });
   const autopilot = autopilotQuery.isError ? undefined : autopilotQuery.data;
+  const agenda = agendaQuery.isError ? undefined : agendaQuery.data;
   const events = useMemo<CalendarEvent[]>(() => {
     const result: CalendarEvent[] = [];
     const expiryKey = dateKeyInTimezone(policy.expiresAt, policy.timezone);
@@ -633,8 +689,14 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
       if (dateKey) result.push({ id: `payment-${payment.id}`, dateKey, title: 'Pembayaran diharapkan', detail: formatMoney(payment.amount, payment.currency), kind: 'payment', time: null, href: '/work' });
     }
 
+    for (const [dateKey, counts] of Object.entries(agenda?.days ?? {})) {
+      for (const [category, label] of AGENDA_LABELS) {
+        const count = counts[category];
+        if (count) result.push({ id: `activity-${dateKey}-${category}`, dateKey, title: label(count), detail: 'Tercatat di log audit', kind: 'activity', time: null, href: '/activity' });
+      }
+    }
     return result.sort((left, right) => left.dateKey.localeCompare(right.dateKey) || (left.time ?? '99:99').localeCompare(right.time ?? '99:99'));
-  }, [policy, work, autopilot]);
+  }, [policy, work, autopilot, agenda]);
   const eventsByDate = useMemo(() => {
     const grouped = new Map<string, CalendarEvent[]>();
     for (const event of events) grouped.set(event.dateKey, [...(grouped.get(event.dateKey) ?? []), event]);
@@ -647,6 +709,7 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
   const { year, month } = dateKeyParts(currentDateKey);
   const monthCells = calendarMonthCells(year, month);
   const currentEvents = eventsByDate.get(currentDateKey) ?? [];
+  const dayLog = useQuery({ queryKey: ['agenda', 'day', currentDateKey], enabled: view === 'day', queryFn: () => api<{ date: string; events: AuditEvent[] }>('/agenda/activity?date=' + currentDateKey) });
   const heading = view === 'year'
     ? String(year)
     : view === 'month'
@@ -669,6 +732,7 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
       </div>
       <button className="calendar-today-button" type="button" onClick={() => { setSelectedDateKey(todayKey); setView('day'); }}>Hari ini</button>
     </div>
+    <label className="form-field calendar-date-jump"><span>Lompat ke tanggal</span><input type="date" value={currentDateKey} min="1900-01-01" max="9999-12-31" onChange={(event) => { if (event.target.value) { setSelectedDateKey(event.target.value); setView('day'); setLogLimit(30); } }} /></label>
 
     {view === 'month' && <div className="calendar-month-view">
       <div className="calendar-weekdays" aria-hidden="true">{calendarWeekdays.map((weekday) => <span key={weekday}>{weekday}</span>)}</div>
@@ -689,11 +753,18 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
     {view === 'day' && <div className="calendar-day-view">
       <div className="calendar-day-summary"><strong>{calendarDateLabel(currentDateKey, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</strong><span>{currentEvents.length} agenda tercatat</span></div>
       {currentEvents.length === 0
-        ? <div className="calendar-empty"><strong>Belum ada agenda pada tanggal ini.</strong><span>Jadwal berasal dari status autopilot, tenggat proyek, pembayaran, dan masa berlaku kebijakan.</span></div>
+        ? <div className="calendar-empty"><strong>Belum ada agenda pada tanggal ini.</strong><span>Agenda berasal dari status autopilot, tenggat proyek, pembayaran, masa berlaku kebijakan, dan riwayat aktivitas 180 hari terakhir.</span></div>
         : <ol className="calendar-event-list">{currentEvents.map((event) => <li key={event.id} className={`calendar-event calendar-event-${event.kind}`}>
-          <span className="calendar-event-date">{event.time ?? (event.kind === 'deadline' ? 'Tenggat' : event.kind === 'payment' ? 'Pembayaran' : event.kind === 'policy' ? 'Kebijakan' : 'Operasi')}</span>
+          <span className="calendar-event-date">{event.time ?? (event.kind === 'deadline' ? 'Tenggat' : event.kind === 'payment' ? 'Pembayaran' : event.kind === 'policy' ? 'Kebijakan' : event.kind === 'activity' ? 'Aktivitas' : 'Operasi')}</span>
           <div><strong>{event.title}</strong><span>{event.detail}</span></div>{event.href && <Link to={event.href} className="calendar-event-link">Buka detail</Link>}
         </li>)}</ol>}
+      <div className="calendar-day-log">
+        <h4>Rincian aktivitas hari ini</h4>
+        {dayLog.isPending ? <p className="form-help" role="status">Memuat log aktivitas...</p>
+          : dayLog.isError ? <p className="form-help">Log aktivitas hari ini tidak dapat dimuat.</p>
+            : <><ActivityRows events={dayLog.data.events.slice(0, logLimit)} />{dayLog.data.events.length > logLimit && <button type="button" className="button button-secondary" onClick={() => setLogLimit(logLimit + 50)}>Tampilkan {Math.min(50, dayLog.data.events.length - logLimit)} catatan lagi ({dayLog.data.events.length - logLimit} tersisa)</button>}</>}
+        {(agenda?.days[currentDateKey]?.skipped ?? 0) > 0 && <p className="form-help">{agenda?.days[currentDateKey]?.skipped} keputusan "peluang dilewati" tidak dirinci satu per satu; alasannya ada di kartu Ringkasan.</p>}
+      </div>
     </div>}
 
     {view === 'year' && <div className="calendar-year-grid">
@@ -710,6 +781,7 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
     <div className="calendar-source-state" aria-live="polite">
       {autopilotQuery.isPending && <span role="status">Memuat jadwal siklus server...</span>}
       {autopilotQuery.isError && <span>Jadwal siklus server tidak tersedia; data lama disembunyikan.</span>}
+      {agendaQuery.isError && <span>Riwayat aktivitas tidak tersedia; data lama disembunyikan.</span>}
       {workPending && <span role="status">Memuat tenggat proyek dan pembayaran...</span>}
       {workError && <span>Tenggat proyek dan pembayaran tidak tersedia; data lama disembunyikan.</span>}
       <span>Penutupan listing Freelancer menggunakan hitungan dari sinkronisasi terakhir, bukan tanggal pasti.</span>
@@ -718,6 +790,8 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
 }
 
 function CalendarPage() {
+  const clockNow = useClock(30_000);
+  const operation = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 15_000 });
   const policyQuery = useQuery({ queryKey: ['policy'], queryFn: () => api<Policy>('/policy') });
   const projectsQuery = useQuery({ queryKey: ['projects', 'calendar'], queryFn: () => api<Opportunity[]>('/projects') });
   const dashboardQuery = useQuery({ queryKey: ['dashboard'], queryFn: () => api<{ counts: { openProjects: number; drafts: number; policySkips: number }; bidUsage: { today: number; week: number } }>('/dashboard') });
@@ -730,10 +804,9 @@ function CalendarPage() {
   const projects = projectsQuery.data;
   const dashboard = dashboardQuery.data;
 
-  const now = new Date();
-  let currentHour: number;
-  try { currentHour = Number(new Intl.DateTimeFormat('en-US', { timeZone: policy.timezone, hour: '2-digit', hourCycle: 'h23' }).format(now)); } catch { currentHour = now.getHours(); }
-  const isWithinHours = currentHour >= policy.activeHours.start && currentHour < policy.activeHours.end;
+  const now = clockNow;
+  const operationData = operation.isError ? undefined : operation.data;
+  const isWithinHours = operationData?.state === 'running' && !operationData.waitingReason;
   const deadlineProjects = projects.filter((p) => p.deadlineDays !== null).sort((a, b) => (a.deadlineDays ?? 0) - (b.deadlineDays ?? 0));
   const expiryDate = new Date(policy.expiresAt);
   const daysUntilExpiry = Math.max(0, Math.ceil((expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
@@ -752,14 +825,10 @@ function CalendarPage() {
         <h3>Jam Kerja & Status Operasi</h3>
         <div className={`hours-status-badge ${isWithinHours && policy.state === 'active' ? 'hours-active' : 'hours-inactive'}`}>
           <span className="mode-indicator" style={{ background: isWithinHours && policy.state === 'active' ? 'var(--success)' : 'var(--danger)' }} />
-          {policy.state === 'paused'
-            ? 'Kebijakan Dijeda (Kill Switch Aktif)'
-            : isWithinHours
-            ? `Dalam Jam Operasi Aktif (${policy.activeHours.start}:00 - ${policy.activeHours.end}:00)`
-            : `Di Luar Jam Operasi (${policy.activeHours.start}:00 - ${policy.activeHours.end}:00)`}
+          {!operationData ? 'Status operasi tidak tersedia' : operationData.waitingReason ?? (isWithinHours ? `Operasi aktif (${policy.activeHours.start}:00 - ${policy.activeHours.end}:00)` : 'Operasi memerlukan perhatian')}
         </div>
         <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 14px' }}>
-          Zona waktu kerja: <strong>{policy.timezone}</strong>. Tindakan automasi mematuhi rentang jam ini untuk membatasi aktivitas pada jam operasional pemilik.
+          Zona waktu kerja: <strong>{policy.timezone}</strong>. Hari aktif: {(policy.activeDays ?? [0, 1, 2, 3, 4, 5, 6]).map((day) => ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'][day]).join(', ')}. Bid mengikuti jadwal dan masa berlaku kebijakan.
         </p>
 
         <div className="meter-row">
@@ -781,8 +850,8 @@ function CalendarPage() {
             <div className="meter-fill" style={{ width: `${Math.min(100, Math.round((dashboard.bidUsage.week / (policy.weeklyBidLimit || 1)) * 100))}%` }} />
           </div>
         </div>
+        <p className="form-help">Dihitung dari bid live yang tercatat berhasil di log audit.</p>
       </section>
-      <p className="form-help">Dihitung dari bid live yang tercatat berhasil di log audit.</p>
 
       <section className="calendar-card">
         <h3>Masa Berlaku Kebijakan</h3>
@@ -856,6 +925,7 @@ function ProfilePage() {
   const profileQuery = useQuery({ queryKey: ['profile'], queryFn: () => api<Profile>('/profile') });
   const [profile, setProfile] = useState<Profile | null>(null);
   const [newFact, setNewFact] = useState({ label: '', value: '', source: '' });
+  const [newSpecialty, setNewSpecialty] = useState('');
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
   useEffect(() => { if (profileQuery.data && !profile) setProfile(profileQuery.data); }, [profileQuery.data]);
   const save = useMutation({
@@ -863,8 +933,8 @@ function ProfilePage() {
     onSuccess: (result: { profile: Profile; policy: Policy }) => { setProfile(result.profile); setNotice({ text: result.policy.state === 'draft' ? 'Profil tersimpan. Kebijakan kembali ke draf; aktifkan ulang di kartu Kebijakan agar autopilot mengirim bid lagi.' : 'Profil tersimpan.', error: false }); queryClient.invalidateQueries({ queryKey: ['profile'] }); queryClient.invalidateQueries({ queryKey: ['policy'] }); queryClient.invalidateQueries({ queryKey: ['dashboard'] }); },
     onError: (error: Error) => setNotice({ text: error.message, error: true }),
   });
-  if (profileQuery.isPending || !profile) return <LoadingPanel label="Membuka profil layanan..." />;
   if (profileQuery.isError) return <ErrorNotice message="Profil belum dapat dimuat." onRetry={() => profileQuery.refetch()} />;
+  if (profileQuery.isPending || !profile) return <LoadingPanel label="Membuka profil layanan..." />;
 
   function toggleSpecialty(value: string) {
     setProfile((current) => current ? { ...current, specializations: current.specializations.includes(value) ? current.specializations.filter((item) => item !== value) : [...current.specializations, value] } : current);
@@ -888,6 +958,7 @@ function ProfilePage() {
         <fieldset className="specialty-fieldset"><legend>Spesialisasi aktif ({profile.specializations.length}/{MAX_SPECIALIZATIONS})</legend>
           <p className="form-help">Dipakai autopilot sebagai kata kunci pencarian proyek Freelancer; skill teknis (mis. Python, Laravel) lebih cocok daripada nama peran.</p>
           <div className="specialty-grid">{[...new Set([...profile.specializations, ...fields])].map((field) => { const checked = profile.specializations.includes(field); return <label key={field} className="check-row"><input type="checkbox" checked={checked} disabled={!checked && profile.specializations.length >= MAX_SPECIALIZATIONS} onChange={() => toggleSpecialty(field)} /><span>{field}</span></label>; })}</div></fieldset>
+        <div className="search-inline"><label className="form-field"><span>Tambahkan spesialisasi teknis</span><input maxLength={80} value={newSpecialty} onChange={(event) => setNewSpecialty(event.target.value)} placeholder="Misalnya: React atau Docker" /></label><button className="button button-secondary" type="button" disabled={profile.specializations.length >= MAX_SPECIALIZATIONS || !newSpecialty.trim() || profile.specializations.some((item) => item.toLowerCase() === newSpecialty.trim().toLowerCase())} onClick={() => { setProfile({ ...profile, specializations: [...profile.specializations, newSpecialty.trim()] }); setNewSpecialty(''); }}>Tambah spesialisasi</button></div>
       </section>
       <section className="form-card"><div className="section-heading"><div><p className="eyebrow">Batas layanan</p><h2>Tarif dan konteks kerja</h2></div></div>
         <div className="form-grid form-grid-three">
@@ -911,7 +982,22 @@ function ProfilePage() {
 function NumField({ value, onChange, ...rest }: { value: number; onChange: (value: number) => void; min?: string; max?: string; step?: string }) {
   const [text, setText] = useState(String(value));
   useEffect(() => { if (Number(text) !== value) setText(String(value)); }, [value]);
-  return <input type="number" {...rest} value={text} onChange={(event) => { setText(event.target.value); if (event.target.value !== '') onChange(Number(event.target.value)); }} />;
+  return <input type="number" required {...rest} value={text} onChange={(event) => { setText(event.target.value); if (event.target.value !== '' && Number.isFinite(Number(event.target.value))) onChange(Number(event.target.value)); }} />;
+}
+
+function OperationStatus({ data, unavailable = false }: { data: Autopilot | undefined; unavailable?: boolean }) {
+  if (unavailable) return <ErrorNotice message="Status operasi tidak tersedia. Data lama tidak ditampilkan sebagai status live." />;
+  if (!data) return <LoadingPanel label="Membaca status operasi..." />;
+  const reasons = Object.entries(data.summary?.reasons ?? {}).sort((a, b) => b[1] - a[1]);
+  return <section className="form-card operation-status" aria-label="Diagnosis operasi otomatis">
+    <div className="section-heading"><div><p className="eyebrow">Operasi otomatis</p><h2>{data.cycleInProgress ? 'Siklus sedang berjalan' : data.waitingReason ?? (data.state === 'running' ? 'Aktif, menunggu siklus berikutnya' : 'Operasi memerlukan perhatian')}</h2></div><StateLabel state={data.state} /></div>
+    <p>{data.lastMessage}</p>
+    {data.marketplaceNotice && <div className="notice notice-error" role="status"><strong>{data.marketplaceNotice.quotaExhausted ? 'Kuota akun Freelancer habis pada percobaan terakhir' : 'Pengiriman bid terakhir gagal'}</strong><p>{data.marketplaceNotice.reason}</p><small>Tercatat {formatDate(data.marketplaceNotice.at)}.{data.marketplaceNotice.retryAt ? ` Kandidat baru dapat dicoba pada siklus setelah ${formatDate(data.marketplaceNotice.retryAt)}. Waktu kuota pulih mengikuti Freelancer.` : ''}</small>{data.marketplaceNotice.quotaExhausted && <p><a href="https://www.freelancer.com/dashboard" target="_blank" rel="noreferrer">Periksa jatah bid di Freelancer</a></p>}</div>}
+    <dl className="operation-facts"><div><dt>Siklus terakhir</dt><dd>{data.lastRunAt ? formatDate(data.lastRunAt) : 'Belum tercatat'}</dd></div><div><dt>Siklus berikutnya</dt><dd>{data.nextRunAt ? formatDate(data.nextRunAt) : 'Tidak terjadwal'}</dd></div><div><dt>Interval</dt><dd>{data.intervalMinutes ?? 15} menit selama server aktif</dd></div><div><dt>Proposal diproses</dt><dd>{data.draftsInProgress ?? 'Tidak diketahui'}</dd></div></dl>
+    {data.summary && <p><strong>{data.summary.considered}</strong> proyek terbuka ditinjau, <strong>{data.summary.eligible}</strong> lolos pemeriksaan awal, <strong>{data.lastSubmitted}</strong> bid terkirim pada siklus terakhir.</p>}
+    {reasons.length > 0 && <details open={data.lastSubmitted === 0}><summary>Alasan proyek dilewati ({reasons.length})</summary><ul className="reason-breakdown">{reasons.map(([reason, total]) => <li key={reason}><span>{reason}</span><strong>{total}</strong></li>)}</ul></details>}
+    {!!data.searchTerms?.length && <details><summary>Kata pencarian siklus terakhir</summary><p>{data.searchTerms.join(', ')}</p><p className="form-help">Maksimal delapan kata per siklus, bergiliran melalui spesialisasi dan kata kunci tersimpan.</p></details>}
+  </section>;
 }
 
 function PolicyPage() {
@@ -919,6 +1005,9 @@ function PolicyPage() {
   const policyQuery = useQuery({ queryKey: ['policy'], queryFn: () => api<Policy>('/policy') });
   const autopilotQuery = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 30_000 });
   const [draft, setDraft] = useState<Policy | null>(null);
+  const presets = useQuery({ queryKey: ['policy-presets'], queryFn: () => api<{ keywords: string[]; groups: Array<{ id: string; label: string; keywords: string[] }> }>('/policy/presets') });
+  const [validityDays, setValidityDays] = useState(30);
+  const [extendValidity, setExtendValidity] = useState(false);
   // Raw text of the comma lists, so a typed trailing comma/space is not stripped on every keystroke.
   const [listText, setListText] = useState<{ keywords?: string; noNegotiationTerms?: string }>({});
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
@@ -939,61 +1028,83 @@ function PolicyPage() {
       timezone: value.timezone,
       activeHours: value.activeHours,
       noNegotiationTerms: value.noNegotiationTerms,
+      expectedVersion: value.version,
+      activeDays: value.activeDays ?? [0, 1, 2, 3, 4, 5, 6],
+      scanIntervalMinutes: value.scanIntervalMinutes ?? 15,
+      allowUnknownDeadline: value.allowUnknownDeadline ?? false,
+      maxRiskScore: value.maxRiskScore ?? 0.65,
+      requireSpecializationMatch: value.requireSpecializationMatch ?? true,
+      ...(extendValidity ? { validityDays } : {}),
     })),
-    onSuccess: async (value) => { setDraft(value); setListText({}); setNotice({ text: value.state === 'active' ? 'Policy tersimpan dan langsung berlaku di siklus autopilot berikutnya.' : 'Policy tersimpan sebagai draf. Aktifkan setelah memeriksa batasnya.', error: false }); await refresh(); },
+    onSuccess: async (value) => { queryClient.setQueryData(['policy'], value); setDraft(null); setListText({}); setExtendValidity(false); setNotice({ text: `Kebijakan versi ${value.version} tersimpan di Supabase. ${value.state === 'paused' ? 'Automasi tetap dijeda.' : value.state === 'active' ? 'Berlaku pada pemeriksaan autopilot berikutnya.' : 'Periksa batas lalu aktifkan kebijakan.'}`, error: false }); await refresh(); },
     onError: (error) => setNotice({ text: error instanceof Error ? error.message : 'Policy tidak dapat disimpan.', error: true }),
   });
   const activate = useMutation({
-    mutationFn: () => api<{ policy: Policy }>('/policy/activate', jsonRequest('POST', { confirmSimulation: true })),
-    onSuccess: async () => { setNotice({ text: 'Policy aktif dalam mode simulasi lokal.', error: false }); await refresh(); },
+    mutationFn: (mode: 'live' | 'simulation') => api<{ policy: Policy }>('/policy/activate', jsonRequest('POST', mode === 'live' ? { mode: 'live', confirmLive: true } : { confirmSimulation: true })),
+    onSuccess: async (result) => { setDraft(null); setListText({}); setNotice({ text: result.policy.simulationOnly ? 'Kebijakan aktif dalam mode simulasi lokal.' : 'Bid live aktif dalam batas kebijakan tersimpan.', error: false }); await refresh(); },
     onError: (error) => setNotice({ text: error instanceof Error ? error.message : 'Policy tidak dapat diaktifkan.', error: true }),
   });
   const control = useMutation({
     mutationFn: (action: 'pause' | 'resume') => api<Policy>('/policy/' + action, jsonRequest('POST')),
-    onSuccess: refresh,
+    onSuccess: async () => { setDraft(null); setListText({}); await refresh(); },
   });
   if (policyQuery.isPending) return <LoadingPanel label="Membaca kebijakan autopilot..." />;
   if (policyQuery.isError) return <ErrorNotice message="Kebijakan belum dapat dimuat." onRetry={() => policyQuery.refetch()} />;
   const policy = draft ?? policyQuery.data;
-  const autopilot = autopilotQuery.data;
-  const setList = (key: 'keywords' | 'noNegotiationTerms', value: string) => { setListText({ ...listText, [key]: value }); setDraft({ ...policy, [key]: value.split(',').map((item) => item.trim()).filter(Boolean) }); };
+  const autopilot = autopilotQuery.isError ? undefined : autopilotQuery.data;
+  const setList = (key: 'keywords' | 'noNegotiationTerms', value: string) => { setListText({ ...listText, [key]: value }); setDraft({ ...policy, [key]: [...new Map(value.split(/[,\n]/).map((item) => item.trim()).filter(Boolean).map((item) => [item.toLowerCase(), item])).values()] }); };
   return <>
-    <PageIntro eyebrow="Policy engine" title="Atur batas autopilot." description="Perubahan disimpan sebagai draf. Aktivasi selalu dimulai dalam mode simulasi lokal." action={<StateLabel state={policy.state} />} />
+    <PageIntro eyebrow="Kebijakan" title="Atur batas autopilot." description="Atur cakupan pencarian, jadwal, dan batas keputusan. Perubahan kebijakan aktif berlaku pada pemeriksaan berikutnya; kebijakan dijeda tetap dijeda." action={<StateLabel state={policy.state} />} />
     {notice && (notice.error ? <ErrorNotice message={notice.text} /> : <div className="notice notice-success" role="status">{notice.text}</div>)}
     {control.isError && <ErrorNotice message={(control.error as Error).message} />}
     <div className="policy-summary-grid">
       <section className="form-card">
         <div className="section-heading"><div><p className="eyebrow">Editor policy</p><h2>Batas keputusan otomatis</h2></div><span>Versi {policy.version}</span></div>
-        <p className="form-help">Pisahkan kata kunci dan istilah non-negosiasi dengan koma. Perubahan pada policy live langsung berlaku; policy simulasi kembali menjadi draf.</p>
-        <form className="policy-form" onSubmit={(event) => { event.preventDefault(); if (draft) save.mutate(draft); }}>
+        <p className="form-help">Bid otomatis mendukung proyek harga tetap dalam USD. Kata kunci memperluas pencarian; peluang tetap diperiksa menurut batas Anda dan kecocokan profil.</p>
+        <form className="policy-form" onSubmit={(event) => { event.preventDefault(); save.mutate(policy); }}>
           <div className="form-grid form-grid-three">
-            <label className="form-field"><span>Confidence minimum (50–100%)</span><NumField min="50" max="100" step="1" value={Math.round(policy.minimumConfidence * 100)} onChange={(next) => setDraft({ ...policy, minimumConfidence: next / 100 })} /></label>
+            <label className="form-field"><span>Skor kecocokan minimum (%)</span><NumField min="0" max="100" step="1" value={Math.round(policy.minimumConfidence * 100)} onChange={(next) => setDraft({ ...policy, minimumConfidence: next / 100 })} /></label>
             <label className="form-field"><span>Harga minimum (USD)</span><NumField min="0" value={policy.minPrice} onChange={(next) => setDraft({ ...policy, minPrice: next })} /></label>
             <label className="form-field"><span>Harga maksimum (USD)</span><NumField min="0" value={policy.maxPrice} onChange={(next) => setDraft({ ...policy, maxPrice: next })} /></label>
             <label className="form-field"><span>Batas bid harian</span><NumField min="0" max="50" value={policy.dailyBidLimit} onChange={(next) => setDraft({ ...policy, dailyBidLimit: next })} /></label>
             <label className="form-field"><span>Batas bid mingguan</span><NumField min="0" max="200" value={policy.weeklyBidLimit} onChange={(next) => setDraft({ ...policy, weeklyBidLimit: next })} /></label>
             <label className="form-field"><span>Zona waktu</span><input value={policy.timezone} onChange={(event) => setDraft({ ...policy, timezone: event.target.value })} /></label>
             <label className="form-field"><span>Jam mulai</span><NumField min="0" max="23" value={policy.activeHours.start} onChange={(next) => setDraft({ ...policy, activeHours: { ...policy.activeHours, start: next } })} /></label>
-            <label className="form-field"><span>Jam selesai</span><NumField min="1" max="24" value={policy.activeHours.end} onChange={(next) => setDraft({ ...policy, activeHours: { ...policy.activeHours, end: next } })} /></label>
+            <label className="form-field"><span>Jam selesai (0–24)</span><NumField min="0" max="24" value={policy.activeHours.end} onChange={(next) => setDraft({ ...policy, activeHours: { ...policy.activeHours, end: next } })} /></label>
+            <label className="form-field"><span>Interval pemindaian (menit)</span><NumField min="5" max="60" value={policy.scanIntervalMinutes ?? 15} onChange={(next) => setDraft({ ...policy, scanIntervalMinutes: next })} /></label>
+            <label className="form-field"><span>Batas risiko maksimum (%)</span><NumField min="0" max="100" value={Math.round((policy.maxRiskScore ?? 0.65) * 100)} onChange={(next) => setDraft({ ...policy, maxRiskScore: next / 100 })} /></label>
           </div>
-          <label className="form-field"><span>Kata kunci proyek</span><input value={listText.keywords ?? policy.keywords.join(', ')} onChange={(event) => setList('keywords', event.target.value)} placeholder="Python, Laravel, API" /></label>
+          <fieldset className="specialty-fieldset"><legend>Hari operasi</legend><div className="day-options">{['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'].map((day, index) => <label className="check-row" key={day}><input type="checkbox" checked={(policy.activeDays ?? [0, 1, 2, 3, 4, 5, 6]).includes(index)} onChange={(event) => { const days = policy.activeDays ?? [0, 1, 2, 3, 4, 5, 6]; setDraft({ ...policy, activeDays: event.target.checked ? [...days, index].sort() : days.filter((item) => item !== index) }); }} /><span>{day}</span></label>)}</div><button className="button button-secondary" type="button" onClick={() => setDraft({ ...policy, activeDays: [0, 1, 2, 3, 4, 5, 6], activeHours: { start: 0, end: 24 } })}>Pilih operasi 24 jam, setiap hari</button><p className="form-help">Jam selesai lebih kecil dari jam mulai berarti melewati tengah malam.</p></fieldset>
+          <label className="check-row"><input type="checkbox" checked={policy.allowedActions.includes('bid.submit')} onChange={(event) => setDraft({ ...policy, allowedActions: event.target.checked ? ['bid.submit'] : [] })} /><span>Izinkan pengiriman bid otomatis dalam batas kebijakan</span></label>
+          <label className="check-row"><input type="checkbox" checked={policy.allowUnknownDeadline === true} onChange={(event) => setDraft({ ...policy, allowUnknownDeadline: event.target.checked })} /><span>Izinkan proyek tanpa waktu penutupan yang diketahui (durasi bid 14 hari)</span></label>
+          <label className="check-row"><input type="checkbox" checked={policy.requireSpecializationMatch !== false} onChange={(event) => setDraft({ ...policy, requireSpecializationMatch: event.target.checked })} /><span>Wajib cocok dengan salah satu spesialisasi profil</span></label>
+          <label className="form-field"><span>Kata kunci proyek ({policy.keywords.length}/300)</span><textarea rows={6} value={listText.keywords ?? policy.keywords.join(', ')} onChange={(event) => setList('keywords', event.target.value)} placeholder="Python, Laravel, API" /><small>Pisahkan dengan koma atau baris baru. Minimal satu kata cocok; kosong berarti tanpa filter kata kunci.</small></label>
+          <details className="keyword-catalog"><summary>Tambahkan katalog coding</summary>{presets.isError ? <ErrorNotice message="Katalog tidak dapat dimuat." onRetry={() => presets.refetch()} /> : <><p className="form-help">Pilih bidang yang relevan atau seluruh katalog. Kata kunci tidak menambahkan klaim keahlian ke profil.</p><div className="form-actions"><button className="button button-secondary" type="button" disabled={!presets.data} onClick={() => setList('keywords', [...policy.keywords, ...(presets.data?.keywords ?? [])].join(', '))}>Tambahkan seluruh katalog ({presets.data?.keywords.length ?? '…'})</button>{presets.data?.groups.map((group) => <button className="button button-secondary" type="button" key={group.id} onClick={() => setList('keywords', [...policy.keywords, ...group.keywords].join(', '))}>{group.label} ({group.keywords.length})</button>)}</div></>}</details>
           <label className="form-field"><span>Istilah non-negosiasi</span><input value={listText.noNegotiationTerms ?? policy.noNegotiationTerms.join(', ')} onChange={(event) => setList('noNegotiationTerms', event.target.value)} placeholder="pembayaran di muka, onsite" /></label>
-          <div className="form-actions"><button className="button button-primary" type="submit" disabled={!draft || save.isPending}>{save.isPending ? 'Menyimpan...' : 'Simpan policy'}</button><button className="button button-secondary" type="button" disabled={activate.isPending || policy.state === 'active'} onClick={() => activate.mutate()}>{activate.isPending ? 'Mengaktifkan...' : 'Aktifkan simulasi lokal'}</button></div>
+          <label className="check-row"><input type="checkbox" checked={extendValidity} onChange={(event) => setExtendValidity(event.target.checked)} /><span>Perbarui masa berlaku saat disimpan</span></label>{extendValidity && <label className="form-field"><span>Berlaku sejak sekarang (hari)</span><NumField min="1" max="365" value={validityDays} onChange={setValidityDays} /></label>}
+          <div className="form-actions"><button className="button button-primary" type="submit" disabled={(!draft && !extendValidity) || save.isPending}>{save.isPending ? 'Menyimpan...' : 'Simpan kebijakan ke Supabase'}</button><button className="button button-secondary" type="button" disabled={activate.isPending || policy.state !== 'draft' || !!draft} onClick={() => activate.mutate('simulation')}>Aktifkan simulasi lokal</button>{(policy.state === 'draft' || policy.simulationOnly) && <button className="button button-primary" type="button" disabled={activate.isPending || policy.state === 'paused' || !!draft} onClick={() => activate.mutate('live')}>Aktifkan bid live sesuai batas tersimpan</button>}{(draft || extendValidity) && <button className="button button-text" type="button" onClick={() => { setDraft(null); setListText({}); setExtendValidity(false); }}>Batalkan perubahan</button>}</div>
         </form>
       </section>
       <section className="form-card">
-        <div className="section-heading"><div><p className="eyebrow">Operasi berjalan</p><h2>{autopilot?.lastMessage ?? 'Autopilot sedang menyiapkan akun.'}</h2></div><StateLabel state={autopilot?.state ?? 'starting'} /></div>
+        <div className="section-heading"><div><p className="eyebrow">Operasi berjalan</p><h2>{autopilotQuery.isError ? 'Status operasi tidak tersedia.' : autopilot?.lastMessage ?? 'Memuat status dari server.'}</h2></div><StateLabel state={autopilot?.state ?? 'unknown'} /></div>
         <div className="policy-facts"><div><span>Spesialisasi</span><strong>{policy.specializations.join(', ') || 'Menunggu profil Freelancer'}</strong></div><div><span>Rentang penawaran</span><strong>{formatMoney(policy.minPrice, 'USD')} – {formatMoney(policy.maxPrice, 'USD')}</strong></div><div><span>Batas harian / mingguan</span><strong>{policy.dailyBidLimit} / {policy.weeklyBidLimit}</strong></div><div><span>Berlaku sampai</span><strong>{formatDate(policy.expiresAt)}</strong></div></div>
         <div className="form-actions">{policy.state === 'paused' ? <button className="button button-primary" type="button" disabled={control.isPending || policy.simulationOnly} onClick={() => control.mutate('resume')}>Lanjutkan autopilot</button> : <button className="button button-secondary" type="button" disabled={control.isPending || policy.state !== 'active'} onClick={() => control.mutate('pause')}>Jeda darurat</button>}<span>{policy.simulationOnly ? 'Mode simulasi lokal.' : 'Bid live mengikuti policy tersimpan.'}</span></div>
       </section>
     </div>
+    <OperationStatus data={autopilot} unavailable={autopilotQuery.isError} />
   </>;
 }
 
 function KnowledgePage() {
   const queryClient = useQueryClient();
   const knowledge = useQuery({ queryKey: ['knowledge'], queryFn: () => api<{ sources: Array<{ id: string; provider: string; label: string; referenceUrl: string; updatedAt: string; chunkCount: number }>; coverage: { sources: number; chunks: number } }>('/knowledge') });
-  const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: () => api<{ github: { tokenConfigured: boolean } }>('/capabilities') });
+  const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: () => api<Capabilities>('/capabilities') });
+  type SyncJob = { id: string; provider: string; state: string; startedAt: string; finishedAt: string | null; current: string | null; total: number; completed: number; chunks: number; results: Array<{ label: string; chunks: number; error: string | null; note?: string }>; error: string | null };
+  const syncStatus = useQuery({ queryKey: ['knowledge-sync'], queryFn: () => api<{ job: SyncJob | null }>('/knowledge/sync-status'), refetchInterval: (query) => query.state.data?.job?.state === 'running' ? 2_000 : 10_000 });
+  const job = syncStatus.isError ? null : syncStatus.data?.job;
+  const [sourceFilter, setSourceFilter] = useState('all');
+  const [sourceSearch, setSourceSearch] = useState('');
+  useEffect(() => { if (job && job.state !== 'running') { queryClient.invalidateQueries({ queryKey: ['knowledge'] }); queryClient.invalidateQueries({ queryKey: ['dashboard'] }); queryClient.invalidateQueries({ queryKey: ['activity'] }); } }, [job?.id, job?.state]);
   const [provider, setProvider] = useState<'manual' | 'linkedin'>('manual');
   const [label, setLabel] = useState('');
   const [referenceUrl, setReferenceUrl] = useState('');
@@ -1008,9 +1119,11 @@ function KnowledgePage() {
 
   const importFiles = async (event: ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(event.target.files ?? []);
-    const next = await Promise.all(selected.map(async (file) => ({ path: file.name, content: await file.text() })));
-    setFiles(next);
-    if (selected.length) setLabel((current) => current || selected.length === 1 ? (current || selected[0]?.name.replace(/\.[^.]+$/, '') || '') : `${selected.length} berkas pilihan`);
+    if (selected.length > 30 || selected.some((file) => file.size > 100_000 || !/\.(md|txt|csv|json)$/i.test(file.name))) { setFiles([]); setNotice({ text: 'Pilih maksimal 30 berkas teks, masing-masing maksimal 100 KB (.md, .txt, .csv, .json).', error: true }); event.target.value = ''; return; }
+    try {
+      setFiles(await Promise.all(selected.map(async (file) => ({ path: file.name, content: await file.text() }))));
+      if (selected.length) setLabel((current) => current || (selected.length === 1 ? selected[0]?.name.replace(/\.[^.]+$/, '') || '' : `${selected.length} berkas pilihan`));
+    } catch { setFiles([]); setNotice({ text: 'Berkas tidak dapat dibaca. Pilih ulang berkas Anda.', error: true }); }
   };
   const runImport = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true); setNotice(null);
@@ -1021,27 +1134,18 @@ function KnowledgePage() {
     } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Impor gagal.', error: true }); }
     finally { setBusy(false); }
   };
-  const syncGitHub = async (event: FormEvent) => {
-    event.preventDefault(); setBusy(true); setNotice({ text: 'Membaca repositori terpilih...', error: false });
+  const startSync = async (provider: 'github' | 'linkedin', repository?: string) => {
+    setBusy(true); setNotice(null);
     try {
-      const result = await api<{ chunks: number; filesSeen: number; rejected: number; complete: boolean }>('/knowledge/github/sync', jsonRequest('POST', { repository: repo }));
-      setNotice({ text: `${result.filesSeen} berkas dibaca, ${result.chunks} potongan aman diindeks, ${result.rejected} dilewati.${result.complete ? '' : ' Cakupan parsial, periksa batas file.'}`, error: false });
-      queryClient.invalidateQueries({ queryKey: ['knowledge'] }); queryClient.invalidateQueries({ queryKey: ['dashboard'] }); queryClient.invalidateQueries({ queryKey: ['capabilities'] });
+      const result = await api<{ job: SyncJob }>('/knowledge/sync', jsonRequest('POST', { provider, ...(repository ? { repository } : {}) }));
+      queryClient.setQueryData(['knowledge-sync'], result);
     } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Sinkronisasi gagal.', error: true }); }
     finally { setBusy(false); }
   };
-  const syncAllGitHub = async () => {
-    setBusy(true); setNotice({ text: 'Membaca semua repositori milik Anda. Ini bisa memakan beberapa menit...', error: false });
-    try {
-      const result = await api<{ synced: number; chunks: number; repositories: Array<{ repository: string; error: string | null }> }>('/knowledge/github/sync-all', jsonRequest('POST'));
-      const failed = result.repositories.filter((item) => item.error);
-      setNotice({ text: `${result.synced} dari ${result.repositories.length} repositori diindeks (${result.chunks} potongan).${failed.length ? ` Dilewati: ${failed.map((item) => item.repository).join(', ')}.` : ''}`, error: false });
-      queryClient.invalidateQueries({ queryKey: ['knowledge'] }); queryClient.invalidateQueries({ queryKey: ['dashboard'] });
-    } catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Sinkronisasi gagal.', error: true }); }
-    finally { setBusy(false); }
-  };
+  const syncGitHub = (event: FormEvent) => { event.preventDefault(); void startSync('github', repo.trim()); };
+  const syncAllGitHub = () => startSync('github');
   const search = async (event: FormEvent) => {
-    event.preventDefault(); setBusy(true);
+    event.preventDefault(); setBusy(true); setResults([]); setSearched(false); setNotice(null);
     try { const nextResults = await api<Array<{ label: string; path: string; url: string; content: string }>>('/knowledge/search', jsonRequest('POST', { query: queryText, limit: 6 })); setResults(nextResults); setSearched(true); }
     catch (error) { setNotice({ text: error instanceof Error ? error.message : 'Pencarian gagal.', error: true }); }
     finally { setBusy(false); }
@@ -1054,10 +1158,21 @@ function KnowledgePage() {
 
   if (knowledge.isPending) return <LoadingPanel label="Membuka knowledge hub lokal..." />;
   if (knowledge.isError) return <ErrorNotice message="Status knowledge hub belum dapat dimuat." onRetry={() => knowledge.refetch()} />;
+  const syncing = busy || job?.state === 'running';
+  const sources = knowledge.data.sources.filter((source) => (sourceFilter === 'all' || source.provider === sourceFilter) && source.label.toLowerCase().includes(sourceSearch.toLowerCase()));
   return <>
     <PageIntro eyebrow="Knowledge Hub" title="Bawa bukti kerja, bukan seluruh repositori ke setiap draf." description="Pilih sumber yang Anda izinkan. Teks diperiksa sebelum masuk indeks lokal dan setiap hasil menyimpan path serta provenance." />
     {notice && (notice.error ? <ErrorNotice message={notice.text} /> : <div className="notice notice-success" role="status">{notice.text}</div>)}
-    <section className="knowledge-summary"><div><p className="eyebrow">Cakupan saat ini</p><strong>{knowledge.data.coverage.sources} sumber / {knowledge.data.coverage.chunks} potongan</strong><span>Postgres FTS / freshness tercatat per sumber</span></div><div className="provider-boundaries"><span>GitHub: baca saja</span><span>LinkedIn: impor milik pengguna</span></div></section>
+    <section className="knowledge-summary"><div><p className="eyebrow">Cakupan di Supabase</p><strong>{knowledge.data.coverage.sources} sumber / {knowledge.data.coverage.chunks} potongan</strong><span>Pencarian Postgres FTS, waktu pembaruan per sumber</span></div><div className="provider-boundaries"><span>GitHub: API baca repositori</span><span>LinkedIn: API profil ringan dan impor ekspor</span></div></section>
+    {syncStatus.isError && <ErrorNotice message="Progres sinkronisasi tidak dapat dimuat." onRetry={() => syncStatus.refetch()} />}
+    {job && <section className="form-card" aria-live="polite">
+      <h2>{job.provider === 'github' ? 'GitHub' : 'LinkedIn'}: {job.state === 'running' ? 'sinkronisasi berjalan' : job.state === 'completed' ? 'sinkronisasi selesai' : 'sinkronisasi memerlukan perhatian'}</h2>
+      <p>{job.completed}/{job.total || '…'} sumber diproses, {job.chunks} potongan tersimpan. {job.current}</p>
+      {job.state === 'running' && <progress aria-label="Progres sinkronisasi" max={Math.max(1, job.total)} value={job.completed} />}
+      {job.error && <p className="is-late">{job.error}</p>}
+      <small>Mulai {formatDate(job.startedAt)}{job.finishedAt ? `, selesai ${formatDate(job.finishedAt)}` : ''}</small>
+      {job.results.length > 0 && <details><summary>Hasil per sumber ({job.results.filter((item) => item.chunks > 0).length} diindeks, {job.results.filter((item) => !item.error && item.chunks === 0).length} dilewati)</summary><ul className="sync-results">{job.results.map((result) => <li key={result.label}><strong>{result.label}</strong><span>{result.error ?? `${result.chunks} potongan tersimpan`}{result.note && <small>{result.note}</small>}</span></li>)}</ul></details>}
+    </section>}
     <div className="knowledge-grid">
       <section className="form-card"><div className="section-heading"><div><p className="eyebrow">Pilih cakupan</p><h2>Impor berkas teks</h2></div></div>
         <form className="stack-form" onSubmit={runImport}>
@@ -1071,13 +1186,15 @@ function KnowledgePage() {
       </section>
       <section className="form-card"><div className="section-heading"><div><p className="eyebrow">Read-only API</p><h2>Sinkronkan repositori GitHub</h2></div></div>
         <p className="form-help">Pilih satu repositori. Aplikasi memakai Contents: read dan tidak mengubah isi. Token privat, bila dipakai, dibaca server dari konfigurasi dan tidak dikirim ke browser.</p>
-        <form className="stack-form" onSubmit={syncGitHub}><label className="form-field"><span>Repositori pemilik/nama</span><input value={repo} onChange={(event) => setRepo(event.target.value)} placeholder="pemilik/nama-repositori" required /></label><div className="provider-status">Token server: {capabilities.data?.github.tokenConfigured ? 'tersedia' : 'tidak diatur, hanya repositori publik'}</div><button className="button button-secondary" type="submit" disabled={busy || repo.trim().length < 3}>Baca repositori pilihan</button></form>
-        <div className="form-actions"><button className="button button-primary" type="button" disabled={busy || !capabilities.data?.github.tokenConfigured} onClick={syncAllGitHub}>Sinkronkan semua repo saya</button><small className="form-help">Repo milik Anda (bukan fork/arsip), maks. 50 repo terbaru; sinkron ulang menggantikan indeks lama.</small></div>
+        <form className="stack-form" onSubmit={syncGitHub}><label className="form-field"><span>Repositori pemilik/nama</span><input value={repo} onChange={(event) => setRepo(event.target.value)} placeholder="pemilik/nama-repositori" required pattern="[A-Za-z0-9-]+/[A-Za-z0-9_.-]+" /></label><div className="provider-status">Token server: {capabilities.isError ? 'Tidak diketahui' : capabilities.isPending ? 'Memuat…' : capabilities.data?.github.tokenConfigured ? 'tersedia' : 'tidak diatur, hanya repositori publik'}</div><button className="button button-secondary" type="submit" disabled={syncing || repo.trim().length < 3}>Baca repositori pilihan</button></form>
+        <div className="form-actions"><button className="button button-primary" type="button" disabled={syncing || capabilities.isError || !capabilities.data?.github.tokenConfigured} onClick={syncAllGitHub}>Sinkronkan semua repo saya</button><small className="form-help">Maksimal 50 repo terbaru milik Anda, kecuali fork/arsip, dan 100 berkas teks per repo. Sinkron ulang mengganti sumber secara atomik.</small></div>
+        <div className="provider-limit"><h3>Sinkronisasi LinkedIn API</h3><p>Ambil nama, foto, bahasa, dan email yang diizinkan dari /userinfo. Pembaruan mengganti sumber profil API tanpa duplikat.</p><button className="button button-primary" type="button" disabled={syncing || capabilities.isError || !capabilities.data?.linkedin.authorized} onClick={() => startSync('linkedin')}>Sinkronkan profil LinkedIn</button><Link className="button button-text" to="/capabilities">Kelola koneksi LinkedIn</Link></div>
         <div className="provider-limit"><strong>LinkedIn: impor lewat file ekspor.</strong><p>API LinkedIn tidak memberi akses ke riwayat kerja atau skill. Di LinkedIn buka Settings → Data privacy → Get a copy of your data, unduh arsipnya, ekstrak, lalu pada form “Impor berkas teks” pilih asal “Ekspor LinkedIn milik saya” dan unggah Profile.csv, Positions.csv, Skills.csv, Education.csv, Projects.csv, serta Certifications.csv.</p></div>
       </section>
     </div>
     <section className="form-card source-section"><div className="section-heading"><div><p className="eyebrow">Provenance dan freshness</p><h2>Sumber terindeks</h2></div></div>
-      {knowledge.data.sources.length === 0 ? <div className="empty-state"><h3>Knowledge hub masih kosong</h3><p>Impor catatan teks atau pilih repositori agar draf dapat menyebutkan bukti yang bisa ditelusuri.</p></div> : <div className="source-list">{knowledge.data.sources.map((source) => <article key={source.id} className="source-row"><div><span className="source-provider">{source.provider}</span><h3>{source.label}</h3><p>{source.chunkCount} potongan / diperbarui {formatDate(source.updatedAt)}</p>{source.referenceUrl && source.referenceUrl.startsWith('https://') && <a href={source.referenceUrl} target="_blank" rel="noreferrer">Buka sumber</a>}</div><button className="button button-text" type="button" onClick={() => removeSource(source.id)}>Hapus sumber</button></article>)}</div>}
+      <div className="form-grid"><label className="form-field"><span>Filter penyedia</span><select value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)}><option value="all">Semua sumber</option><option value="github">GitHub</option><option value="linkedin">LinkedIn</option><option value="manual">Manual</option></select></label><label className="form-field"><span>Cari nama sumber</span><input type="search" value={sourceSearch} onChange={(event) => setSourceSearch(event.target.value)} /></label></div><p className="form-help">{sources.length} dari {knowledge.data.sources.length} sumber</p>
+      {sources.length === 0 ? <div className="empty-state"><h3>Tidak ada sumber yang ditampilkan</h3><p>Ubah filter atau impor sumber baru.</p></div> : <div className="source-list">{sources.map((source) => <article key={source.id} className="source-row"><div><span className="source-provider">{source.provider}</span><h3>{source.label}</h3><p>{source.chunkCount} potongan / diperbarui {formatDate(source.updatedAt)}</p>{source.referenceUrl && source.referenceUrl.startsWith('https://') && <a href={source.referenceUrl} target="_blank" rel="noreferrer">Buka sumber</a>}</div><div className="source-actions">{source.provider === 'github' && <button className="button button-secondary" type="button" disabled={syncing} onClick={() => startSync('github', source.label)}>Sinkron ulang</button>}<button className="button button-text" type="button" disabled={syncing} onClick={() => removeSource(source.id)}>Hapus sumber</button></div></article>)}</div>}
     </section>
     <section className="form-card search-section"><div className="section-heading"><div><p className="eyebrow">Retrieval lokal</p><h2>Temukan bukti yang relevan</h2></div></div><form className="search-inline" onSubmit={search}><label className="form-field"><span>Kata atau frasa</span><input value={queryText} onChange={(event) => setQueryText(event.target.value)} minLength={2} placeholder="Misalnya: cursor pagination" /></label><button type="submit" className="button button-primary" disabled={busy || queryText.trim().length < 2}>Cari di knowledge hub</button></form>
       {results.length > 0 ? <div className="search-results">{results.map((result, index) => <article key={`${result.path}-${index}`}><div><strong>{result.label} / {result.path}</strong>{result.url.startsWith('https://') ? <a href={result.url} target="_blank" rel="noreferrer">Lihat provenance</a> : <span className="local-reference">Sumber lokal</span>}</div><p>{result.content}</p></article>)}</div> : <p className="form-help">{searched ? 'Tidak ada hasil untuk pencarian ini.' : 'Hasil pencarian menampilkan potongan teks dan sumbernya, bukan seluruh dokumen.'}</p>}
@@ -1086,9 +1203,10 @@ function KnowledgePage() {
 }
 
 function ActivityPage() {
+  const [limit, setLimit] = useState(100);
   const [filter, setFilter] = useState<'all' | 'allowed' | 'blocked' | 'recorded' | 'failed'>('all');
   const [search, setSearch] = useState('');
-  const query = useQuery({ queryKey: ['activity'], queryFn: () => api<AuditEvent[]>('/activity?limit=100') });
+  const query = useQuery({ queryKey: ['activity', limit], queryFn: () => api<AuditEvent[]>('/activity?limit=' + limit) });
   if (query.isPending) return <LoadingPanel label="Membaca jejak aktivitas..." />;
   if (query.isError) return <ErrorNotice message="Log aktivitas belum dapat dimuat." onRetry={() => query.refetch()} />;
 
@@ -1113,6 +1231,7 @@ function ActivityPage() {
     <section className="activity-section">
       <ActivityRows events={filteredEvents} />
     </section>
+    <p className="form-help">Pencarian dan filter berlaku pada {query.data.length} catatan terbaru yang dimuat.</p>{query.data.length >= limit && limit < 500 && <button className="button button-secondary" type="button" onClick={() => setLimit(Math.min(500, limit + 100))}>Muat 100 catatan lebih lama</button>}
   </>;
 }
 
@@ -1120,8 +1239,8 @@ type IntegrationCheck = { id: string; label: string; ok: boolean; status: number
 
 function HealthCard() {
   const checkAll = useMutation({ mutationFn: () => api<IntegrationCheck[]>('/integrations/check', jsonRequest('POST')) });
-  const bids = useQuery({ queryKey: ['activity', 'bids'], queryFn: () => api<AuditEvent[]>('/activity?limit=100'), refetchInterval: 60_000 });
-  const recentBids = (bids.data ?? []).filter((event) => event.type === 'marketplace.production.submit_bid' && event.status !== 'allowed').slice(0, 6);
+  const bids = useQuery({ queryKey: ['activity', 'bids'], queryFn: () => api<AuditEvent[]>('/activity?limit=20&type=marketplace.production.submit_bid'), refetchInterval: 60_000 });
+  const recentBids = (bids.isError ? [] : bids.data ?? []).filter((event) => event.type === 'marketplace.production.submit_bid' && event.status !== 'allowed').slice(0, 6);
   const failed = recentBids.filter((event) => event.status === 'failed').length;
   return <section className="form-card health-card" aria-labelledby="health-title">
     <div className="section-heading">
@@ -1129,7 +1248,7 @@ function HealthCard() {
       <button type="button" className="button button-primary" disabled={checkAll.isPending} onClick={() => checkAll.mutate()}>{checkAll.isPending ? 'Memeriksa...' : 'Periksa semua integrasi'}</button>
     </div>
     {checkAll.isError && <ErrorNotice message={checkAll.error instanceof Error ? checkAll.error.message : 'Pemeriksaan gagal.'} onRetry={() => checkAll.mutate()} />}
-    {checkAll.data
+    {!checkAll.isError && checkAll.data
       ? <ul className="health-list">{checkAll.data.map((item) => <li className="health-row" key={item.id}>
         <span className={'health-pill ' + (item.ok ? 'is-ok' : 'is-bad')}>{item.ok ? 'Berhasil' : 'Bermasalah'}</span>
         <div className="health-main"><strong>{item.label}</strong><p>{item.detail}</p></div>
@@ -1194,13 +1313,13 @@ function CapabilitiesPage() {
   });
   if (query.isPending) return <LoadingPanel />;
   if (query.isError) return <ErrorNotice message="Status integrasi belum dapat dimuat." onRetry={() => query.refetch()} />;
-  const status = autopilot.data;
+  const status = autopilot.isError ? undefined : autopilot.data;
   return <>
     <PageIntro eyebrow="Koneksi dan capability" title="Autopilot bekerja dari profil Freelancer." description="Proyek dipindai otomatis. Bid hanya dikirim saat aturan profil, anggaran, tenggat, risiko, confidence, kuota, dan jam aktif terpenuhi." />
     {notice && <div className={'notice ' + (noticeError ? 'notice-error' : 'notice-success')} role={noticeError ? 'alert' : 'status'}>{notice}</div>}
     <section className="form-card autopilot-card">
-      <div className="section-heading"><div><p className="eyebrow">Freelancer Auto-Pilot</p><h2>Siklus operasi</h2></div><StateLabel state={status?.state ?? 'starting'} /></div>
-      <p className="form-help">{status?.lastMessage ?? 'Menghubungkan autopilot ke profil Freelancer...'}</p>
+      <div className="section-heading"><div><p className="eyebrow">Freelancer Auto-Pilot</p><h2>Siklus operasi</h2></div><StateLabel state={status?.state ?? 'unknown'} /></div>
+      <p className="form-help">{autopilot.isError ? 'Status operasi tidak tersedia. Data lama disembunyikan.' : status?.lastMessage ?? 'Memuat status operasi dari server.'}</p>
       <dl className="cycle-stats">
         <div><dt>Proyek dipindai (siklus terakhir)</dt><dd>{status ? status.lastImported : '–'}</dd></div>
         <div><dt>Bid terkirim (siklus terakhir)</dt><dd>{status ? status.lastSubmitted : '–'}</dd></div>
@@ -1208,7 +1327,7 @@ function CapabilitiesPage() {
         <div><dt>Pindai berikutnya</dt><dd>{status?.nextRunAt ? formatDate(status.nextRunAt) : 'Belum dijadwalkan'}</dd></div>
       </dl>
       {status?.specializations.length ? <div><p className="cycle-label">Kata kunci pencarian</p><div className="tag-row">{status.specializations.map((item) => <span className="skill-tag" key={item}>{item}</span>)}</div></div> : null}
-      <p className="provider-limit">Autopilot hanya mengirim bid pada proyek fixed price USD yang lolos kebijakan: {savedPolicy.data ? `USD ${savedPolicy.data.minPrice}–${savedPolicy.data.maxPrice}, maksimal ${savedPolicy.data.dailyBidLimit} bid per hari dan ${savedPolicy.data.weeklyBidLimit} per minggu` : 'harga dan kuota sesuai kebijakan tersimpan'}, serta risiko, deadline, confidence, dan jam kerja. Aplikasi tidak pernah mengirim pesan ke klien.</p>
+      <p className="provider-limit">Autopilot hanya mengirim bid pada proyek fixed price USD yang lolos kebijakan: {!savedPolicy.isError && savedPolicy.data ? `USD ${savedPolicy.data.minPrice}–${savedPolicy.data.maxPrice}, maksimal ${savedPolicy.data.dailyBidLimit} bid per hari dan ${savedPolicy.data.weeklyBidLimit} per minggu` : 'harga dan kuota tidak tersedia'}, serta risiko, deadline, confidence, dan jam kerja. Aplikasi tidak pernah mengirim pesan ke klien.</p>
     </section>
     <HealthCard />
     <div className="capability-grid">
@@ -1308,36 +1427,51 @@ function buildBoards(data: ShellData): BoardContent[] {
   return BOARDS.map((slot) => ({ id: slot.id, title: slot.label, accent: BOARD_ACCENTS[slot.id], lines: lines[slot.id].lines.filter(Boolean), ...(lines[slot.id].alert ? { alert: true } : {}) }));
 }
 
-type OwnerMoveDirection = keyof OwnerMoveInput;
-
-function OwnerControls({ onMoveStart, onMoveStop }: { onMoveStart: (direction: OwnerMoveDirection) => void; onMoveStop: () => void }) {
-  const button = (direction: OwnerMoveDirection, label: string, key: string) => <button type="button" aria-label={label}
-    onPointerDown={() => onMoveStart(direction)} onPointerUp={onMoveStop} onPointerLeave={onMoveStop} onPointerCancel={onMoveStop}
-    onKeyDown={(event) => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); onMoveStart(direction); } }}
-    onKeyUp={(event) => { if (event.key === ' ' || event.key === 'Enter') onMoveStop(); }}>{key}</button>;
+function OwnerControls({ input, moving }: { input: OwnerInput; moving: boolean }) {
+  useEffect(() => () => input.clear(), [input]);
+  const button = (direction: OwnerDirection, label: string, key: string) => <button type="button" aria-label={label}
+    onPointerDown={(event) => {
+      if (event.button !== 0) return;
+      event.preventDefault(); event.currentTarget.focus({ preventScroll: true });
+      event.currentTarget.setPointerCapture(event.pointerId);
+      input.press(`pointer:${event.pointerId}`, direction);
+    }}
+    onPointerUp={(event) => input.release(`pointer:${event.pointerId}`)} onPointerCancel={(event) => input.release(`pointer:${event.pointerId}`)}
+    onLostPointerCapture={(event) => input.release(`pointer:${event.pointerId}`)}
+    onKeyDown={(event) => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); if (!event.repeat) input.press(`button:${direction}`, direction); } }}
+    onKeyUp={(event) => { if (event.key === ' ' || event.key === 'Enter') input.release(`button:${direction}`); }}
+    onBlur={() => input.release(`button:${direction}`)}>{key}</button>;
   return <div className="vo3d-owner-controls" aria-label="Kontrol gerak Owner">
-    <p className="vo3d-owner-hint">Gerakkan Owner dengan W A S D atau tombol panah.</p>
+    <p className="vo3d-owner-motion" role="status">{moving ? 'Owner sedang berjalan' : 'Owner diam'}</p>
+    <p className="vo3d-owner-hint">Tahan WASD, tombol panah, atau tombol di bawah untuk berjalan sesuai arah kamera. Lepaskan untuk berhenti. Esc menghentikan perjalanan.</p>
     <div className="vo3d-owner-dpad">
       <span aria-hidden="true" />{button('up', 'Berjalan ke atas', 'W')}<span aria-hidden="true" />
-      {button('left', 'Berjalan ke kiri', 'A')}<button type="button" aria-label="Berhenti berjalan" onPointerDown={onMoveStop} onClick={onMoveStop}>■</button>{button('right', 'Berjalan ke kanan', 'D')}
+      {button('left', 'Berjalan ke kiri', 'A')}<button type="button" aria-label="Berhenti berjalan" onClick={() => input.stop()}>■</button>{button('right', 'Berjalan ke kanan', 'D')}
       <span aria-hidden="true" />{button('down', 'Berjalan ke bawah', 'S')}<span aria-hidden="true" />
     </div>
   </div>;
 }
 
 function OfficeShell() {
+  const knowledgeSync = useQuery({ queryKey: ['knowledge-sync'], queryFn: () => api<{ job: { state: string; provider: string; current: string | null } | null }>('/knowledge/sync-status'), refetchInterval: 3_000 });
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const stage = useRef<HTMLDivElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
+  const ownerButton = useRef<HTMLButtonElement>(null);
+  const panelBody = useRef<HTMLDivElement>(null);
   const sheetHeading = useRef<HTMLHeadingElement>(null);
+  const sheetElement = useRef<HTMLElement>(null);
+  const [refreshingSheet, setRefreshingSheet] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [panel, setPanel] = useState<'owner' | 'agent' | 'activity' | 'channels' | null>(null);
   const [rosterOpen, setRosterOpen] = useState(wideScreen);
   const [command, setCommand] = useState<CameraCommand>({ kind: 'overview', n: 0 });
   const [followId, setFollowId] = useState<string | null>(null);
-  const [ownerMoveInput, setOwnerMoveInput] = useState<OwnerMoveInput>({ up: false, down: false, left: false, right: false });
+  const [ownerInput] = useState(createOwnerInput);
+  const [ownerMoving, setOwnerMoving] = useState(false);
+  const [ownerVisitVersion, setOwnerVisitVersion] = useState(0);
   const [view, setView] = useState<'3d' | 'top'>('3d');
   const [tour, setTour] = useState(false);
   const [search, setSearch] = useState('');
@@ -1347,7 +1481,7 @@ function OfficeShell() {
   const [webgl] = useState(() => {
     try { const canvas = document.createElement('canvas'); return Boolean(canvas.getContext('webgl2') || canvas.getContext('webgl')); } catch { return false; }
   });
-  const [reducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const now = useClock(30_000);
   const phase = dayPhase(now.getHours());
 
@@ -1359,9 +1493,9 @@ function OfficeShell() {
   const health = useQuery({ queryKey: ['health'], queryFn: () => api<{ ok: boolean; mode: string; liveWrites: boolean }>('/health'), refetchInterval: 30_000 });
   const dashboard = useQuery({ queryKey: ['dashboard'], queryFn: () => api<NonNullable<ShellData['dashboard']>>('/dashboard'), refetchInterval: 30_000 });
   const pipeline = useQuery({ queryKey: ['pipeline'], queryFn: () => api<Array<Opportunity & { latestDraft: BidDraft | null }>>('/pipeline'), refetchInterval: 60_000 });
-  const policy = useQuery({ queryKey: ['policy'], queryFn: () => api<Policy>('/policy') });
-  const profile = useQuery({ queryKey: ['profile'], queryFn: () => api<Profile>('/profile') });
-  const knowledge = useQuery({ queryKey: ['knowledge'], queryFn: () => api<{ coverage: { sources: number; chunks: number } }>('/knowledge') });
+  const policy = useQuery({ queryKey: ['policy'], queryFn: () => api<Policy>('/policy'), refetchInterval: 30_000 });
+  const profile = useQuery({ queryKey: ['profile'], queryFn: () => api<Profile>('/profile'), refetchInterval: 30_000 });
+  const knowledge = useQuery({ queryKey: ['knowledge'], queryFn: () => api<{ coverage: { sources: number; chunks: number } }>('/knowledge'), refetchInterval: 30_000 });
   const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: () => api<Capabilities>('/capabilities'), refetchInterval: 3000 });
   const pause = useMutation({
     mutationFn: (action: 'pause' | 'resume') => api<Policy>(`/policy/${action}`, jsonRequest('POST')),
@@ -1376,7 +1510,8 @@ function OfficeShell() {
   const inboxWaiting = fresh(inbox)?.needsReply.length;
   const dueSoon = fresh(work)?.dueSoon;
   const hermes = fresh(capabilities)?.hermes;
-  const agents = useMemo(() => deriveOfficeAgents(autopilotData, activityData, { sync: syncData, inboxWaiting, dueSoon, hermes }), [autopilotData, activityData, syncData, inboxWaiting, dueSoon, hermes]);
+  const knowledgeJob = fresh(knowledgeSync)?.job;
+  const agents = useMemo(() => deriveOfficeAgents(autopilotData, activityData, { sync: syncData, inboxWaiting, dueSoon, hermes, knowledge: knowledgeJob }), [autopilotData, activityData, syncData, inboxWaiting, dueSoon, hermes, knowledgeJob]);
   const spots = useMemo(() => spotsFor(agents), [agents]);
   const ownerTarget = selectedId ? spots.get(selectedId) ?? null : null;
   const counts = summarize(agents);
@@ -1394,6 +1529,37 @@ function OfficeShell() {
   const sheetOpen = location.pathname !== '/';
   const dashboardData = fresh(dashboard);
 
+  useEffect(() => {
+    if (!sheetOpen) return;
+    const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const onTab = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return;
+      const items = [...(sheetElement.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]') ?? [])].filter((item) => item.getClientRects().length > 0);
+      const first = items[0]; const last = items.at(-1);
+      if (!first || !last) { event.preventDefault(); sheetHeading.current?.focus(); return; }
+      if (event.shiftKey && (document.activeElement === first || !items.includes(document.activeElement as HTMLElement))) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && (document.activeElement === last || !items.includes(document.activeElement as HTMLElement))) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onTab);
+    return () => { document.removeEventListener('keydown', onTab); if (returnFocus?.isConnected) returnFocus.focus(); };
+  }, [sheetOpen]);
+  useEffect(() => { sheetElement.current?.querySelector('.vo3d-sheet-body')?.scrollTo({ top: 0 }); }, [location.pathname]);
+
+  useEffect(() => { panelBody.current?.scrollTo({ top: 0 }); }, [panel, selectedId]);
+
+  useEffect(() => {
+    ownerInput.setActive(document.visibilityState !== 'hidden');
+    return bindOwnerKeyboard(ownerInput, window, document);
+  }, [ownerInput]);
+  useEffect(() => { ownerInput.setEnabled(!sheetOpen && webgl); }, [ownerInput, sheetOpen, webgl]);
+  useEffect(() => {
+    const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => setReducedMotion(preference.matches);
+    preference.addEventListener('change', update);
+    return () => preference.removeEventListener('change', update);
+  }, []);
+  useEffect(() => { if (followId && followId !== 'owner' && !spots.has(followId)) setFollowId(null); }, [spots, followId]);
+
   // Session log of state transitions observed by this page (real polling results, not simulated).
   useEffect(() => {
     if (autopilot.isPending) return;
@@ -1409,16 +1575,27 @@ function OfficeShell() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); searchInput.current?.focus(); }
-      if (event.key === 'Escape' && window.location.pathname !== '/') navigate('/');
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        if (window.location.pathname !== '/') sheetElement.current?.querySelector<HTMLElement>('input[type="search"], .sheet-tools select')?.focus();
+        else searchInput.current?.focus();
+      }
+      if (event.key === 'Escape') {
+        ownerInput.stop();
+        if (window.location.pathname !== '/') navigate('/');
+        else { setPanel(null); ownerButton.current?.focus(); }
+      }
     };
     const onFullscreen = () => setFullscreen(document.fullscreenElement === stage.current);
     window.addEventListener('keydown', onKey);
     document.addEventListener('fullscreenchange', onFullscreen);
     return () => { window.removeEventListener('keydown', onKey); document.removeEventListener('fullscreenchange', onFullscreen); };
-  }, [navigate]);
+  }, [navigate, ownerInput]);
 
-  const fly = (next: Omit<CameraCommand, 'n'>) => setCommand((current) => ({ ...next, n: current.n + 1 }));
+  const fly = (next: Omit<CameraCommand, 'n'>) => {
+    setFollowId(null); setTour(false);
+    setCommand((current) => ({ ...next, n: current.n + 1 }));
+  };
   useEffect(() => {
     const board = BOARDS.find((slot) => slot.route === location.pathname);
     if (board) fly({ kind: 'board', id: board.id });
@@ -1428,24 +1605,24 @@ function OfficeShell() {
   const selectAgent = (id: string | null) => {
     setSelectedId(id);
     if (!id) return;
+    setOwnerVisitVersion((version) => version + 1);
     setPanel('agent');
     setFollowId(null);
     if (spots.has(id)) fly({ kind: 'agent', id });
   };
   const openOwner = () => {
+    panelBody.current?.scrollTo({ top: 0 });
     setSelectedId(null);
     setPanel('owner');
     setFollowId(null);
     fly({ kind: 'owner' });
   };
-  const stopOwnerMove = () => setOwnerMoveInput({ up: false, down: false, left: false, right: false });
-  const setOwnerMove = (direction: OwnerMoveDirection, active: boolean) => setOwnerMoveInput((current) => current[direction] === active ? current : { ...current, [direction]: active });
-  useEffect(() => { if (panel !== 'owner' || sheetOpen) stopOwnerMove(); }, [panel, sheetOpen]);
   const toggleFollow = (id: string) => {
     const next = followId === id ? null : id;
-    setFollowId(next);
     if (next === 'owner') fly({ kind: 'owner' });
     else if (next && spots.has(next)) fly({ kind: 'agent', id: next });
+    setFollowId(next);
+    setTour(false);
   };
   const openBoard = (id: BoardId) => navigate(BOARDS.find((slot) => slot.id === id)!.route);
   const summary = autopilot.isPending ? 'Memuat status kru...'
@@ -1453,11 +1630,12 @@ function OfficeShell() {
   const time = new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit' }).format(now);
   const width = FLOOR.maxX - FLOOR.minX;
   const depth = FLOOR.maxZ - FLOOR.minZ;
-  const externalLabel = !dashboardData ? 'Status aksi eksternal tidak diketahui' : dashboardData.externalWrites ? 'Bid live ke Freelancer aktif' : 'Aksi eksternal nonaktif';
+  const externalLabel = !dashboardData ? 'Status aksi eksternal tidak diketahui' : autopilotData?.marketplaceNotice?.quotaExhausted ? 'Bid terakhir ditolak: kuota akun Freelancer habis' : dashboardData.externalWrites ? 'Bid live ke Freelancer aktif' : 'Aksi eksternal nonaktif';
+  const lastCycle = !autopilotData ? 'Tidak tersedia' : autopilotData.lastRunAt ? formatDate(autopilotData.lastRunAt) : 'Belum tercatat';
   const employeeMetrics = (id: string) => {
     if (id === 'market-scout') return [
       { label: 'Proyek tersinkron pada siklus terakhir', value: !autopilotData ? 'Tidak tersedia' : autopilotData.lastRunAt ? String(autopilotData.lastImported) : autopilotData.cycleInProgress ? 'Siklus berjalan' : 'Belum tercatat' },
-      { label: 'Siklus terakhir', value: autopilotData?.lastRunAt ? formatDate(autopilotData.lastRunAt) : 'Belum tercatat' },
+      { label: 'Siklus terakhir', value: lastCycle },
     ];
     if (id === 'bid-strategist') return [
       { label: 'Bid berhasil pada siklus terakhir', value: !autopilotData ? 'Tidak tersedia' : autopilotData.lastRunAt ? String(autopilotData.lastSubmitted) : autopilotData.cycleInProgress ? 'Siklus berjalan' : 'Belum tercatat' },
@@ -1465,7 +1643,7 @@ function OfficeShell() {
     ];
     if (id === 'compliance-auditor') return [
       { label: 'Skip pada 50 audit terbaru', value: activityData ? String(activityData.filter((event) => event.type === 'autopilot.bid_skipped').length) : 'Tidak tersedia' },
-      { label: 'Siklus terakhir', value: autopilotData?.lastRunAt ? formatDate(autopilotData.lastRunAt) : 'Belum tercatat' },
+      { label: 'Siklus terakhir', value: lastCycle },
     ];
     if (id === 'lead-agent') return [
       { label: 'Status Hermes', value: hermes ? hermes.active ? 'Aktif' : 'Nonaktif' : 'Tidak tersedia' },
@@ -1494,7 +1672,7 @@ function OfficeShell() {
   return <div className="vo3d vo3d-app" ref={stage} style={{ background: phase.sky }}>
     <div className="vo3d-canvas" role="img" aria-label={`Kantor 3D Mission Control. ${summary}. Gunakan menu Papan dan daftar agen untuk navigasi dengan keyboard.`}>
       {webgl ? <Suspense fallback={<div className="vo3d-fallback">Memuat kantor visual...</div>}>
-        <VisualOffice agents={agents} ready={!autopilot.isPending} selectedId={selectedId} ownerSelected={panel === 'owner'} ownerMovementEnabled={!sheetOpen} ownerMoveInput={ownerMoveInput} ownerTarget={ownerTarget} followId={followId} onSelect={selectAgent} onOwnerSelect={openOwner} command={command} view={view} tour={tour} phase={phase} reducedMotion={reducedMotion} boards={boards} onOpenBoard={openBoard} />
+        <VisualOffice agents={agents} ready={!autopilot.isPending} selectedId={selectedId} ownerSelected={panel === 'owner'} ownerInput={ownerInput} ownerTarget={ownerTarget} ownerVisitVersion={ownerVisitVersion} onOwnerMoving={setOwnerMoving} followId={followId} onSelect={selectAgent} onOwnerSelect={openOwner} onCameraInteract={() => { setFollowId(null); setTour(false); }} command={command} view={view} tour={tour} phase={phase} reducedMotion={reducedMotion} boards={boards} onOpenBoard={openBoard} />
       </Suspense> : <div className="vo3d-fallback">WebGL tidak tersedia di browser ini. Gunakan menu Papan untuk membuka setiap kartu.</div>}
     </div>
 
@@ -1517,7 +1695,7 @@ function OfficeShell() {
     </nav>
 
     <div className="vo3d-float vo3d-tools">
-      <button type="button" className="vo3d-owner-action" aria-pressed={panel === 'owner'} onClick={openOwner}><OfficeIcon name="target" />Pemilik</button>
+      <button ref={ownerButton} type="button" className="vo3d-owner-action" aria-pressed={panel === 'owner'} onClick={openOwner}><OfficeIcon name="target" />Pemilik</button>
       <details className="vo3d-menu">
         <summary className="vo3d-icon" aria-label="Menu papan"><OfficeIcon name="grid" /></summary>
         <nav aria-label="Papan Mission Control">
@@ -1537,14 +1715,28 @@ function OfficeShell() {
     {pause.isError && <div className="vo3d-float vo3d-toast" role="alert">{pause.error.message}</div>}
 
     {panel && !sheetOpen && <aside className="vo3d-float vo3d-panel" aria-label="Panel detail">
-      <div className="vo3d-tabs" role="tablist">
-        {([['owner', 'Pemilik'], ['agent', 'Agen'], ['activity', 'Aktivitas'], ['channels', 'Kanal']] as const).map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={panel === id} onClick={() => id === 'owner' ? openOwner() : setPanel(id)}>{label}</button>)}
-        <button type="button" className="vo3d-close" aria-label="Tutup panel" onClick={() => setPanel(null)}><OfficeIcon name="close" /></button>
+      <div className="vo3d-tabs" role="tablist" aria-label="Rincian kantor">
+        {([['owner', 'Pemilik'], ['agent', 'Agen'], ['activity', 'Aktivitas'], ['channels', 'Kanal']] as const).map(([id, label], index, tabs) => <button key={id} id={`office-tab-${id}`} type="button" role="tab" aria-controls="office-detail-panel" tabIndex={panel === id ? 0 : -1} aria-selected={panel === id}
+          onClick={() => id === 'owner' ? openOwner() : setPanel(id)}
+          onKeyDown={(event) => {
+            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+            event.preventDefault(); event.stopPropagation();
+            const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+            const tab = tabs[next]!;
+            if (tab[0] === 'owner') openOwner(); else setPanel(tab[0]);
+            event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
+          }}>{label}</button>)}
+        <button type="button" className="vo3d-close" aria-label="Tutup panel" onClick={() => { ownerInput.stop(); setPanel(null); ownerButton.current?.focus(); }}><OfficeIcon name="close" /></button>
       </div>
-      <div className="vo3d-panel-body" role="tabpanel">
+      <div ref={panelBody} className="vo3d-panel-body" id="office-detail-panel" role="tabpanel" aria-labelledby={`office-tab-${panel}`}>
         {panel === 'owner' && <>
           <div className="vo3d-profile"><span className="vo3d-avatar vo3d-owner-avatar">P</span>
             <div><h3>Pemilik</h3><p>Kendali dan pemantauan tim</p><span className="vo3d-badge">Data kantor lokal</span></div></div>
+          {webgl ? <OwnerControls input={ownerInput} moving={ownerMoving} /> : <p className="vo3d-owner-hint">Kontrol gerak tidak tersedia karena WebGL tidak aktif.</p>}
+          <div className="vo3d-owner-actions">
+            <button type="button" disabled={!webgl} aria-pressed={followId === 'owner'} onClick={() => toggleFollow('owner')}>{followId === 'owner' ? 'Hentikan ikuti kamera' : 'Ikuti Owner'}</button>
+            <button type="button" onClick={() => fly({ kind: 'overview' })}>Kamera overview</button>
+          </div>
           <h2>Ringkasan tim</h2>
           <div className="vo3d-owner-summary">
             <div><span>Aktif</span><strong>{counts.working}</strong></div>
@@ -1552,16 +1744,11 @@ function OfficeShell() {
             <div><span>Offline</span><strong>{counts.offline}</strong></div>
             <div><span>Tidak diketahui</span><strong>{counts.unknown}</strong></div>
           </div>
-          <div className="vo3d-owner-actions">
-            <button type="button" aria-pressed={followId === 'owner'} onClick={() => toggleFollow('owner')}>{followId === 'owner' ? 'Hentikan ikuti kamera' : 'Ikuti Owner'}</button>
-            <button type="button" onClick={() => { setFollowId(null); fly({ kind: 'overview' }); }}>Kamera overview</button>
-          </div>
-          <OwnerControls onMoveStart={(direction) => setOwnerMove(direction, true)} onMoveStop={stopOwnerMove} />
           <h2>Kinerja operasi</h2>
           <p className="vo3d-owner-hint">Ringkasan berasal dari status server dan audit tersimpan.</p>
           <dl>
             <dt>Autopilot</dt><dd>{autopilotData ? <StateLabel state={autopilotData.state} /> : 'Tidak tersedia'}</dd>
-            <dt>Siklus terakhir</dt><dd>{autopilotData?.lastRunAt ? formatDate(autopilotData.lastRunAt) : 'Belum tercatat'}</dd>
+            <dt>Siklus terakhir</dt><dd>{lastCycle}</dd>
             <dt>Siklus berikutnya</dt><dd>{autopilotData?.nextRunAt ? formatDate(autopilotData.nextRunAt) : 'Tidak tersedia'}</dd>
             <dt>Proyek tersinkron pada siklus terakhir</dt><dd>{!autopilotData ? 'Tidak tersedia' : autopilotData.lastRunAt ? autopilotData.lastImported : autopilotData.cycleInProgress ? 'Siklus berjalan' : 'Belum tercatat'}</dd>
             <dt>Bid berhasil pada siklus terakhir</dt><dd>{!autopilotData ? 'Tidak tersedia' : autopilotData.lastRunAt ? autopilotData.lastSubmitted : autopilotData.cycleInProgress ? 'Siklus berjalan' : 'Belum tercatat'}</dd>
@@ -1569,7 +1756,7 @@ function OfficeShell() {
             <dt>Kebijakan</dt><dd>{dashboardData ? <StateLabel state={dashboardData.policy.state} /> : 'Tidak tersedia'}</dd>
           </dl>
           <h2 className="vo3d-owner-list-title">Temui karyawan</h2>
-          <p className="vo3d-owner-hint">Pilih nama untuk menghampiri agen dan membuka rinciannya. Aktifkan ikuti kamera dari kartu agen.</p>
+          <p className="vo3d-owner-hint">Pilih nama untuk melihat rincian dan menghampiri agen yang ada di lantai. Agen offline hanya membuka rincian.</p>
           <ul className="vo3d-owner-agent-list">
             {agents.map((agent) => <li key={agent.id}><button type="button" onClick={() => selectAgent(agent.id)}>
               <span className="vo3d-avatar" style={{ background: agent.color }}>{initials(agent.name)}</span>
@@ -1583,6 +1770,7 @@ function OfficeShell() {
           <div className="vo3d-owner-actions">
             <button type="button" disabled={!spots.has(selected.id)} aria-pressed={followId === selected.id} onClick={() => toggleFollow(selected.id)}>{followId === selected.id ? 'Hentikan ikuti kamera' : 'Ikuti kamera agen'}</button>
             <button type="button" onClick={openOwner}>Kembali ke Owner</button>
+            <button type="button" onClick={() => ownerInput.stop()}>Hentikan perjalanan Owner</button>
           </div>
           <h2>Sinyal kinerja yang tersedia</h2>
           <p className="vo3d-owner-hint">Angka mengikuti data tersimpan; beberapa peran memakai loop bersama atau belum memiliki runtime.</p>
@@ -1592,7 +1780,7 @@ function OfficeShell() {
           <dl>
             <dt>Ruangan</dt><dd>{selected.room ? ROOM_LABELS[selected.room] : 'Tidak di lantai kantor'}</dd>
             <dt>Alasan status</dt><dd>{selected.reason}</dd>
-            <dt>Tugas saat ini</dt><dd>{selected.task ?? 'Tidak ada tugas berjalan'}</dd>
+            <dt>Tugas saat ini</dt><dd>{selected.task ?? (selected.state === 'unknown' ? 'Tidak tersedia' : 'Tidak ada tugas berjalan')}</dd>
             <dt>Aktivitas terbaru</dt>
             <dd>{selected.recentActivity.length ? selected.recentActivity.map((event) => <div key={event.id}>{activityTitle(event.type)} · {formatDate(event.createdAt)}</div>) : 'Belum ada aktivitas tercatat'}</dd>
           </dl>
@@ -1639,16 +1827,17 @@ function OfficeShell() {
     <div className="vo3d-float vo3d-seg" role="toolbar" aria-label="Kontrol tampilan">
       <button type="button" aria-pressed={view === '3d'} aria-label="Tampilan 3D" title="Tampilan 3D" onClick={() => { setView('3d'); fly({ kind: 'overview' }); }}><OfficeIcon name="cube" /></button>
       <button type="button" aria-pressed={view === 'top'} aria-label="Tampilan denah atas" title="Denah atas" onClick={() => { setView('top'); setTour(false); fly({ kind: 'overview' }); }}><OfficeIcon name="top" /></button>
-      <button type="button" aria-pressed={tour} disabled={reducedMotion} title={reducedMotion ? 'Dinonaktifkan karena preferensi kurangi gerakan' : 'Putar kamera otomatis'} onClick={() => { setView('3d'); setTour((on) => !on); }}><OfficeIcon name="play" />Tur</button>
+      <button type="button" aria-pressed={tour} disabled={reducedMotion} title={reducedMotion ? 'Dinonaktifkan karena preferensi kurangi gerakan' : 'Putar kamera otomatis'} onClick={() => { setFollowId(null); setView('3d'); setTour((on) => !on); }}><OfficeIcon name="play" />Tur</button>
       <button type="button" aria-label="Pusatkan kamera" title="Pusatkan" onClick={() => fly({ kind: 'overview' })}><OfficeIcon name="target" /></button>
     </div>
 
     {sheetOpen && <div className="vo3d-sheet-backdrop" onClick={() => navigate('/')}>
-      <section className="vo3d-sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" onClick={(event) => event.stopPropagation()}>
+      <section ref={sheetElement} className="vo3d-sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" onClick={(event) => event.stopPropagation()}>
         <header className="vo3d-sheet-head">
           <h2 id="sheet-title" ref={sheetHeading} tabIndex={-1}>{SHEET_TITLES[location.pathname] ?? 'Halaman'}</h2>
           <button type="button" className="vo3d-icon" aria-label="Tutup kartu dan kembali ke kantor" onClick={() => navigate('/')}><OfficeIcon name="close" /></button>
         </header>
+        <nav className="sheet-tools" aria-label="Navigasi dan pembaruan kartu"><label><span>Buka kartu</span><select value={location.pathname} onChange={(event) => navigate(event.target.value)}>{Object.entries(SHEET_TITLES).map(([route, title]) => <option value={route} key={route}>{title}</option>)}</select></label><button type="button" className="button button-secondary" disabled={refreshingSheet} onClick={async () => { setRefreshingSheet(true); try { await queryClient.invalidateQueries({ type: 'active' }); } finally { setRefreshingSheet(false); } }}>{refreshingSheet ? 'Memperbarui…' : 'Perbarui data'}</button></nav>
         <div className="vo3d-sheet-body page-content"><Outlet /></div>
       </section>
     </div>}

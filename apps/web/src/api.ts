@@ -59,6 +59,11 @@ export type Policy = {
   activeHours: { start: number; end: number };
   noNegotiationTerms: string[];
   simulationOnly: boolean;
+  allowUnknownDeadline?: boolean;
+  activeDays?: number[];
+  scanIntervalMinutes?: number;
+  maxRiskScore?: number;
+  requireSpecializationMatch?: boolean;
 };
 
 export type Opportunity = {
@@ -181,4 +186,10 @@ export type Autopilot = {
   lastSubmitted: number;
   specializations: string[];
   cycleInProgress?: boolean;
+  draftsInProgress?: number;
+  intervalMinutes?: number;
+  searchTerms?: string[];
+  summary?: { considered: number; eligible: number; reasons: Record<string, number> } | null;
+  waitingReason?: string | null;
+  marketplaceNotice?: { at: string; quotaExhausted: boolean; reason: string; retryAt: string | null } | null;
 };

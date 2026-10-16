@@ -4,6 +4,18 @@ import { GitHubReadAdapter } from './index.js';
 const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
 describe('GitHubReadAdapter', () => {
+  it('skips an oversized blob without aborting the remaining repository files', async () => {
+    const fetcher = vi.fn<typeof fetch>(async (url) => String(url).includes('/git/trees/') ? jsonResponse({ sha: 'tree', tree: [{ path: 'large.md', type: 'blob', size: 10, sha: 'large' }, { path: 'README.md', type: 'blob', size: 10, sha: 'small' }] }) : String(url).endsWith('/large') ? jsonResponse({ encoding: 'base64', size: 100_001, content: '' }) : String(url).endsWith('/small') ? jsonResponse({ encoding: 'base64', content: Buffer.from('Portfolio evidence').toString('base64') }) : jsonResponse({ default_branch: 'main' }));
+    expect(await new GitHubReadAdapter({ fetcher }).readRepository('owner/repo')).toMatchObject({ fetched: 1, limited: 1, skipped: 1, files: [{ path: 'README.md', content: 'Portfolio evidence' }] });
+  });
+  it('avoids downloading unchanged trees and reads changed content by blob hash', async () => {
+    const fetcher = vi.fn<typeof fetch>(async (url) => String(url).includes('/git/trees/') ? jsonResponse({ sha: 'same-tree', tree: [{ path: 'README.md', type: 'blob', size: 50, sha: 'blob123' }] }) : String(url).includes('/git/blobs/') ? jsonResponse({ encoding: 'base64', content: Buffer.from('# Updated snapshot').toString('base64') }) : jsonResponse({ default_branch: 'main' }));
+    const adapter = new GitHubReadAdapter({ fetcher });
+    expect(await adapter.readRepository('me/project', 'same-tree')).toMatchObject({ unchanged: true, fetched: 0 });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(await adapter.readRepository('me/project', 'older')).toMatchObject({ unchanged: false, files: [{ path: 'README.md', content: '# Updated snapshot' }] });
+    expect(fetcher.mock.calls.at(-1)?.[0]).toContain('/git/blobs/blob123');
+  });
   it('reads only eligible text files from a selected repository', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ default_branch: 'main' }))
@@ -47,6 +59,8 @@ describe('GitHubReadAdapter', () => {
     await expect(truncated.readRepository('bad/repo/name')).rejects.toMatchObject({ code: 'invalid_repository' });
     const denied = new GitHubReadAdapter({ fetcher: vi.fn().mockResolvedValue(jsonResponse({ message: 'forbidden' }, 403)) as typeof fetch });
     await expect(denied.readRepository('owner/project')).rejects.toMatchObject({ code: 'permission_denied' });
+    const empty = new GitHubReadAdapter({ fetcher: vi.fn().mockResolvedValue(jsonResponse({ message: 'Git Repository is empty.' }, 409)) as typeof fetch });
+    await expect(empty.readRepository('owner/empty')).rejects.toMatchObject({ code: 'repository_empty' });
   });
 
   it('passes an optional read token only in the server-side authorization header', async () => {

@@ -1,11 +1,14 @@
 import { z } from 'zod';
+import { normalizeKeywords, validPolicyTimezone } from '@fvh/domain';
+
+const timezone = z.string().trim().min(3).max(80).refine(validPolicyTimezone, 'Zona waktu IANA tidak valid, misalnya Asia/Jakarta.');
 
 export const updateProfileSchema = z.object({
   primaryField: z.string().trim().max(100),
   specializations: z.array(z.string().trim().min(1).max(80)).max(12),
   language: z.string().trim().min(2).max(40),
   currency: z.string().trim().length(3).toUpperCase(),
-  timezone: z.string().trim().min(3).max(80),
+  timezone,
   minPrice: z.number().finite().min(0),
   maxPrice: z.number().finite().min(0),
   facts: z.array(z.object({ label: z.string().trim().min(1).max(100), value: z.string().trim().min(1).max(500), source: z.string().trim().min(1).max(300) })).max(30),
@@ -13,19 +16,26 @@ export const updateProfileSchema = z.object({
 
 export const updatePolicySchema = z.object({
   allowedActions: z.array(z.enum(['bid.submit'])).max(1),
-  keywords: z.array(z.string().trim().min(2).max(60)).max(30),
-  minimumConfidence: z.number().min(0.5).max(1),
+  keywords: z.array(z.string().trim().min(1).max(60)).max(300).transform(normalizeKeywords),
+  minimumConfidence: z.number().min(0).max(1),
   minPrice: z.number().finite().min(0),
   maxPrice: z.number().finite().min(0),
   dailyBidLimit: z.number().int().min(0).max(50),
   weeklyBidLimit: z.number().int().min(0).max(200),
-  timezone: z.string().trim().min(3).max(80),
-  activeHours: z.object({ start: z.number().int().min(0).max(23), end: z.number().int().min(1).max(24) }),
+  timezone,
+  activeHours: z.object({ start: z.number().int().min(0).max(23), end: z.number().int().min(0).max(24) }),
+  activeDays: z.array(z.number().int().min(0).max(6)).min(1).max(7).optional(),
+  allowUnknownDeadline: z.boolean().optional(),
+  scanIntervalMinutes: z.number().int().min(5).max(60).optional(),
+  maxRiskScore: z.number().min(0).max(1).optional(),
+  requireSpecializationMatch: z.boolean().optional(),
+  validityDays: z.number().int().min(1).max(365).optional(),
+  expectedVersion: z.number().int().positive().optional(),
   noNegotiationTerms: z.array(z.string().trim().min(2).max(80)).max(30),
 }).refine((policy) => policy.maxPrice >= policy.minPrice, { path: ['maxPrice'], message: 'Harga maksimum harus sama atau lebih besar.' })
-  .refine((policy) => policy.activeHours.end > policy.activeHours.start, { path: ['activeHours'], message: 'Jam selesai harus setelah jam mulai.' });
+  .refine((policy) => policy.activeHours.end !== policy.activeHours.start, { path: ['activeHours'], message: 'Untuk operasi 24 jam gunakan 00–24; jam mulai dan selesai tidak boleh sama.' });
 
-export const activatePolicySchema = z.object({ confirmSimulation: z.literal(true) });
+export const activatePolicySchema = z.union([z.object({ confirmSimulation: z.literal(true) }), z.object({ confirmLive: z.literal(true), mode: z.literal('live') })]);
 
 export const knowledgeImportSchema = z.object({
   provider: z.enum(['github', 'linkedin', 'manual']),

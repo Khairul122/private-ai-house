@@ -7,7 +7,7 @@ const MAX_FILE_BYTES = 100_000;
 const MAX_OWN_REPOSITORIES = 50;
 
 export type GitHubFile = { path: string; content: string };
-export type GitHubReadResult = { repository: string; branch: string; ref: string; files: GitHubFile[]; fetched: number; skipped: number };
+export type GitHubReadResult = { repository: string; branch: string; ref: string; files: GitHubFile[]; fetched: number; skipped: number; eligible: number; limited: number; unchanged: boolean };
 type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 export class GitHubReadError extends Error {
@@ -24,7 +24,7 @@ export class GitHubReadAdapter {
     this.fetcher = options.fetcher ?? fetch;
   }
 
-  async readRepository(repository: string): Promise<GitHubReadResult> {
+  async readRepository(repository: string, knownRef?: string): Promise<GitHubReadResult> {
     if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+$/.test(repository)) {
       throw new GitHubReadError('invalid_repository', 'Gunakan format pemilik/nama-repositori.');
     }
@@ -44,13 +44,25 @@ export class GitHubReadAdapter {
       throw new GitHubReadError('invalid_tree_response', 'Struktur repositori tidak dapat dibaca.');
     }
 
-    const entries = tree.tree as Array<{ path?: unknown; type?: unknown; size?: unknown }>;
-    const eligible = entries.filter((entry) => entry.type === 'blob' && typeof entry.path === 'string' && isEligibleKnowledgePath(entry.path) && typeof entry.size === 'number' && entry.size <= MAX_FILE_BYTES).slice(0, MAX_REPOSITORY_FILES);
+    const entries = tree.tree as Array<{ path?: unknown; type?: unknown; size?: unknown; sha?: unknown }>;
+    const candidates = entries.filter((entry) => entry.type === 'blob' && typeof entry.path === 'string' && isEligibleKnowledgePath(entry.path) && typeof entry.size === 'number' && entry.size <= MAX_FILE_BYTES);
+    const eligible = candidates.slice(0, MAX_REPOSITORY_FILES);
+    const limited = Math.max(0, candidates.length - eligible.length);
+    if (tree.sha === knownRef) return { repository, branch, ref: tree.sha, files: [], fetched: 0, skipped: 0, eligible: candidates.length, limited, unchanged: true };
     const files: GitHubFile[] = [];
-    for (const entry of eligible) {
-      const path = entry.path as string;
-      const raw = await this.getText(`${API_ROOT}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(branch)}`);
-      files.push({ path, content: raw });
+    for (let start = 0; start < eligible.length; start += 3) {
+      files.push(...await Promise.all(eligible.slice(start, start + 3).map(async (entry) => {
+        const path = entry.path as string;
+        // Blob hashes pin real API reads to the tree snapshot, even if its branch moves.
+        const prefix = `${API_ROOT}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+        try {
+          const content = typeof entry.sha === 'string' ? await this.getBlobText(`${prefix}/git/blobs/${encodeURIComponent(entry.sha)}`) : await this.getText(`${prefix}/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(branch)}`);
+          return { path, content };
+        } catch (error) {
+          if (error instanceof GitHubReadError && error.code === 'file_too_large') return null;
+          throw error;
+        }
+      })).then((batch) => batch.filter((file): file is GitHubFile => file !== null)));
     }
     return {
       repository,
@@ -58,7 +70,10 @@ export class GitHubReadAdapter {
       ref: tree.sha,
       files,
       fetched: files.length,
-      skipped: entries.length - files.length,
+      skipped: entries.filter((entry) => entry.type === 'blob').length - files.length,
+      eligible: candidates.length,
+      limited: Math.max(limited, candidates.length - files.length),
+      unchanged: false,
     };
   }
 
@@ -78,8 +93,13 @@ export class GitHubReadAdapter {
     } catch {
       throw new GitHubReadError('network_error', 'GitHub tidak dapat dijangkau. Sinkronisasi dapat dicoba lagi nanti.');
     }
+    if (response.status === 429 || (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0')) throw new GitHubReadError('rate_limited', 'Batas permintaan GitHub tercapai. Tunggu hingga kuota API pulih sebelum mencoba kembali.');
     if (response.status === 401 || response.status === 403) throw new GitHubReadError('permission_denied', 'GitHub menolak akses repositori. Periksa izin baca Contents.');
     if (response.status === 404) throw new GitHubReadError('repository_not_found', 'Repositori tidak ditemukan atau tidak tersedia untuk token ini.');
+    if (response.status === 409) {
+      const details = await response.json().catch(() => null) as { message?: unknown } | null;
+      if (details?.message === 'Git Repository is empty.') throw new GitHubReadError('repository_empty', 'Repositori masih kosong; belum ada berkas untuk diindeks.');
+    }
     if (response.status === 429) throw new GitHubReadError('rate_limited', 'GitHub membatasi permintaan. Sinkronisasi dihentikan tanpa retry otomatis.');
     if (!response.ok) throw new GitHubReadError('provider_error', `GitHub mengembalikan status ${response.status}.`);
     return response;
@@ -109,5 +129,14 @@ export class GitHubReadAdapter {
     const content = await response.text();
     if (Buffer.byteLength(content, 'utf8') > MAX_FILE_BYTES) throw new GitHubReadError('file_too_large', 'GitHub mengembalikan file di atas batas indeks.');
     return content;
+  }
+
+  private async getBlobText(url: string): Promise<string> {
+    const blob = await this.getJson(url) as { encoding?: unknown; content?: unknown; size?: unknown };
+    if (typeof blob.size === 'number' && blob.size > MAX_FILE_BYTES) throw new GitHubReadError('file_too_large', 'GitHub mengembalikan file di atas batas indeks.');
+    if (blob.encoding !== 'base64' || typeof blob.content !== 'string') throw new GitHubReadError('invalid_blob', 'Isi file GitHub tidak memiliki encoding base64 yang valid.');
+    const bytes = Buffer.from(blob.content, 'base64');
+    if (bytes.length > MAX_FILE_BYTES) throw new GitHubReadError('file_too_large', 'GitHub mengembalikan file di atas batas indeks.');
+    return bytes.toString('utf8');
   }
 }

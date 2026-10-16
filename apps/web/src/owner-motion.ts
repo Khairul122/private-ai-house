@@ -94,17 +94,19 @@ export function ownerVisitDestination(target: Spot): P2 | null {
 }
 
 export function createOwnerMotion() {
-  return { x: OWNER_SPOT.x, z: OWNER_SPOT.z, heading: OWNER_SPOT.facing, facing: OWNER_SPOT.facing, path: [] as P2[], targetKey: '', gait: 0, blend: 0, swing: 0, bob: 0 };
+  return { x: OWNER_SPOT.x, z: OWNER_SPOT.z, heading: OWNER_SPOT.facing, facing: OWNER_SPOT.facing, path: [] as P2[], targetKey: '', gait: 0, blend: 0, swing: 0, bob: 0, moving: false };
 }
 export type OwnerMotion = ReturnType<typeof createOwnerMotion>;
 
-export function setOwnerDestination(state: OwnerMotion, target: Spot | null) {
-  const key = target ? `${target.x}:${target.z}:${target.facing}` : '';
-  if (state.targetKey === key) return;
+export function setOwnerDestination(state: OwnerMotion, target: Spot | null, request = 0) {
+  const key = target ? `${request}:${target.x}:${target.z}:${target.facing}` : '';
+  if (state.targetKey === key) return false;
   state.targetKey = key;
   const destination = target ? ownerVisitDestination(target) : null;
   state.path = destination ? planOwnerPath([state.x, state.z], destination) : [];
   if (target && destination) state.facing = Math.atan2(target.x - destination[0], target.z - destination[1]);
+  else state.facing = state.heading;
+  return true;
 }
 
 export function stopOwnerMotion(state: OwnerMotion) { state.path = []; state.facing = state.heading; }
@@ -115,8 +117,8 @@ export function stepOwnerMotion(state: OwnerMotion, input: OwnerMoveInput, camer
   const horizontal = Number(input.right) - Number(input.left);
   const vertical = Number(input.up) - Number(input.down);
   const length = Math.hypot(horizontal, vertical);
+  if (input.up || input.down || input.left || input.right) state.path = [];
   if (length) {
-    state.path = [];
     const yawLength = Math.hypot(...cameraRight) || 1;
     const rx = cameraRight[0] / yawLength; const rz = cameraRight[1] / yawLength;
     const dx = (rx * horizontal + rz * vertical) / length * 4.2 * dt;
@@ -138,6 +140,7 @@ export function stepOwnerMotion(state: OwnerMotion, input: OwnerMoveInput, camer
   const dx = state.x - startX; const dz = state.z - startZ;
   const distance = Math.hypot(dx, dz);
   const moving = distance > 0.00001;
+  state.moving = moving;
   const heading = moving ? Math.atan2(dx, dz) : state.path.length ? state.heading : state.facing;
   if (length && moving) state.facing = heading;
   const turn = Math.atan2(Math.sin(heading - state.heading), Math.cos(heading - state.heading));

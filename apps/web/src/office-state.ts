@@ -47,12 +47,12 @@ function autopilotState(autopilot: Autopilot | undefined, collaborating: boolean
   if (autopilot.state === 'running') {
     return autopilot.cycleInProgress
       ? { state: collaborating ? 'collaborating' : 'working', reason: WORK_REASON }
-      : { state: 'idle', reason: IDLE_REASON };
+      : { state: 'idle', reason: autopilot.waitingReason ?? IDLE_REASON };
   }
   const reason = autopilot.state === 'paused'
     ? 'Autopilot dijeda melalui kill switch.'
     : autopilot.state === 'blocked'
-      ? 'Kebijakan belum mengizinkan bid live.'
+      ? autopilot.waitingReason ?? 'Kebijakan belum mengizinkan bid live.'
       : autopilot.state === 'error'
         ? `Autopilot mengalami kesalahan: ${autopilot.lastMessage}`
         : 'Autopilot tidak sedang berjalan.';
@@ -87,6 +87,7 @@ export type OfficeContext = {
   hermes?: { active: boolean; reason: string; draftsInProgress?: number | undefined } | undefined;
   inboxWaiting?: number | undefined;
   dueSoon?: number | undefined;
+  knowledge?: { state: string; provider: string; current: string | null } | null | undefined;
 };
 
 type Derived = { state: AgentState; reason: string; task?: string | null };
@@ -116,6 +117,7 @@ export function deriveOfficeAgents(autopilot: Autopilot | undefined, activity: A
     else if (entry.id === 'bid-strategist' && sync?.step === 'outcomes') derived = { state: 'reviewing', reason: 'Memeriksa hasil bid di Freelancer.', task: 'Memeriksa status bid yang menunggu.' };
     else if (entry.id === 'bid-strategist' || entry.id === 'compliance-auditor') derived = autopilotState(autopilot, true);
     else if (entry.id === 'client-relations') derived = clientRelationsState(sync, inboxWaiting);
+    else if (entry.id === 'knowledge-curator' && context.knowledge?.state === 'running') derived = { state: 'working', reason: `Sinkronisasi API ${context.knowledge.provider} sedang berjalan.`, task: context.knowledge.current ?? 'Membaca sumber Knowledge Hub.' };
     else if (entry.id === 'operations-analyst' && autopilot && dueSoon) derived = { state: 'reviewing', reason: `Memantau ${dueSoon} tenggat proyek dalam 48 jam.`, task: `Memantau ${dueSoon} tenggat proyek dalam 48 jam.` };
     else if (['chief-of-staff', 'profile-editor', 'operations-analyst', 'knowledge-curator'].includes(entry.id)) derived = autopilot ? { state: 'idle', reason: ON_DEMAND_REASON } : { state: 'unknown', reason: 'Data server tidak tersedia.' };
     else derived = { state: 'offline', reason: 'Tidak ada komponen runtime; tes dijalankan di luar aplikasi.' };

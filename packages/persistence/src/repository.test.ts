@@ -7,6 +7,21 @@ describe('WorkspaceRepository', () => {
   let repository: WorkspaceRepository | undefined;
   afterEach(async () => { await repository?.close(); });
 
+  it('preserves a previous source when replacement fails and compares policy versions atomically', async () => {
+    repository = await WorkspaceRepository.open();
+    const prepared = prepareKnowledgeFile({ sourceId: 'atomic', provider: 'github', label: 'owner/repo', referenceUrl: 'https://github.com/owner/repo', sourceRef: 'ref', updatedAt: '2026-10-16T00:00:00Z', path: 'README.md', content: 'Original documented portfolio evidence' });
+    if (!prepared.ok) throw new Error('Fixture must pass.');
+    const source = { id: 'atomic', provider: 'github' as const, label: 'owner/repo', referenceUrl: 'https://github.com/owner/repo', updatedAt: '2026-10-16T00:00:00Z' };
+    await repository.createKnowledgeSource(source, prepared.chunks);
+    await expect(repository.replaceKnowledgeSource({ ...source, label: 'replacement' }, [...prepared.chunks, ...prepared.chunks])).rejects.toThrow();
+    expect(await repository.listKnowledgeSources()).toMatchObject([{ label: 'owner/repo', chunkCount: 1 }]);
+    expect(await repository.knowledgeSourceRef('atomic')).toBe('ref');
+    const policy = await repository.getPolicy();
+    expect(await repository.savePolicyIfVersion({ ...policy, version: policy.version + 1 }, policy.version)).toBe(true);
+    expect(await repository.savePolicyIfVersion({ ...policy, keywords: ['stale'] }, policy.version)).toBe(false);
+    expect((await repository.getPolicy()).keywords).not.toContain('stale');
+  });
+
   it('creates an empty local workspace with an inactive policy', async () => {
     repository = await WorkspaceRepository.open();
 

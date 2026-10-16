@@ -229,6 +229,13 @@ export class WorkspaceRepository {
       ON CONFLICT (workspace_id) DO UPDATE SET policy_json = excluded.policy_json, updated_at = excluded.updated_at`, [WORKSPACE_ID, JSON.stringify(policy), new Date().toISOString()]);
   }
 
+  async savePolicyIfVersion(policy: AutonomyPolicy, expectedVersion: number): Promise<boolean> {
+    const rows = await this.database.query(`UPDATE autonomy_policies SET policy_json = $1, updated_at = $2
+      WHERE workspace_id = $3 AND (policy_json::jsonb->>'version')::int = $4 RETURNING workspace_id`,
+    [JSON.stringify(policy), new Date().toISOString(), WORKSPACE_ID, expectedVersion]);
+    return rows.length === 1;
+  }
+
   async getProfile(): Promise<ServiceProfile> {
     const [row] = await this.database.query<{ profile_json: string }>('SELECT profile_json FROM service_profiles WHERE workspace_id = $1', [WORKSPACE_ID]);
     return row ? parseJson<ServiceProfile>(row.profile_json) : initialProfile();
@@ -248,6 +255,41 @@ export class WorkspaceRepository {
 
   async listAudit(limit = 50): Promise<AuditEvent[]> {
     return camel<AuditEvent>(await this.database.query('SELECT id, type, resource_id, status, reason, policy_version, payload_hash, created_at FROM audit_events ORDER BY created_at DESC LIMIT $1', [limit]));
+  }
+
+  async listAuditForType(type: string, limit = 50): Promise<AuditEvent[]> {
+    return camel<AuditEvent>(await this.database.query('SELECT id, type, resource_id, status, reason, policy_version, payload_hash, created_at FROM audit_events WHERE type = $1 ORDER BY created_at DESC LIMIT $2', [type, limit]));
+  }
+
+  async bidUsage(now: Date, timezone: string): Promise<{ today: number; week: number }> {
+    const rows = await this.database.query<{ today: number; week: number }>(`
+      SELECT COUNT(*) FILTER (WHERE local_day = ($1::timestamptz AT TIME ZONE $2)::date)::int AS today,
+        COUNT(*) FILTER (WHERE date_trunc('week', local_day) = date_trunc('week', $1::timestamptz AT TIME ZONE $2))::int AS week
+      FROM (SELECT (created_at::timestamptz AT TIME ZONE $2)::date AS local_day FROM audit_events
+        WHERE type = 'marketplace.production.submit_bid' AND status = 'recorded' AND created_at >= $3 AND created_at <= $1) bids`,
+    [now.toISOString(), timezone, new Date(now.getTime() - 9 * 86_400_000).toISOString()]);
+    return rows[0] ?? { today: 0, week: 0 };
+  }
+
+  async autopilotDecisions(policyVersion: number): Promise<Array<{ resourceId: string; reason: string; attempted: boolean }>> {
+    return camel(await this.database.query(`SELECT resource_id, reason, type = 'marketplace.production.submit_bid' AS attempted
+      FROM audit_events WHERE type = 'marketplace.production.submit_bid'
+        OR (type = 'autopilot.bid_skipped' AND policy_version = $1)`, [policyVersion]));
+  }
+
+  /** Audit event counts per local day (in the owner's timezone), for the agenda. */
+  async auditDailySummary(timezone: string, sinceIso: string): Promise<Array<{ day: string; type: string; status: string; total: number }>> {
+    return await this.database.query(
+      "SELECT to_char((created_at::timestamptz AT TIME ZONE $1), 'YYYY-MM-DD') AS day, type, status, COUNT(*)::int AS total FROM audit_events WHERE created_at >= $2 GROUP BY 1, 2, 3", [timezone, sinceIso]);
+  }
+
+  /** Events of one local day, newest first; per-project skip decisions are summarized elsewhere because they are too many to list. */
+  async auditForDay(timezone: string, day: string, limit = 300): Promise<AuditEvent[]> {
+    const from = new Date(Date.parse(day + 'T00:00:00Z') - 86_400_000).toISOString();
+    const to = new Date(Date.parse(day + 'T00:00:00Z') + 2 * 86_400_000).toISOString();
+    return camel<AuditEvent>(await this.database.query(
+      "SELECT id, type, resource_id, status, reason, policy_version, payload_hash, created_at FROM audit_events WHERE created_at >= $3 AND created_at < $4 AND type <> 'autopilot.bid_skipped' AND to_char((created_at::timestamptz AT TIME ZONE $1), 'YYYY-MM-DD') = $2 ORDER BY created_at DESC LIMIT $5",
+      [timezone, day, from, to, limit]));
   }
 
   async recordSubmittedBid(input: { projectId: string; bidId: string; amount: number | null; currency: string | null; submittedAt: string }): Promise<BidOutcome> {
@@ -399,6 +441,15 @@ export class WorkspaceRepository {
       FROM knowledge_sources s LEFT JOIN knowledge_chunks c ON c.source_id = s.id
       GROUP BY s.id ORDER BY s.updated_at DESC
     `));
+  }
+
+  async knowledgeSourceRef(sourceId: string): Promise<string | undefined> {
+    const rows = await this.database.query<{ source_ref: string }>('SELECT source_ref FROM knowledge_chunks WHERE source_id = $1 LIMIT 1', [sourceId]);
+    return rows[0]?.source_ref;
+  }
+
+  async markKnowledgeChecked(sourceId: string, checkedAt: string): Promise<void> {
+    await this.database.query('UPDATE knowledge_sources SET updated_at = $2 WHERE id = $1', [sourceId, checkedAt]);
   }
 
   /** `rank` is lower-is-better (negated ts_rank), matching the old bm25 ordering. */

@@ -5,12 +5,13 @@ import fastifyStatic from '@fastify/static';
 import { FreelancerProductionWriteAdapter, FreelancerReadAdapter, FreelancerReadError, FreelancerSandboxWriteAdapter } from '@fvh/adapter-freelancer';
 import { HermesCliDraftingAdapter } from '@fvh/adapter-hermes';
 import { createDatabase, WorkspaceRepository } from '@fvh/persistence';
-import { deleteLinkedInAccessToken, getFreelancerAccessToken, getLinkedInClientCredentials, readCredentialStatus, storeLinkedInAccessToken } from './credential-store.js';
+import { deleteLinkedInAccessToken, getFreelancerAccessToken, getLinkedInAccessToken, getLinkedInClientCredentials, readCredentialStatus, storeLinkedInAccessToken } from './credential-store.js';
 import { LinkedInOAuthService } from './linkedin-oauth.js';
 import { readLinkedInEnvironment } from './linkedin-env.js';
 import { readGitHubEnvironment } from './github-env.js';
 import { readFreelancerEnvironment } from './freelancer-env.js';
 import { readDraftingEnvironment } from './ai-env.js';
+import { readLinkedInProfile, syncLinkedInProfile } from './linkedin-api.js';
 import { createApp } from './app.js';
 import { FreelancerAutopilot } from './autopilot.js';
 import { BusinessSync } from './business-sync.js';
@@ -169,6 +170,7 @@ const app = await createApp({
   },
   linkedinOAuth,
   disconnectLinkedIn: () => deleteLinkedInAccessToken(credentialStorePath, credentialScriptPath),
+  syncLinkedIn: async () => syncLinkedInProfile(repository, await readLinkedInProfile(await getLinkedInAccessToken(credentialStorePath, credentialScriptPath))),
   spaFallback: hasWebBuild,
   draftingReason,
   ...(drafting ? { drafting, draftingMode: 'hermes' as const } : { draftingMode: 'disabled' as const }),

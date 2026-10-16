@@ -2,11 +2,12 @@ import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { BOARD_SIZE, BOARDS, FLOOR, LEAD_DESK, LEAD_ID, OWNER_SPOT, PODS, POD_SIZE, ownerVisitSpot, planPath, spotsFor, ZONES, type BoardId, type BoardSlot, type dayPhase, type P2, type Spot } from './office-layout.js';
+import { BOARD_SIZE, BOARDS, FLOOR, LEAD_DESK, LEAD_ID, OWNER_SPOT, PODS, POD_SIZE, planPath, spotsFor, ZONES, type BoardId, type BoardSlot, type dayPhase, type P2, type Spot } from './office-layout.js';
 import { STATE_COLORS, type OfficeAgent } from './office-state.js';
+import type { OwnerInput } from './owner-input.js';
+import { createOwnerMotion, setOwnerDestination, stepOwnerMotion, stopOwnerMotion } from './owner-motion.js';
 
 export type CameraCommand = { kind: 'overview' | 'zone' | 'agent' | 'board' | 'owner'; id?: string; n: number };
-export type OwnerMoveInput = { up: boolean; down: boolean; left: boolean; right: boolean };
 /** Live summary drawn on a wall board; lines come from real API data. */
 export type BoardContent = { id: BoardId; title: string; lines: string[]; accent: string; alert?: boolean };
 type Phase = ReturnType<typeof dayPhase>;
@@ -17,12 +18,14 @@ export type VisualOfficeProps = {
   ready: boolean;
   selectedId: string | null;
   ownerSelected: boolean;
-  ownerMovementEnabled: boolean;
-  ownerMoveInput: OwnerMoveInput;
+  ownerInput: OwnerInput;
   ownerTarget: Spot | null;
+  ownerVisitVersion: number;
+  onOwnerMoving: (moving: boolean) => void;
   followId: string | null;
   onSelect: (id: string | null) => void;
   onOwnerSelect: () => void;
+  onCameraInteract: () => void;
   command: CameraCommand;
   view: '3d' | 'top';
   tour: boolean;
@@ -364,23 +367,22 @@ function Agent({ agent, index, spot, selected, hovered, onSelect, onHover, reduc
   </group>;
 }
 
-function isTextEntry(target: EventTarget | null) {
-  const element = target instanceof HTMLElement ? target : null;
-  return Boolean(element?.closest('input, textarea, select, [contenteditable="true"]'));
-}
-
-function OwnerCharacter({ destination, selected, hovered, enabled, moveInput, onSelect, onHover, reducedMotion, positions }: {
-  destination: Spot; selected: boolean; hovered: boolean;
-  enabled: boolean; moveInput: OwnerMoveInput;
+function OwnerCharacter({ destination, request, selected, hovered, input, onMoving, onSelect, onHover, reducedMotion, positions }: {
+  destination: Spot | null; selected: boolean; hovered: boolean;
+  request: number; onMoving: (moving: boolean) => void;
+  input: OwnerInput;
   onSelect: () => void; onHover: (id: string | null) => void; reducedMotion: boolean;
   positions: Map<string, THREE.Vector3>;
 }) {
   const root = useRef<THREE.Group>(null);
+  const legL = useRef<THREE.Group>(null);
+  const legR = useRef<THREE.Group>(null);
+  const armL = useRef<THREE.Group>(null);
   const armR = useRef<THREE.Group>(null);
-  const sim = useRef({ x: OWNER_SPOT.x, z: OWNER_SPOT.z, rot: OWNER_SPOT.facing, path: [] as P2[], spot: OWNER_SPOT });
-  const pressedKeys = useRef(new Set<string>());
-  const destinationKey = useRef<string | null>(null);
-  const livePosition = useMemo(() => new THREE.Vector3(), []);
+  const sim = useRef(createOwnerMotion());
+  const lastStop = useRef(input.stopVersion);
+  const moving = useRef(false);
+  const livePosition = useMemo(() => new THREE.Vector3(OWNER_SPOT.x, 0, OWNER_SPOT.z), []);
 
   useEffect(() => {
     positions.set('owner', livePosition);
@@ -388,73 +390,21 @@ function OwnerCharacter({ destination, selected, hovered, enabled, moveInput, on
   }, [livePosition, positions]);
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!enabled || isTextEntry(event.target)) return;
-      const key = event.key.toLowerCase();
-      if (!['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) return;
-      pressedKeys.current.add(key);
-      event.preventDefault();
-    };
-    const onKeyUp = (event: KeyboardEvent) => {
-      pressedKeys.current.delete(event.key.toLowerCase());
-    };
-    const clearKeys = () => pressedKeys.current.clear();
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
-    window.addEventListener('blur', clearKeys);
-    if (!enabled) clearKeys();
-    return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
-      window.removeEventListener('blur', clearKeys);
-      clearKeys();
-    };
-  }, [enabled]);
-
-  useEffect(() => {
-    const state = sim.current;
-    const nextKey = `${destination.x}:${destination.z}:${destination.facing}`;
-    if (destinationKey.current === nextKey) return;
-    destinationKey.current = nextKey;
-    if (state.spot.x === destination.x && state.spot.z === destination.z) { state.spot = destination; return; }
-    state.path = reducedMotion ? [] : planPath(state.spot, destination);
-    if (reducedMotion) { state.x = destination.x; state.z = destination.z; }
-    state.spot = destination;
-  }, [destination, reducedMotion]);
+    if (setOwnerDestination(sim.current, destination, request)) lastStop.current = input.stopVersion;
+  }, [destination, request, input]);
 
   useFrame((frame, rawDt) => {
-    const dt = Math.min(rawDt, 0.5);
     const state = sim.current;
-    const keys = pressedKeys.current;
-    const moveX = (enabled && (moveInput.right || keys.has('d') || keys.has('arrowright')) ? 1 : 0)
-      - (enabled && (moveInput.left || keys.has('a') || keys.has('arrowleft')) ? 1 : 0);
-    const moveZ = (enabled && (moveInput.down || keys.has('s') || keys.has('arrowdown')) ? 1 : 0)
-      - (enabled && (moveInput.up || keys.has('w') || keys.has('arrowup')) ? 1 : 0);
-    const movingManually = moveX !== 0 || moveZ !== 0;
-    if (movingManually) {
-      state.path = [];
-      const length = Math.hypot(moveX, moveZ);
-      const step = 4.8 * dt / length;
-      state.x = THREE.MathUtils.clamp(state.x + moveX * step, FLOOR.minX + 1, FLOOR.maxX - 1);
-      state.z = THREE.MathUtils.clamp(state.z + moveZ * step, FLOOR.minZ + 1, FLOOR.maxZ - 1);
-      state.rot += shortestAngle(state.rot, Math.atan2(moveX, moveZ)) * Math.min(1, dt * 10);
-      state.spot = { ...state.spot, x: state.x, z: state.z, facing: state.rot, via: [] };
-    }
-    const next = movingManually ? undefined : state.path[0];
-    if (next) {
-      const dx = next[0] - state.x;
-      const dz = next[1] - state.z;
-      const distance = Math.hypot(dx, dz);
-      const step = 2.8 * dt;
-      if (distance <= step) { state.x = next[0]; state.z = next[1]; state.path.shift(); }
-      else { state.x += (dx / distance) * step; state.z += (dz / distance) * step; }
-      if (distance > 0.01) state.rot += shortestAngle(state.rot, Math.atan2(dx, dz)) * Math.min(1, dt * 8);
-    } else {
-      state.rot += shortestAngle(state.rot, state.spot.facing) * Math.min(1, dt * 8);
-    }
-    if (root.current) { root.current.position.set(state.x, 0, state.z); root.current.rotation.y = state.rot; }
+    if (lastStop.current !== input.stopVersion || !input.enabled) { stopOwnerMotion(state); lastStop.current = input.stopVersion; }
+    const right: P2 = [frame.camera.matrixWorld.elements[0]!, frame.camera.matrixWorld.elements[2]!];
+    stepOwnerMotion(state, input.read(), right, rawDt, reducedMotion);
+    if (moving.current !== state.moving) { moving.current = state.moving; onMoving(state.moving); }
+    if (root.current) { root.current.position.set(state.x, state.bob, state.z); root.current.rotation.y = state.heading; }
     livePosition.set(state.x, 0, state.z);
-    if (armR.current) armR.current.rotation.x = movingManually ? Math.sin(frame.clock.getElapsedTime() * 10) * 0.55 : selected ? -0.8 : 0;
+    if (legL.current) legL.current.rotation.x = state.swing;
+    if (legR.current) legR.current.rotation.x = -state.swing;
+    if (armL.current) armL.current.rotation.x = -state.swing * 0.8;
+    if (armR.current) armR.current.rotation.x = state.swing * 0.8;
   });
 
   return <group ref={root}
@@ -462,16 +412,13 @@ function OwnerCharacter({ destination, selected, hovered, enabled, moveInput, on
     onPointerOver={(event) => { event.stopPropagation(); onHover('owner'); }}
     onPointerOut={() => onHover(null)}>
     <group position={[0, 0.7, 0]}>
-      <B p={[-0.13, -0.33, 0]} s={[0.2, 0.66, 0.24]} c="#303946" />
-      <B p={[-0.13, -0.66, 0.04]} s={[0.22, 0.08, 0.32]} c="#15171c" />
-      <B p={[0.13, -0.33, 0]} s={[0.2, 0.66, 0.24]} c="#303946" />
-      <B p={[0.13, -0.66, 0.04]} s={[0.22, 0.08, 0.32]} c="#15171c" />
+      <group ref={legL} position={[-0.13, 0, 0]}><B p={[0, -0.33, 0]} s={[0.2, 0.66, 0.24]} c="#303946" /><B p={[0, -0.66, 0.04]} s={[0.22, 0.08, 0.32]} c="#15171c" /></group>
+      <group ref={legR} position={[0.13, 0, 0]}><B p={[0, -0.33, 0]} s={[0.2, 0.66, 0.24]} c="#303946" /><B p={[0, -0.66, 0.04]} s={[0.22, 0.08, 0.32]} c="#15171c" /></group>
     </group>
     <B p={[0, 1.05, 0]} s={[0.6, 0.74, 0.38]} c="#1f2933" />
     <B p={[0, 1.37, 0.06]} s={[0.32, 0.07, 0.32]} c="#f3f1ea" />
     <B p={[0, 1.04, 0.2]} s={[0.09, 0.34, 0.025]} c="#d5a53b" shadow={false} />
-    <B p={[-0.38, 1.35, 0]} s={[0.16, 0.6, 0.2]} c="#1f2933" />
-    <B p={[-0.38, 0.71, 0]} s={[0.15, 0.12, 0.17]} c="#c68642" />
+    <group ref={armL} position={[-0.38, 1.35, 0]}><B p={[0, -0.3, 0]} s={[0.16, 0.6, 0.2]} c="#1f2933" /><B p={[0, -0.64, 0]} s={[0.15, 0.12, 0.17]} c="#c68642" /></group>
     <group ref={armR} position={[0.38, 1.35, 0]}><B p={[0, -0.3, 0]} s={[0.16, 0.6, 0.2]} c="#1f2933" /><B p={[0, -0.64, 0]} s={[0.15, 0.12, 0.17]} c="#c68642" /></group>
     <group position={[0, 1.42, 0]}>
       <B p={[0, 0.27, 0]} s={[0.5, 0.5, 0.46]} c="#c68642" />
@@ -538,13 +485,16 @@ function zoneTarget(id: string | undefined) {
   return zone ? { x: zone.x, z: zone.z, dist: Math.max(zone.w, zone.d) * 1.35 + 6 } : null;
 }
 
-function CameraRig({ command, view, tour, spots, reducedMotion, followId, positions }: { command: CameraCommand; view: '3d' | 'top'; tour: boolean; spots: Map<string, Spot>; reducedMotion: boolean; followId: string | null; positions: Map<string, THREE.Vector3> }) {
+function CameraRig({ command, view, tour, spots, reducedMotion, followId, positions, onInteract }: { command: CameraCommand; view: '3d' | 'top'; tour: boolean; spots: Map<string, Spot>; reducedMotion: boolean; followId: string | null; positions: Map<string, THREE.Vector3>; onInteract: () => void }) {
   const { camera, gl, size } = useThree();
-  const controls = useMemo(() => new OrbitControls(camera, gl.domElement), [camera, gl]);
-  const fly = useRef<{ target: THREE.Vector3; position: THREE.Vector3 } | null>(null);
+  const controls = useMemo(() => new OrbitControls(camera), [camera]);
+  const fly = useRef<{ target: THREE.Vector3; position: THREE.Vector3; trackId: string | null; anchor: THREE.Vector3 } | null>(null);
+  const interact = useRef(onInteract);
+  interact.current = onInteract;
   const aspect = size.width / Math.max(size.height, 1);
 
   useEffect(() => {
+    controls.connect(gl.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.minDistance = 7;
@@ -553,10 +503,10 @@ function CameraRig({ command, view, tour, spots, reducedMotion, followId, positi
     controls.target.set(-3, 0, 0);
     controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
     controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
-    const cancel = () => { fly.current = null; };
+    const cancel = () => { fly.current = null; interact.current(); };
     controls.addEventListener('start', cancel);
     return () => { controls.removeEventListener('start', cancel); controls.dispose(); };
-  }, [controls]);
+  }, [controls, gl]);
 
   useEffect(() => {
     controls.enableRotate = view === '3d';
@@ -570,10 +520,13 @@ function CameraRig({ command, view, tour, spots, reducedMotion, followId, positi
     let target = { x: -3, z: 0, dist: 44 * fit };
     if (command.kind === 'zone') target = zoneTarget(command.id) ?? target;
     if (command.kind === 'agent' && command.id) {
-      const spot = spots.get(command.id);
+      const spot = positions.get(command.id) ?? spots.get(command.id);
       if (spot) target = { x: spot.x, z: spot.z, dist: 13 * fit };
     }
-    if (command.kind === 'owner') target = { x: OWNER_SPOT.x, z: OWNER_SPOT.z, dist: 13 * fit };
+    if (command.kind === 'owner') {
+      const owner = positions.get('owner') ?? OWNER_SPOT;
+      target = { x: owner.x, z: owner.z, dist: 13 * fit };
+    }
     if (command.kind === 'zone') target.dist *= fit;
     const direction = view === 'top' ? new THREE.Vector3(0, 1, 0.001) : new THREE.Vector3(0.55, 0.95, 1).normalize();
     let goal = { target: new THREE.Vector3(target.x, 0, target.z), position: new THREE.Vector3(target.x, 0, target.z).addScaledVector(direction, target.dist) };
@@ -586,13 +539,20 @@ function CameraRig({ command, view, tour, spots, reducedMotion, followId, positi
       goal = { target: focus, position: focus.clone().add(new THREE.Vector3(nx * 9 * fit, 2.5, nz * 9 * fit)) };
     }
     if (reducedMotion) { controls.target.copy(goal.target); camera.position.copy(goal.position); fly.current = null; }
-    else fly.current = goal;
+    else fly.current = { ...goal, trackId: followId, anchor: goal.target.clone() };
     // spots intentionally omitted: re-run only on explicit commands, not on every state poll.
-  }, [command.n, view, aspect > 1.5, reducedMotion]);
+  }, [command.n, view, aspect, reducedMotion]);
 
   useFrame((_, dt) => {
     const goal = fly.current;
     if (goal) {
+      const tracked = goal.trackId ? positions.get(goal.trackId) : null;
+      if (tracked) {
+        const dx = tracked.x - goal.anchor.x; const dz = tracked.z - goal.anchor.z;
+        goal.target.x += dx; goal.target.z += dz;
+        goal.position.x += dx; goal.position.z += dz;
+        goal.anchor.copy(tracked);
+      }
       const k = 1 - Math.exp(-dt * 3.5);
       controls.target.lerp(goal.target, k);
       camera.position.lerp(goal.position, k);
@@ -600,7 +560,7 @@ function CameraRig({ command, view, tour, spots, reducedMotion, followId, positi
     } else if (followId) {
       const tracked = positions.get(followId);
       if (tracked) {
-        const k = 1 - Math.exp(-dt * 4);
+        const k = reducedMotion ? 1 : 1 - Math.exp(-dt * 4);
         const dx = (tracked.x - controls.target.x) * k;
         const dy = (0.9 - controls.target.y) * k;
         const dz = (tracked.z - controls.target.z) * k;
@@ -608,7 +568,7 @@ function CameraRig({ command, view, tour, spots, reducedMotion, followId, positi
         camera.position.x += dx; camera.position.y += dy; camera.position.z += dz;
       }
     }
-    controls.autoRotate = tour && !reducedMotion && view === '3d';
+    controls.autoRotate = tour && !followId && !reducedMotion && view === '3d';
     controls.autoRotateSpeed = 0.7;
     // Keep panning on the building.
     controls.target.x = THREE.MathUtils.clamp(controls.target.x, FLOOR.minX - 4, FLOOR.maxX + 4);
@@ -628,12 +588,11 @@ function Lights({ phase }: { phase: Phase }) {
   </>;
 }
 
-export default function VisualOffice({ agents, ready, selectedId, ownerSelected, ownerMovementEnabled, ownerMoveInput, ownerTarget, followId, onSelect, onOwnerSelect, command, view, tour, phase, reducedMotion, boards, onOpenBoard }: VisualOfficeProps) {
+export default function VisualOffice({ agents, ready, selectedId, ownerSelected, ownerInput, ownerTarget, ownerVisitVersion, onOwnerMoving, followId, onSelect, onOwnerSelect, onCameraInteract, command, view, tour, phase, reducedMotion, boards, onOpenBoard }: VisualOfficeProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [hoveredBoard, setHoveredBoard] = useState<BoardId | null>(null);
   const spots = useMemo(() => spotsFor(agents), [agents]);
   const positions = useMemo(() => new Map<string, THREE.Vector3>(), []);
-  const ownerDestination = useMemo(() => ownerTarget ? ownerVisitSpot(ownerTarget) : OWNER_SPOT, [ownerTarget]);
   useEffect(() => { document.body.style.cursor = hoveredId || hoveredBoard ? 'pointer' : ''; return () => { document.body.style.cursor = ''; }; }, [hoveredId, hoveredBoard]);
   return <Canvas shadows dpr={[1, 2]} camera={{ position: [20, 34, 38], fov: 38, near: 0.5, far: 400 }} onPointerMissed={() => onSelect(null)}>
     <Lights phase={phase} />
@@ -644,8 +603,8 @@ export default function VisualOffice({ agents, ready, selectedId, ownerSelected,
       return spot ? <Agent key={agent.id} agent={agent} index={index} spot={spot} selected={agent.id === selectedId} hovered={agent.id === hoveredId}
         onSelect={onSelect} onHover={setHoveredId} reducedMotion={reducedMotion} positions={positions} /> : null;
     })}
-    {ready && <OwnerCharacter destination={ownerDestination} selected={ownerSelected} hovered={hoveredId === 'owner'} enabled={ownerMovementEnabled} moveInput={ownerMoveInput} onSelect={onOwnerSelect} onHover={setHoveredId} reducedMotion={reducedMotion} positions={positions} />}
-    <CameraRig command={command} view={view} tour={tour} spots={spots} reducedMotion={reducedMotion} followId={followId} positions={positions} />
+    <OwnerCharacter destination={ownerTarget} request={ownerVisitVersion} selected={ownerSelected} hovered={hoveredId === 'owner'} input={ownerInput} onMoving={onOwnerMoving} onSelect={onOwnerSelect} onHover={setHoveredId} reducedMotion={reducedMotion} positions={positions} />
+    <CameraRig command={command} view={view} tour={tour} spots={spots} reducedMotion={reducedMotion} followId={followId} positions={positions} onInteract={onCameraInteract} />
   </Canvas>;
 }
 

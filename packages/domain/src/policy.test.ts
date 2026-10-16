@@ -51,6 +51,14 @@ const context = {
 };
 
 describe('evaluatePolicy', () => {
+  it('uses owner risk and specialization settings without weakening other limits', () => {
+    const input = { ...context, capability: 'supported' as const, policy: { ...policy, maxRiskScore: 0.95, requireSpecializationMatch: false }, project: { ...project, skills: ['TypeScript'], riskScore: 0.9 } };
+    expect(evaluatePolicy(input).allowed).toBe(true);
+    expect(evaluatePolicy({ ...input, proposedPrice: 900 }).reasonCode).toBe('price_out_of_range');
+    expect(evaluatePolicy({ ...input, policy: { ...input.policy, activeDays: [1] } }).reasonCode).toBe('outside_active_days');
+    expect(evaluatePolicy({ ...input, policy: { ...input.policy, timezone: 'Invalid/Zone' } }).reasonCode).toBe('invalid_policy_timezone');
+    expect(evaluatePolicy({ ...input, policy: { ...input.policy, expiresAt: 'invalid' } }).reasonCode).toBe('policy_expired');
+  });
   it('blocks every external write while its capability is unknown', () => {
     const result = evaluatePolicy(context);
 

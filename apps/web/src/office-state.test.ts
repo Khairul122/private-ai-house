@@ -10,6 +10,11 @@ const event = (type: string, id = type): AuditEvent => ({ id, type, resourceId: 
 const agent = (agents: ReturnType<typeof deriveOfficeAgents>, id: string) => agents.find((item) => item.id === id)!;
 
 describe('office state', () => {
+  it('uses real knowledge sync activity and explains schedule waits', () => {
+    expect(agent(deriveOfficeAgents(autopilot(), [], { knowledge: { state: 'running', provider: 'github', current: 'owner/repo' } }), 'knowledge-curator')).toMatchObject({ state: 'working', room: 'workspace', task: 'owner/repo' });
+    expect(agent(deriveOfficeAgents(autopilot(), [], { knowledge: { state: 'completed', provider: 'github', current: null } }), 'knowledge-curator')).toMatchObject({ state: 'idle' });
+    expect(agent(deriveOfficeAgents(autopilot({ waitingReason: 'Menunggu jadwal operasi.' }), []), 'market-scout').reason).toBe('Menunggu jadwal operasi.');
+  });
   it('marks scout unknown when autopilot is undefined', () => {
     expect(agent(deriveOfficeAgents(undefined, undefined), 'market-scout')).toMatchObject({ state: 'unknown', room: 'lobby' });
   });

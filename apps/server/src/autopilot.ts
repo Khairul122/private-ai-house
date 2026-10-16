@@ -1,4 +1,4 @@
-import { evaluatePolicy, scoreProject } from '@fvh/domain';
+import { evaluatePolicy, policySchedule, scoreProject, selectSearchTerms } from '@fvh/domain';
 import type { AutonomyPolicy, BidDraft, ProjectOpportunity } from '@fvh/domain';
 import type { FreelancerProfile, FreelancerWriteResult } from '@fvh/adapter-freelancer';
 import { createId, hashPayload, type AiDraftingPort } from '@fvh/application';
@@ -26,6 +26,11 @@ export type AutopilotStatus = {
   specializations: string[];
   cycleInProgress: boolean;
   draftsInProgress: number;
+  intervalMinutes: number;
+  searchTerms: string[];
+  summary: { considered: number; eligible: number; reasons: Record<string, number> } | null;
+  waitingReason: string | null;
+  marketplaceNotice: { at: string; quotaExhausted: boolean; reason: string; retryAt: string | null } | null;
 };
 
 const dayMs = 24 * 60 * 60 * 1_000;
@@ -68,7 +73,7 @@ function seedPolicy(policy: AutonomyPolicy, profile: ServiceProfile, now: Date, 
     specializations: profile.specializations,
     ...limits,
     simulationOnly: false,
-    allowUnknownDeadline: true,
+    allowUnknownDeadline: ownerEdited ? policy.allowUnknownDeadline ?? false : true,
   };
 }
 
@@ -125,11 +130,15 @@ export class FreelancerAutopilot {
   private readonly now: () => Date;
   private readonly intervalMs: number;
   private timer: ReturnType<typeof setInterval> | undefined;
+  private searchCycle = 0;
+  private starting = false;
+  private stopping = false;
   private busy = false;
   private drafting = 0;
   private status: AutopilotStatus = {
     state: 'starting', lastRunAt: null, nextRunAt: null, lastMessage: 'Membaca profil Freelancer untuk menyiapkan operasi otomatis.',
     lastImported: 0, lastSubmitted: 0, specializations: [], cycleInProgress: false, draftsInProgress: 0,
+    intervalMinutes: 15, searchTerms: [], summary: null, waitingReason: null, marketplaceNotice: null,
   };
 
   private scheduleRetry(): void {
@@ -149,14 +158,26 @@ export class FreelancerAutopilot {
 
   async getStatus(): Promise<AutopilotStatus> {
     const policy = await this.dependencies.repository.getPolicy();
-    const state = policy.state === 'paused' ? 'paused' : policy.state !== 'active' || policy.simulationOnly ? 'blocked' : this.status.state;
-    return { ...this.status, state, cycleInProgress: this.busy, draftsInProgress: this.drafting, specializations: [...this.status.specializations] };
+    const lastBid = (await this.dependencies.repository.listAuditForType('marketplace.production.submit_bid', 2)).find((event) => event.status === 'failed' || event.status === 'recorded');
+    const quotaExhausted = lastBid?.status === 'failed' && lastBid.reason.includes('BID_LIMIT_EXCEEDED');
+    const marketplaceNotice = lastBid?.status === 'failed' ? { at: lastBid.createdAt, quotaExhausted, reason: quotaExhausted ? 'Freelancer menolak bid terakhir karena kuota bid akun habis. Batas lokal tidak menambah kuota akun.' : lastBid.reason, retryAt: quotaExhausted ? new Date(Date.parse(lastBid.createdAt) + 60 * 60_000).toISOString() : null } : null;
+    const expired = !Number.isFinite(Date.parse(policy.expiresAt)) || Date.parse(policy.expiresAt) <= this.now().getTime();
+    const state = policy.state === 'paused' ? 'paused' : policy.state !== 'active' || policy.simulationOnly || expired || !policy.allowedActions.includes('bid.submit') ? 'blocked' : this.status.state;
+    let waitingReason = policy.state === 'paused' ? 'Automasi dijeda oleh pemilik.' : expired ? 'Masa berlaku kebijakan berakhir.' : policy.state !== 'active' ? 'Kebijakan belum aktif.' : policy.simulationOnly ? 'Kebijakan hanya mengizinkan simulasi.' : !policy.allowedActions.includes('bid.submit') ? 'Izin bid otomatis belum dipilih.' : null;
+    if (!waitingReason) {
+      try { if (!policySchedule(policy, this.now()).active) waitingReason = 'Menunggu jadwal operasi yang Anda pilih.'; }
+      catch { waitingReason = 'Zona waktu kebijakan tidak valid.'; }
+    }
+    return { ...this.status, state, waitingReason, marketplaceNotice, intervalMinutes: this.dependencies.intervalMs === undefined ? policy.scanIntervalMinutes ?? 15 : this.intervalMs / 60_000, cycleInProgress: this.busy, draftsInProgress: this.drafting, specializations: [...this.status.specializations] };
   }
 
   async start(): Promise<void> {
-    if (this.timer) return;
+    if (this.timer || this.starting) return;
+    this.starting = true;
+    this.stopping = false;
     try {
       const remote = await this.dependencies.readProfile();
+      if (this.stopping) return;
       if (remote.jobIds.length > 0 && this.dependencies.syncProfileJobs && !(await this.dependencies.repository.hasAudit('marketplace.production.edit_profile', 'freelancer-profile-sync'))) {
         try {
           const current = await this.dependencies.readProfile();
@@ -201,22 +222,31 @@ export class FreelancerAutopilot {
         return;
       }
       if (currentPolicy.state !== 'active') {
-        const policy = seedPolicy(currentPolicy, profile, this.now(), await repository.hasAudit('policy.updated', 'policy'));
+        if (await repository.hasAudit('policy.updated', 'policy') || await repository.hasAudit('policy.reactivation_required', 'policy')) {
+          this.status = { ...this.status, state: 'blocked', lastMessage: 'Kebijakan draf menunggu aktivasi pemilik di kartu Kebijakan.', specializations: profile.specializations };
+          return;
+        }
+        const policy = seedPolicy(currentPolicy, profile, this.now(), false);
         await repository.savePolicy(policy);
         await repository.appendAudit({ type: 'autopilot.policy_bootstrapped', resourceId: 'policy', status: 'recorded', reason: 'Kebijakan bid otomatis dibentuk dari ringkasan dan keahlian profil Freelancer; batas harga, kuota, zona waktu, serta jam mengikuti nilai lokal yang tersimpan.', policyVersion: policy.version, payloadHash: hashPayload({ specializations: policy.specializations, minPrice: policy.minPrice, maxPrice: policy.maxPrice, dailyBidLimit: policy.dailyBidLimit, weeklyBidLimit: policy.weeklyBidLimit }) });
       } else if (currentPolicy.simulationOnly || !currentPolicy.allowedActions.includes('bid.submit')) {
         this.status = { ...this.status, state: 'blocked', lastMessage: 'Kebijakan tersimpan belum mengizinkan bid otomatis live; tidak ada penawaran yang dikirim.', specializations: jobs.map((job) => job.name) };
         return;
-      } else if (await repository.hasAudit('autopilot.policy_bootstrapped', 'policy') && currentPolicy.allowUnknownDeadline !== true) {
-        await repository.savePolicy({ ...currentPolicy, allowUnknownDeadline: true });
       }
-      this.status = { ...this.status, state: 'running', lastMessage: 'Autopilot aktif. Pemindaian Freelancer berjalan otomatis tiap 15 menit.', specializations: jobs.map((job) => job.name) };
+      this.status = { ...this.status, state: 'running', lastMessage: 'Autopilot aktif; pemindaian mengikuti interval kebijakan.', specializations: profile.specializations };
       await this.runCycle();
-      this.timer = setInterval(() => { void this.runCycle(); }, this.intervalMs);
+      if (this.stopping) return;
+      this.timer = setInterval(() => {
+        if (!this.status.nextRunAt || this.now().getTime() >= Date.parse(this.status.nextRunAt)) void this.runCycle().catch(() => {
+          this.status = { ...this.status, state: 'error', lastMessage: 'Penyimpanan sementara tidak dapat dibaca. Penjadwal tetap aktif dan akan mencoba lagi.', nextRunAt: new Date(this.now().getTime() + (this.dependencies.intervalMs ?? this.status.intervalMinutes * 60_000)).toISOString() };
+        });
+      }, Math.min(this.intervalMs, 30_000));
       this.timer.unref?.();
     } catch {
       this.status = { ...this.status, state: 'error', lastRunAt: this.now().toISOString(), lastMessage: 'Autopilot tidak dapat membaca profil Freelancer. Periksa koneksi dan token yang tersimpan.' };
-      this.scheduleRetry();
+      if (!this.stopping) this.scheduleRetry();
+    } finally {
+      this.starting = false;
     }
   }
 
@@ -256,12 +286,13 @@ export class FreelancerAutopilot {
   }
 
   stop(): void {
+    this.stopping = true;
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
   }
 
   async runCycle(): Promise<void> {
-    if (this.busy) return;
+    if (this.busy || this.stopping) return;
     const repository = this.dependencies.repository;
     const policy = await repository.getPolicy();
     if (policy.state !== 'active' || policy.simulationOnly || !policy.allowedActions.includes('bid.submit')) {
@@ -269,12 +300,18 @@ export class FreelancerAutopilot {
       return;
     }
     this.busy = true;
+    this.status = { ...this.status, state: 'running' };
     const runAt = this.now();
     let imported = 0;
     let submitted = 0;
+    let eligible = 0;
+    const reasons: Record<string, number> = {};
+    const count = (reason: string) => { reasons[reason] = (reasons[reason] ?? 0) + 1; };
     try {
       const unique = new Map<string, ProjectOpportunity>();
-      for (const keyword of policy.specializations.slice(0, 8)) {
+      const searchTerms = selectSearchTerms(policy.specializations, policy.keywords, this.searchCycle++);
+      this.status = { ...this.status, searchTerms };
+      for (const keyword of searchTerms) {
         const result = await this.dependencies.readProjects(keyword, 20);
         for (const project of result.projects) {
           const searchable = `${project.title}\n${project.description}`.toLocaleLowerCase();
@@ -285,43 +322,52 @@ export class FreelancerAutopilot {
       }
       const sync = await repository.syncFreelancerProjects([...unique.values()]);
       imported = sync.upserted;
-      const audits = await repository.listAudit(5_000);
-      const successfulBids = audits.filter((event) => event.type === 'marketplace.production.submit_bid' && event.status === 'recorded');
-      const today = localDateKey(runAt, policy.timezone);
-      const thisWeek = mondayKey(today);
-      let dailyUsed = successfulBids.filter((event) => localDateKey(new Date(event.createdAt), policy.timezone) === today).length;
-      let weeklyUsed = successfulBids.filter((event) => mondayKey(localDateKey(new Date(event.createdAt), policy.timezone)) === thisWeek).length;
+      const usage = await repository.bidUsage(runAt, policy.timezone);
+      let dailyUsed = usage.today;
+      let weeklyUsed = usage.week;
+      const history = await repository.autopilotDecisions(policy.version);
+      const lastBid = (await repository.listAuditForType('marketplace.production.submit_bid', 2)).find((event) => event.status === 'failed' || event.status === 'recorded');
+      const quotaCooldown = lastBid?.status === 'failed' && lastBid.reason.includes('BID_LIMIT_EXCEEDED') && this.now().getTime() < Date.parse(lastBid.createdAt) + 60 * 60_000;
+      const attempted = new Set(history.filter((item) => item.attempted).map((item) => item.resourceId));
+      const skipped = new Map(history.filter((item) => !item.attempted).map((item) => [item.resourceId, item.reason]));
+      const drafts = await repository.latestDrafts();
       const projects = (await repository.listProjects())
         .filter((project) => project.source === 'freelancer' && project.status === 'open')
         .map((project) => ({ ...project, ...scoreProject(project, policy.specializations) }))
         .sort((a, b) => b.score - a.score);
 
+      const considered = projects.length;
       for (const project of projects) {
+        if (this.stopping) break;
         const activePolicy = await repository.getPolicy();
         if (activePolicy.state !== 'active' || activePolicy.simulationOnly || !activePolicy.allowedActions.includes('bid.submit')) break;
-        if (dailyUsed >= policy.dailyBidLimit || weeklyUsed >= policy.weeklyBidLimit) break;
-        if (await repository.hasAudit('marketplace.production.submit_bid', project.id)) continue;
-        if (await repository.hasAuditForPolicy('autopilot.bid_skipped', project.id, activePolicy.version)) continue;
-        if (await repository.getLatestDraft(project.id)) continue;
-        const bid = chooseBid(project, policy);
-        if (!bid) continue;
+        if (attempted.has(project.id)) { count('Sudah pernah dikirim atau hasilnya perlu rekonsiliasi'); continue; }
+        if (drafts.has(project.id)) { count('Memiliki draf lokal; tidak dikirim otomatis'); continue; }
+        const bid = chooseBid(project, activePolicy);
+        if (!bid) { count(project.projectType !== 'fixed' ? 'Tipe proyek bukan harga tetap' : project.currency !== 'USD' ? 'Mata uang bukan USD' : 'Anggaran atau tenggat di luar batas bid'); continue; }
         const confidence = project.score / 100;
         const decision = evaluatePolicy({ policy: activePolicy, project, action: 'bid.submit', confidence, proposedPrice: bid.amount, dailyUsed, weeklyUsed, now: this.now(), capability: 'supported', executionMode: 'external' });
         if (!decision.allowed) {
-          await repository.appendAudit({ type: 'autopilot.bid_skipped', resourceId: project.id, status: 'blocked', reason: decision.reason, policyVersion: policy.version, payloadHash: null });
+          count(decision.reason);
+          if (activePolicy.version !== policy.version || skipped.get(project.id) !== decision.reason) await repository.appendAudit({ type: 'autopilot.bid_skipped', resourceId: project.id, status: 'blocked', reason: decision.reason, policyVersion: activePolicy.version, payloadHash: null });
           continue;
         }
-        if ((await repository.getPolicy()).state !== 'active' || (await repository.getPolicy()).simulationOnly) break;
+        eligible += 1;
+        if (quotaCooldown) { count('Menunggu kuota akun Freelancer; jeda satu jam sejak penolakan API terakhir'); continue; }
         const written = await this.writeProposal(project, activePolicy, bid, project.score);
         const proposal = written.proposal;
-        // Hermes can take a while; honour a kill switch pressed meanwhile.
-        if ((await repository.getPolicy()).state !== 'active' || (await repository.getPolicy()).simulationOnly) break;
+        if (this.stopping) break;
+        // Recheck after drafting: the owner may change the policy while Hermes runs.
+        const latest = await repository.getPolicy();
+        const latestUsage = await repository.bidUsage(this.now(), latest.timezone);
+        const latestDecision = evaluatePolicy({ policy: latest, project, action: 'bid.submit', confidence: scoreProject(project, latest.specializations).score / 100, proposedPrice: bid.amount, dailyUsed: latestUsage.today, weeklyUsed: latestUsage.week, now: this.now(), capability: 'supported', executionMode: 'external' });
+        if (latest.simulationOnly || !latestDecision.allowed || latest.version !== activePolicy.version) { count('Kebijakan berubah saat proposal ditulis; diperiksa lagi pada siklus berikutnya'); continue; }
         const payloadHash = hashPayload({ projectId: project.id, amount: bid.amount, period: bid.period, description: proposal });
         const claimed = await repository.claimAudit({
           type: 'marketplace.production.submit_bid', resourceId: project.id, policyVersion: activePolicy.version,
           payloadHash, reason: 'Bid live sedang dikirim oleh autopilot.',
         });
-        if (!claimed) continue;
+        if (!claimed) { count('Proyek sudah dikunci oleh percobaan pengiriman lain'); continue; }
         const draft: BidDraft = {
           id: createId('draft'), projectId: project.id, proposal, proposedPrice: bid.amount, currency: project.currency,
           durationDays: bid.period, confidence, evidence: written.evidence, assumptions: written.assumptions, status: 'draft_ready', createdAt: runAt.toISOString(),
@@ -331,7 +377,7 @@ export class FreelancerAutopilot {
         try {
           const result = await this.dependencies.submitBid({ operation: 'submit_bid', projectId: Number(project.id.replace(/^freelancer:/, '')), amount: bid.amount, period: bid.period, milestonePercentage: 100, description: proposal });
           const success = result.statusCode === 200;
-          await repository.appendAudit({ type: 'marketplace.production.submit_bid', resourceId: project.id, status: success ? 'recorded' : 'failed', reason: `Bid otomatis menghasilkan HTTP ${result.statusCode}.${result.resultId ? ` ID hasil: ${result.resultId}.` : ''} Isi proposal tidak disimpan pada audit.`, policyVersion: policy.version, payloadHash });
+          await repository.appendAudit({ type: 'marketplace.production.submit_bid', resourceId: project.id, status: success ? 'recorded' : 'failed', reason: `Bid otomatis menghasilkan HTTP ${result.statusCode}.${result.resultId ? ` ID hasil: ${result.resultId}.` : ''} Isi proposal tidak disimpan pada audit.`, policyVersion: activePolicy.version, payloadHash });
           if (success) {
             if (result.resultId?.trim()) {
               await repository.setPipelineStatus(project.id, 'submitted');
@@ -342,23 +388,29 @@ export class FreelancerAutopilot {
             dailyUsed += 1;
             weeklyUsed += 1;
           } else {
+            count(`Bid ditolak Freelancer: HTTP ${result.statusCode}`);
             await repository.setPipelineStatus(project.id, 'error');
           }
         } catch (error) {
           const statusCode = typeof error === 'object' && error !== null && 'statusCode' in error && typeof error.statusCode === 'number' ? error.statusCode : null;
           await repository.appendAudit({ type: 'marketplace.production.submit_bid', resourceId: project.id, status: 'failed', reason: statusCode === null ? 'Bid otomatis tidak menerima respons yang dapat dipastikan; proyek dikunci agar tidak dikirim ulang otomatis.' : `Bid otomatis menghasilkan HTTP ${statusCode}. ${error instanceof Error ? error.message.slice(0, 260) : ''}`.trim(), policyVersion: policy.version, payloadHash });
           await repository.setPipelineStatus(project.id, 'reconciliation_required');
+          const quotaExceeded = error instanceof Error && error.message.includes('BID_LIMIT_EXCEEDED');
+          count(quotaExceeded ? 'Kuota bid akun Freelancer habis (dikonfirmasi API)' : 'Pengiriman bid gagal atau hasilnya belum dapat dipastikan');
+          if (quotaExceeded) break;
         }
       }
       await repository.appendAudit({ type: 'autopilot.cycle', resourceId: 'freelancer', status: 'recorded', reason: `Pemindaian otomatis mengimpor ${imported} proyek dan mengirim ${submitted} bid; payload proyek tidak disimpan pada audit.`, policyVersion: policy.version, payloadHash: null });
       this.status = {
-        ...this.status, state: 'running', lastRunAt: runAt.toISOString(), nextRunAt: new Date(runAt.getTime() + this.intervalMs).toISOString(),
+        ...this.status, state: 'running', lastRunAt: runAt.toISOString(), summary: { considered, eligible, reasons },
         lastMessage: `${imported} proyek diperiksa; ${submitted} bid terkirim sesuai kebijakan.`, lastImported: imported, lastSubmitted: submitted,
       };
     } catch {
       this.status = { ...this.status, state: 'error', lastRunAt: runAt.toISOString(), nextRunAt: new Date(runAt.getTime() + this.intervalMs).toISOString(), lastMessage: 'Siklus otomatis gagal. Tidak ada proyek yang akan dikirim ulang bila hasil sebelumnya tidak pasti.', lastImported: imported, lastSubmitted: submitted };
     } finally {
       this.busy = false;
+      const interval = this.dependencies.intervalMs ?? (policy.scanIntervalMinutes ?? 15) * 60_000;
+      this.status = { ...this.status, intervalMinutes: interval / 60_000, nextRunAt: new Date(this.now().getTime() + interval).toISOString() };
     }
   }
 }
