@@ -14,7 +14,7 @@ import { prepareKnowledgeFile } from '@fvh/knowledge';
 import { WorkspaceRepository } from '@fvh/persistence';
 import type { CredentialStatus, FreelancerVerification } from './credential-store.js';
 import type { LinkedInOAuthService } from './linkedin-oauth.js';
-import { localDateKey, mondayKey } from './autopilot.js';
+import { readLinkedInProfile, syncLinkedInProfile } from './linkedin-api.js';
 import type { FreelancerAutopilot } from './autopilot.js';
 import type { BusinessSync } from './business-sync.js';
 
@@ -81,12 +81,13 @@ function isSameOrigin(origin: string, protocol: string, host: string | undefined
 async function readProductionWriteChecks(repository: WorkspaceRepository): Promise<Map<FreelancerWriteOperation, FreelancerProductionWriteCheck>> {
   const checks = new Map<FreelancerWriteOperation, FreelancerProductionWriteCheck>();
   const operations = new Set<FreelancerWriteOperation>(['submit_bid', 'edit_profile', 'send_message']);
-  for (const event of await repository.listAudit(500)) {
+  for (const event of await repository.listAudit(1_000)) {
     const prefix = 'marketplace.production.';
-    if (!event.type.startsWith(prefix)) continue;
+    if (!event.type.startsWith(prefix) || event.status === 'allowed') continue;
     const operation = event.type.slice(prefix.length) as FreelancerWriteOperation;
-    if (!operations.has(operation) || checks.has(operation)) continue;
+    if (!operations.has(operation) || checks.get(operation)?.statusCode === 200) continue;
     const statusCode = event.reason.match(/HTTP (\d{3})/)?.[1];
+    if (checks.has(operation) && statusCode !== '200') continue;
     const resultId = event.reason.match(/ID hasil: (\d{1,30})/)?.[1];
     checks.set(operation, {
       statusCode: statusCode ? Number(statusCode) : null,
@@ -513,6 +514,47 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     }
   });
 
+  // Read-only probes of every integration, with the real HTTP status where one exists.
+  app.post('/api/integrations/check', async () => {
+    const checkedAt = now().toISOString();
+    type Probe = { ok: boolean; status: number | null; detail: string };
+    const probe = async (id: string, label: string, run: () => Promise<Probe>) => {
+      const started = Date.now();
+      try { return { id, label, ...(await run()), latencyMs: Date.now() - started, checkedAt }; }
+      catch (error) { return { id, label, ok: false, status: null, detail: error instanceof Error ? error.message.slice(0, 200) : 'Pemeriksaan gagal.', latencyMs: Date.now() - started, checkedAt }; }
+    };
+    const credentialStatus = options.getCredentialStatus?.() ?? options.credentialStatus;
+    return await Promise.all([
+      probe('supabase', 'Supabase (Postgres)', async () => {
+        const [row] = await repository.sql.query<{ projects: number; chunks: number }>('SELECT (SELECT COUNT(*) FROM projects)::int AS projects, (SELECT COUNT(*) FROM knowledge_chunks)::int AS chunks');
+        return { ok: true, status: 200, detail: `Query berhasil di schema fvh: ${row?.projects ?? 0} proyek, ${row?.chunks ?? 0} potongan knowledge.` };
+      }),
+      probe('freelancer', 'Freelancer.com (baca)', async () => {
+        if (!credentialStatus?.freelancerAccessTokenConfigured || !options.verifyFreelancer) return { ok: false, status: null, detail: 'Token Freelancer belum dikonfigurasi.' };
+        const result = await options.verifyFreelancer();
+        const reads = [['profil', result.readProfile], ['proyek', result.readProjects], ['portofolio', result.readPortfolio ?? false], ['pesan', result.readMessages ?? false]].map(([name, ok]) => `${name}: ${ok ? 'ok' : 'gagal'}`).join(', ');
+        return { ok: result.connected, status: result.connected ? 200 : null, detail: `${reads}.${result.connected ? '' : ` Alasan: ${result.reason}.`}` };
+      }),
+      probe('github', 'GitHub (baca repo)', async () => {
+        const token = options.getGitHubToken?.() ?? options.githubToken;
+        const response = await (options.fetcher ?? fetch)('https://api.github.com/rate_limit', { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'freelancer-virtual-house', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, signal: AbortSignal.timeout(10_000) });
+        const body = (await response.json().catch(() => null)) as { resources?: { core?: { remaining?: number; limit?: number } } } | null;
+        const core = body?.resources?.core;
+        return { ok: response.ok, status: response.status, detail: response.ok ? `${token ? 'Token terdaftar' : 'Tanpa token'}; sisa kuota API ${core?.remaining ?? '?'} dari ${core?.limit ?? '?'}.` : `GitHub menolak permintaan (${response.status}).` };
+      }),
+      probe('linkedin', 'LinkedIn (OIDC)', async () => {
+        const state = linkedinVerification(credentialStatus, now());
+        const expiry = credentialStatus?.linkedinAccessTokenExpiresAt;
+        return { ok: state.authorized, status: null, detail: state.authorized ? `Token tersimpan, berlaku sampai ${expiry}. Tidak diuji langsung ke LinkedIn.` : state.verificationStatus === 'expired' ? 'Token sudah kedaluwarsa.' : 'Belum terhubung.' };
+      }),
+      probe('hermes', 'Hermes Agent (draf)', async () => ({ ok: draftingMode === 'hermes', status: null, detail: draftingMode === 'hermes' ? 'Aktif; proposal ditulis lewat profil Hermes lokal.' : options.draftingReason ?? 'Nonaktif.' })),
+      probe('autopilot', 'Autopilot', async () => {
+        const status = await options.autopilot?.getStatus();
+        return { ok: status?.state === 'running', status: null, detail: status ? `${status.state}: ${status.lastMessage}` : 'Autopilot tidak tersedia di server ini.' };
+      }),
+    ]);
+  });
+
   app.get('/api/profile', async () => await repository.getProfile());
   app.put('/api/profile', async (request, reply) => {
     const parsed = parseBody(updateProfileSchema, request.body);
@@ -537,17 +579,19 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     if ('issues' in parsed) return reply.code(400).send({ error: 'Kebijakan tidak valid.', issues: parsed.issues });
     const previous = await repository.getPolicy();
     const profile = await repository.getProfile();
+    // A live policy stays live when the owner edits its limits (the autopilot reads the saved policy every cycle); anything else returns to draft.
+    const keepLive = previous.state === 'active' && !previous.simulationOnly;
     const next: AutonomyPolicy = {
       ...previous,
       ...parsed.value,
       version: previous.version + 1,
-      state: 'draft',
+      state: keepLive ? 'active' : 'draft',
       primaryField: profile.primaryField,
       specializations: profile.specializations,
-      simulationOnly: true,
+      simulationOnly: !keepLive,
     };
     await repository.savePolicy(next);
-    await repository.appendAudit({ type: 'policy.updated', resourceId: 'policy', status: 'recorded', reason: 'Batas kebijakan diperbarui; perlu aktivasi ulang.', policyVersion: next.version, payloadHash: hashPayload(next) });
+    await repository.appendAudit({ type: 'policy.updated', resourceId: 'policy', status: 'recorded', reason: keepLive ? 'Batas kebijakan live diperbarui; langsung berlaku di siklus berikutnya.' : 'Batas kebijakan diperbarui; perlu aktivasi ulang.', policyVersion: next.version, payloadHash: hashPayload(next) });
     return next;
   });
   app.post('/api/policy/activate', async (request, reply) => {
@@ -584,11 +628,11 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     const query = request.query as { search?: string; status?: string };
     const profile = await repository.getProfile();
     const search = query.search?.trim().toLowerCase() ?? '';
-    const assessed = await Promise.all((await repository.listProjects()).map(async (project) => {
+    const assessed = (await repository.listProjects()).map((project) => {
       const assessment = assessProject(project, profile.specializations);
-      await repository.evaluateProject(project.id, assessment.score, assessment.factors);
       return { ...project, score: assessment.score, factors: assessment.factors };
-    }));
+    });
+    await repository.evaluateProjects(assessed.map((project) => ({ id: project.id, score: project.score, factors: project.factors })));
     return assessed.filter((project) => (!search || `${project.title} ${project.description} ${project.skills.join(' ')}`.toLowerCase().includes(search)) && (!query.status || query.status === 'all' || project.status === query.status))
       .sort((a, b) => b.score - a.score);
   });
@@ -674,13 +718,13 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     };
   });
 
-  app.get('/api/pipeline', async () => (await Promise.all((await repository.listProjects()).map(async (project) => ({
-    ...project,
-    latestDraft: await repository.getLatestDraft(project.id) ?? null,
-  })))).sort((a, b) => b.score - a.score));
+  app.get('/api/pipeline', async () => {
+    const drafts = await repository.latestDrafts();
+    return (await repository.listProjects()).map((project) => ({ ...project, latestDraft: drafts.get(project.id) ?? null })).sort((a, b) => b.score - a.score);
+  });
   app.get('/api/dashboard', async () => {
     const projects = await repository.listProjects();
-    const draftCount = (await Promise.all(projects.map((project) => repository.getLatestDraft(project.id)))).filter(Boolean).length;
+    const draftCount = (await repository.latestDrafts()).size;
     const activity = await repository.listAudit(8);
     const audits = await repository.listAudit(5_000);
     const sources = await repository.listKnowledgeSources();

@@ -539,7 +539,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .vo3d-agent small { display: flex; align-items: center; gap: 5px; color: var(--vo-muted); font-size: 11px; }
 .vo3d-agent > span:last-child { min-width: 0; }
 .vo3d-state-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; }
-.vo3d-roster-toggle { top: 214px; left: 16px; display: none; align-items: center; gap: 7px; min-height: 40px; padding: 0 14px; border-radius: 999px; font-weight: 600; }
+.vo3d-roster-toggle { top: 214px; left: 16px; display: none; align-items: center; gap: 7px; min-height: 44px; padding: 0 14px; border-radius: 999px; font-weight: 600; }
 .vo3d-tools { top: 16px; right: 16px; display: flex; gap: 8px; padding: 0; border: 0; background: none; box-shadow: none; backdrop-filter: none; }
 .vo3d-search { display: flex; align-items: center; gap: 8px; width: 270px; min-height: 44px; padding: 0 12px; border: 1px solid var(--vo-line); border-radius: 12px; background: var(--vo-card); box-shadow: 0 6px 24px rgba(15, 23, 42, .12); color: var(--vo-muted); }
 .vo3d-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: none; color: var(--vo-ink); }
@@ -547,12 +547,12 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .vo3d-icon { display: grid; width: 44px; height: 44px; flex: none; place-items: center; border: 1px solid var(--vo-line); border-radius: 12px; background: var(--vo-card); box-shadow: 0 6px 24px rgba(15, 23, 42, .12); }
 .vo3d-icon[aria-pressed='true'], .vo3d-seg button[aria-pressed='true'] { border-color: var(--vo-accent); background: var(--vo-accent); color: #fff; }
 .vo3d-dock { bottom: 16px; left: 50%; display: flex; max-width: calc(100% - 520px); gap: 2px; overflow-x: auto; padding: 6px; transform: translateX(-50%); scrollbar-width: none; }
-.vo3d-dock button { display: flex; align-items: center; gap: 7px; min-height: 40px; padding: 0 12px; border: 0; border-radius: 10px; background: none; color: var(--vo-muted); font-size: 14px; font-weight: 600; white-space: nowrap; }
+.vo3d-dock button { display: flex; align-items: center; gap: 7px; min-height: 44px; padding: 0 12px; border: 0; border-radius: 10px; background: none; color: var(--vo-muted); font-size: 14px; font-weight: 600; white-space: nowrap; }
 .vo3d-dock button:hover, .vo3d-dock button[aria-pressed='true'] { background: rgba(31, 41, 51, .08); color: var(--vo-ink); }
 .vo3d-dock em { min-width: 20px; padding: 0 5px; border-radius: 999px; background: rgba(31, 41, 51, .08); font-size: 11px; font-style: normal; text-align: center; }
 .vo3d-dock-sep { width: 1px; margin: 8px 4px; flex: none; background: var(--vo-line); }
 .vo3d-seg { right: 16px; bottom: 16px; display: flex; gap: 4px; padding: 6px; }
-.vo3d-seg button { display: flex; align-items: center; gap: 6px; min-height: 40px; min-width: 40px; justify-content: center; padding: 0 10px; border: 1px solid transparent; border-radius: 10px; background: none; color: var(--vo-muted); font-size: 13px; font-weight: 600; }
+.vo3d-seg button { display: flex; align-items: center; gap: 6px; min-height: 44px; min-width: 44px; justify-content: center; padding: 0 10px; border: 1px solid transparent; border-radius: 10px; background: none; color: var(--vo-muted); font-size: 13px; font-weight: 600; }
 .vo3d-seg button:hover { color: var(--vo-ink); background: rgba(31, 41, 51, .06); }
 .vo3d-map { top: 76px; right: 16px; width: 230px; margin: 0; padding: 10px; }
 .vo3d-map svg { display: block; width: 100%; height: auto; }
@@ -560,9 +560,9 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .vo3d-map p { margin: 4px 0 0; color: var(--vo-muted); font-size: 10px; }
 .vo3d-panel { top: 76px; right: 16px; display: flex; width: 320px; max-height: calc(100% - 170px); flex-direction: column; overflow: hidden; }
 .vo3d-tabs { display: flex; align-items: center; gap: 2px; padding: 6px; border-bottom: 1px solid var(--vo-line); }
-.vo3d-tabs button { min-height: 34px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: var(--vo-muted); font-size: 13px; font-weight: 600; }
+.vo3d-tabs button { min-height: 44px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: var(--vo-muted); font-size: 13px; font-weight: 600; }
 .vo3d-tabs button[aria-selected='true'] { background: rgba(31, 41, 51, .08); color: var(--vo-ink); }
-.vo3d-tabs .vo3d-close { display: grid; width: 34px; margin-left: auto; padding: 0; place-items: center; }
+.vo3d-tabs .vo3d-close { display: grid; width: 44px; margin-left: auto; padding: 0; place-items: center; }
 .vo3d-panel-body { overflow: auto; padding: 14px 16px 16px; font-size: 13px; }
 .vo3d-panel-body h2 { margin: 0 0 8px; font-size: 13px; }
 .vo3d-panel-body h2 + p, .vo3d-hint { margin: 0 0 14px; color: var(--vo-muted); }
@@ -580,16 +580,21 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 @media (max-width: 1100px) { .vo3d-map { display: none; } .vo3d-search { width: 200px; } }
 @media (max-width: 760px) {
   .vo3d { height: calc(100vh - 150px); min-height: 520px; border-radius: 12px; }
-  .vo3d-card { top: 12px; left: 12px; padding: 10px 12px; width: calc(100% - 80px); }
+  .vo3d-card { top: 12px; left: 12px; padding: 10px 12px; width: calc(100% - 24px); max-width: 340px; }
   .vo3d-card h1 { font-size: 16px; }
-  .vo3d-tools { top: 12px; right: 12px; }
+  .vo3d-tools { top: 166px; right: 12px; left: 12px; flex-wrap: wrap; justify-content: flex-end; }
   .vo3d-search { display: none; }
-  .vo3d-roster-toggle { display: flex; top: 172px; left: 12px; }
-  .vo3d-roster { top: 220px; left: 12px; width: min(250px, calc(100% - 24px)); max-height: calc(100% - 300px); }
+  .vo3d-roster-toggle { display: flex; top: 222px; left: 12px; }
+  .vo3d-roster { top: 272px; left: 12px; width: min(250px, calc(100% - 24px)); max-height: calc(100% - 340px); }
   .vo3d-roster.is-collapsed { display: none; }
   .vo3d-dock { bottom: 70px; left: 12px; max-width: calc(100% - 24px); transform: none; }
   .vo3d-seg { right: auto; bottom: 12px; left: 12px; }
   .vo3d-panel { top: auto; right: 0; bottom: 0; left: 0; width: auto; max-height: 55%; border-radius: 16px 16px 0 0; z-index: 3; }
+}
+@media (max-width: 360px) {
+  html, body { min-width: 0; }
+  .vo3d-roster-toggle { top: 270px; }
+  .vo3d-roster { top: 320px; max-height: calc(100% - 388px); }
 }
 @media (max-height: 640px) { .vo3d-map { display: none; } }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -668,3 +673,233 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .opp-factors li:first-child { border-top: 0; }
 .opp-factors em { color: var(--muted); font-style: normal; text-align: right; }
 @media (max-width: 520px) { .opp-head { flex-direction: column; } .opp-factors li { grid-template-columns: 1fr 44px; } .opp-factors li strong { grid-column: 1; } }
+
+/* ---------------------------------------------------------------------------
+   Sistem kartu (panel di dalam kantor 3D).
+   Alasan: satu bahasa kartu supaya info utama terbaca dulu (angka/judul), keterangan kedua,
+   aksi terakhir. Aksen biru hanya untuk fokus, tautan, dan angka kunci; merah hanya untuk
+   keterlambatan nyata. Bayangan hanya muncul saat kartu bisa diklik (hover/fokus).
+   --------------------------------------------------------------------------- */
+.vo3d-sheet { --accent-text: #14609f; --late: #b3261e; --ok: #1e7a46; --card-pad: 16px; --ease: .15s ease; }
+
+/* Skala teks: tidak ada teks di bawah 12px. */
+.vo3d-sheet-body :is(.metric span, .metric small, .queue-main p, .queue-score small, .queue-budget, .policy-details, .policy-details strong,
+  .activity-copy small, .state-label, .search-field, .filter-note span, .score-mark small, .skill-tag, .factor-list small, .factor-list strong,
+  .opportunity-footer span, .form-field, .form-help, .pipeline-summary, .pipeline-row p:not(.eyebrow), .pipeline-state strong, .fact-list li small,
+  .form-actions span, .knowledge-summary span, .file-field small, .provider-status, .source-provider, .source-row p, .source-row a, .search-results a,
+  .search-results strong, .search-results p, .local-reference, .capability-row p, .production-capability-status > div, .sandbox-http-status,
+  .autopilot-metrics, .policy-facts span, .pipeline-chip, .agent-dept, .agent-boundary, .agent-foot, .kanban-count, .kanban-card-client, .kanban-card-score,
+  .calendar-day-events, .calendar-year-month span, .calendar-source-state, .hours-status-badge, .meter-label, .filter-tab, .eyebrow, .section-heading .eyebrow) { font-size: 12px; }
+.vo3d-sheet-body .metric strong { font-size: 26px; }
+.vo3d-sheet-body .eyebrow { color: var(--accent-text); letter-spacing: .02em; text-transform: none; font-weight: 600; }
+.vo3d-sheet-body .metric-primary .eyebrow { color: inherit; }
+
+/* Kartu dasar */
+.vo3d-sheet-body :is(.form-card, .metric, .kanban-card, .calendar-card, .agent-card, .policy-card, .queue-item, .activity-preview, .pipeline-row, .opportunity-row) {
+  padding: var(--card-pad); border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: none;
+}
+.vo3d-sheet-body :is(.activity-preview, .form-card, .calendar-card, .policy-card) { margin-bottom: 14px; }
+.vo3d-sheet-body .section-heading { align-items: flex-start; gap: 12px; margin-bottom: 10px; }
+.vo3d-sheet-body .form-help, .vo3d-sheet-body .intro-copy { max-width: 70ch; color: var(--muted); line-height: 1.55; }
+.vo3d-sheet-body .empty-state { padding: 22px 16px; border: 1px dashed var(--line); border-radius: 12px; text-align: center; background: var(--surface); }
+.vo3d-sheet-body .empty-state h3 { font-family: var(--body); font-size: 16px; }
+
+/* Kartu yang bisa diklik: naik 1px dan garis aksen. Tanpa animasi berulang. */
+.vo3d-sheet-body :is(.metric-link, .kanban-card, .queue-item, .pipeline-row, .agent-card, .pipeline-chip) { transition: border-color var(--ease), transform var(--ease), box-shadow var(--ease), background var(--ease); }
+.vo3d-sheet-body :is(.metric-link, .kanban-card, .queue-item, .pipeline-row, .agent-card):hover,
+.vo3d-sheet-body :is(.metric-link, .kanban-card, .queue-item, .pipeline-row):focus-within { border-color: var(--accent-text); box-shadow: 0 4px 14px rgba(15, 23, 42, .08); transform: translateY(-1px); }
+.vo3d-sheet-body :is(.metric-link, .pipeline-chip):active, .vo3d-sheet-body :is(.kanban-card, .queue-item, .pipeline-row):active { transform: none; background: var(--surface-muted); }
+.vo3d-sheet-body .metric-link { color: inherit; text-decoration: none; }
+.vo3d-sheet-body .metric-link:focus-visible, .vo3d-sheet-body .pipeline-chip:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.vo3d-sheet-body .metric-link > span::after { content: ' ›'; }
+
+/* Ringkasan angka: titik fokus = angka besar, label di atas, keterangan di bawah. */
+.vo3d-sheet-body .metrics-row { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin: 0 0 16px; gap: 10px; }
+.vo3d-sheet-body .metric { min-height: 0; gap: 4px; }
+.vo3d-sheet-body .metric span { color: var(--muted); font-weight: 600; }
+.vo3d-sheet-body .metric-primary span, .vo3d-sheet-body .metric-primary small { color: #dbe3ea; }
+
+/* Distribusi pipeline: chip yang bisa diklik */
+.vo3d-sheet-body .pipeline-overview-bar { align-items: center; gap: 8px; margin-bottom: 16px; padding: 12px; border-radius: 12px; }
+.vo3d-sheet-body .pipeline-overview-title { flex: 1 0 100%; color: var(--muted); font-size: 12px; font-weight: 600; }
+.vo3d-sheet-body .pipeline-chip { min-height: 44px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; text-decoration: none; }
+.vo3d-sheet-body .pipeline-chip:hover { border-color: var(--accent-text); background: var(--surface); }
+.vo3d-sheet-body .pipeline-chip strong { color: var(--accent-text); font-size: 14px; }
+
+/* Daftar baris: judul + keterangan di kiri, angka/aksi di kanan, turun ke bawah di layar sempit. */
+.vo3d-sheet-body .deadline-item, .vo3d-sheet-body .reason-item { gap: 12px; padding: 12px 0; font-size: 13px; }
+.vo3d-sheet-body .deadline-item { flex-wrap: wrap; }
+.vo3d-sheet-body .deadline-item > :first-child { flex: 1 1 220px; min-width: 0; }
+.item-sub { margin-top: 2px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.item-aside { display: grid; justify-items: end; gap: 6px; text-align: right; }
+.item-aside small { color: var(--muted); font-size: 12px; }
+.item-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.item-link { font-weight: 600; text-decoration: none; }
+.item-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.vo3d-sheet-body .is-late { color: var(--late); }
+.vo3d-sheet-body .is-ok { color: var(--ok); }
+
+/* Alasan dilewati: bilah proporsional dari data nyata */
+.reason-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.reason-item { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(80px, 1fr) 104px; align-items: center; border-top: 1px solid var(--line); }
+.reason-item:first-child { border-top: 0; }
+.reason-text { overflow-wrap: anywhere; }
+.reason-meter { height: 8px; border-radius: 4px; background: var(--surface-muted); overflow: hidden; }
+.reason-meter span { display: block; height: 100%; border-radius: 4px; background: var(--accent-text); }
+
+/* Antrean dan pipeline: seluruh baris menjadi target klik lewat tautan utamanya. */
+.vo3d-sheet-body .queue-item { position: relative; margin-bottom: 8px; min-height: 0; }
+.vo3d-sheet-body .queue-list { border-top: 0; }
+.vo3d-sheet-body .queue-title { font-family: var(--body); font-size: 15px; }
+.vo3d-sheet-body .queue-title::after, .vo3d-sheet-body .kanban-card-action .button::after, .vo3d-sheet-body .pipeline-row > .button::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
+.vo3d-sheet-body .queue-main p { white-space: normal; }
+.vo3d-sheet-body .pipeline-list { border-top: 0; display: grid; gap: 8px; }
+.vo3d-sheet-body .pipeline-row { position: relative; gap: 14px; }
+.vo3d-sheet-body .pipeline-row h2 { font-family: var(--body); font-size: 15px; font-weight: 700; }
+.vo3d-sheet-body .pipeline-row > .button { position: static; }
+
+/* Papan tugas */
+.vo3d-sheet-body .kanban-board { grid-template-columns: repeat(4, minmax(250px, 1fr)); gap: 12px; scroll-snap-type: x proximity; overscroll-behavior-x: contain; }
+.vo3d-sheet-body .kanban-column { min-height: 0; padding: 10px; border-radius: 12px; scroll-snap-align: start; }
+.vo3d-sheet-body .kanban-card { position: relative; border-radius: 10px; }
+.vo3d-sheet-body .kanban-card h4 { font-size: 14px; }
+.kanban-hint { margin: 0; color: var(--muted); font-size: 12px; }
+.kanban-empty { padding: 20px 8px; color: var(--muted); font-size: 12px; text-align: center; }
+.kanban-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.kanban-card-action { display: flex; justify-content: flex-end; margin-top: 4px; }
+.vo3d-sheet-body .kanban-card-action .button { min-height: 44px; font-size: 12px; }
+
+/* Karyawan virtual */
+.vo3d-sheet-body .agent-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 12px; margin-top: 0; }
+.vo3d-sheet-body .agent-card { gap: 10px; }
+.vo3d-sheet-body .agent-card-header h3 { font-family: var(--body); font-size: 16px; }
+.vo3d-sheet-body .agent-task { margin: 0 0 8px; font-size: 13px; line-height: 1.5; }
+.agent-role, .agent-reason { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }
+.vo3d-sheet-body .agent-boundary { padding: 8px 10px; border-radius: 8px; background: var(--surface-muted); line-height: 1.45; }
+.vo3d-sheet-body .agent-foot { padding-top: 8px; border-top: 1px solid var(--line); color: var(--ink); font-weight: 600; }
+
+/* Kalender */
+.calendar-wide { grid-column: 1 / -1; }
+.calendar-note { margin: 0 0 12px; color: var(--muted); font-size: 12px; }
+.calendar-expiry { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; padding: 12px; border-radius: 8px; background: var(--surface-muted); }
+.calendar-expiry-label { display: block; color: var(--muted); font-size: 12px; }
+
+/* Aktivitas dan filter */
+.vo3d-sheet-body .filter-tabs { gap: 8px; }
+.vo3d-sheet-body .filter-tab { min-height: 44px; padding: 6px 14px; border-radius: 8px; }
+.vo3d-sheet-body .filter-tab[aria-pressed='true'] { background: var(--ink); border-color: var(--ink); color: #fff; }
+.activity-search { display: grid; gap: 4px; margin-bottom: 8px; }
+.activity-search input { width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); }
+.vo3d-sheet-body .activity-row { gap: 12px; padding: 12px 2px; }
+.vo3d-sheet-body .activity-copy strong { font-size: 14px; }
+.vo3d-sheet-body .activity-copy p { margin: 2px 0; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.vo3d-sheet-body .local-reference { display: block; margin-top: 2px; }
+.vo3d-sheet-body .state-label { padding: 3px 8px; border-radius: 6px; font-weight: 600; }
+
+/* Tombol dan kolom isian: target sentuh minimal 44px */
+.vo3d-sheet-body :is(.button, .form-field input, .form-field select, .search-field input) { min-height: 44px; }
+.vo3d-sheet-body .button-text { min-height: 44px; }
+.vo3d-sheet-body .form-actions { flex-wrap: wrap; gap: 8px; }
+.vo3d-sheet-body .capability-row { gap: 12px; padding: 12px 0; }
+.vo3d-sheet-body .capability-row strong { font-size: 13px; }
+.vo3d-sheet-body .capability-row p { font-size: 12px; line-height: 1.5; }
+
+/* Responsif: tiga keadaan (lebar, sedang, sempit) */
+@media (max-width: 960px) {
+  .vo3d-sheet-body .overview-grid, .vo3d-sheet-body .policy-summary-grid, .vo3d-sheet-body .capability-grid, .vo3d-sheet-body .form-section { grid-template-columns: minmax(0, 1fr); }
+  .vo3d-sheet-body .kanban-board { grid-template-columns: repeat(4, minmax(240px, 78%)); }
+}
+@media (max-width: 560px) {
+  .vo3d-sheet { --card-pad: 14px; }
+  .vo3d-sheet-body .metrics-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .vo3d-sheet-body .metric strong { font-size: 22px; }
+  .reason-item { grid-template-columns: minmax(0, 1fr) auto; }
+  .reason-meter { grid-column: 1 / -1; grid-row: 2; }
+  .item-aside { justify-items: start; text-align: left; }
+  .item-actions { justify-content: flex-start; }
+  .vo3d-sheet-body .pipeline-row, .vo3d-sheet-body .queue-item { grid-template-columns: minmax(0, 1fr); }
+  .vo3d-sheet-body .queue-budget { grid-column: auto; }
+  .vo3d-sheet-body .form-grid, .vo3d-sheet-body .form-grid-three { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vo3d-sheet-body * { transition: none !important; }
+  .vo3d-sheet-body :is(.metric-link, .kanban-card, .queue-item, .pipeline-row):hover { transform: none; }
+}
+/* Angka utama: satu kartu gelap sebagai titik fokus (kontras teks putih di atas ink gelap). */
+.vo3d-sheet-body .metric-primary { border-color: var(--ink); background: var(--ink); color: #fff; }
+.vo3d-sheet-body .metric-primary:is(.metric-link):hover { border-color: var(--ink); }
+.vo3d-sheet-body .metric-primary span, .vo3d-sheet-body .metric-primary small { color: #dbe3ea; }
+.kanban-more { width: 100%; }
+
+/* Owner controls, staff performance signals, and the visit list. */
+.vo3d-owner-action { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-width: 92px; min-height: 44px; padding: 0 12px; border: 1px solid var(--vo-line); border-radius: 12px; background: var(--vo-card); box-shadow: 0 6px 24px rgba(15, 23, 42, .12); font-weight: 650; }
+.vo3d-owner-action[aria-pressed='true'] { border-color: var(--vo-accent); background: var(--vo-accent); color: #fff; }
+.vo3d-owner-action:focus-visible, .vo3d-tabs button:focus-visible { outline: 2px solid var(--vo-ink); outline-offset: 2px; }
+.vo3d-owner-avatar { background: var(--vo-ink); }
+.vo3d-owner-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0 0 12px; }
+.vo3d-owner-summary > div { display: flex; min-height: 54px; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 11px; border: 1px solid var(--vo-line); border-radius: 9px; background: #fff; }
+.vo3d-owner-summary span { color: var(--vo-muted); }
+.vo3d-owner-summary strong { font-size: 18px; }
+.vo3d-owner-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 16px; }
+.vo3d-owner-actions button { min-height: 44px; padding: 0 12px; border: 1px solid var(--vo-line); border-radius: 8px; background: #fff; color: var(--vo-ink); font-weight: 600; }
+.vo3d-owner-actions button[aria-pressed='true'] { border-color: var(--vo-ink); background: var(--vo-ink); color: #fff; }
+.vo3d-owner-actions button:disabled { cursor: not-allowed; opacity: .55; }
+.vo3d-owner-hint { margin: 0 0 8px; color: var(--vo-muted); font-size: 12px; line-height: 1.45; }
+.vo3d-owner-controls { margin: 4px 0 16px; padding: 10px 11px 12px; border: 1px solid var(--vo-line); border-radius: 9px; background: #f7f8f6; }
+.vo3d-owner-controls .vo3d-owner-hint { margin-bottom: 8px; }
+.vo3d-owner-dpad { display: grid; width: 148px; grid-template-columns: repeat(3, 44px); grid-template-rows: repeat(3, 44px); gap: 4px; margin: 0 auto; }
+.vo3d-owner-dpad button { min-width: 44px; min-height: 44px; border: 1px solid var(--vo-line); border-radius: 8px; background: #fff; color: var(--vo-ink); font: 700 13px/1 inherit; touch-action: none; }
+.vo3d-owner-dpad button:hover { border-color: var(--vo-ink); }
+.vo3d-owner-dpad button:active { background: var(--vo-accent); border-color: var(--vo-accent); color: #fff; }
+.vo3d-owner-dpad button:focus-visible { outline: 2px solid var(--vo-ink); outline-offset: 2px; }
+.vo3d-performance-list { margin-bottom: 12px !important; }
+.vo3d-owner-list-title { margin-top: 14px !important; }
+.vo3d-owner-agent-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.vo3d-owner-agent-list button { display: flex; width: 100%; min-height: 52px; align-items: center; gap: 10px; padding: 6px 9px; border: 1px solid var(--vo-line); border-radius: 9px; background: #fff; text-align: left; }
+.vo3d-owner-agent-list button:hover { border-color: var(--vo-ink); }
+.vo3d-owner-agent-list button > span:last-child { min-width: 0; }
+.vo3d-owner-agent-list strong, .vo3d-owner-agent-list small { display: block; overflow-wrap: anywhere; }
+.vo3d-owner-agent-list small { display: flex; align-items: center; gap: 6px; margin-top: 2px; color: var(--vo-muted); }
+.vo3d-panel-body :is(.vo3d-owner-action, .vo3d-owner-actions button, .vo3d-owner-agent-list button):focus-visible { outline: 2px solid var(--vo-ink); outline-offset: 2px; }
+@media (max-width: 560px) {
+  .vo3d-owner-action { min-width: 44px; padding: 0 9px; }
+  .vo3d-owner-summary { gap: 6px; }
+  .vo3d-owner-summary > div { min-height: 48px; padding: 7px 9px; }
+  .vo3d-owner-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .vo3d-owner-actions button { min-width: 0; padding: 6px 8px; }
+}
+
+/* Kartu Siklus operasi dan Kesehatan integrasi */
+.cycle-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 14px 0; }
+.cycle-stats div { min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-muted); }
+.cycle-stats dt { color: var(--muted); font-size: 12px; }
+.cycle-stats dd { margin: 2px 0 0; font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+.cycle-label { margin: 0 0 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.vo3d-sheet-body .autopilot-card .provider-limit { margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-muted); color: var(--muted); font-size: 12px; line-height: 1.55; }
+.health-list { display: grid; margin: 12px 0 0; padding: 0; list-style: none; }
+.health-row { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; align-items: start; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
+.health-row:first-child { border-top: 0; }
+.health-main strong { font-size: 14px; overflow-wrap: anywhere; }
+.health-main p { margin: 2px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.health-meta { display: grid; justify-items: end; gap: 2px; text-align: right; }
+.health-meta b { font-size: 13px; }
+.health-meta small { color: var(--muted); font-size: 12px; }
+.health-pill { display: inline-flex; justify-content: center; padding: 3px 8px; border-radius: 6px; font-size: 12px; font-weight: 700; }
+.health-pill.is-ok { background: #e3f3ea; color: #14633a; }
+.health-pill.is-bad { background: #fbe6e4; color: #9b1c14; }
+.health-subtitle { margin: 18px 0 0; font-size: 14px; }
+@media (max-width: 560px) { .health-row { grid-template-columns: minmax(0, 1fr); gap: 6px; } .health-meta { justify-items: start; text-align: left; } }
+/* Teks panjang tanpa spasi (URL, ID) membungkus, bukan membuat panel bergulir ke samping. */
+.vo3d-sheet-body :is(p, code, strong, span, h2, h3, dd, small, a, li) { overflow-wrap: anywhere; }
+.vo3d-sheet-body :is(.capability-grid, .capability-row, .policy-summary-grid, .form-section) > * { min-width: 0; }
+.vo3d-sheet-body code { white-space: normal; word-break: break-all; }
+.vo3d-sheet-body .button-primary:hover:not(:disabled) { background: #1864ab; }
+/* Baris integrasi: teks di kiri, label status selalu utuh di kanan (tidak mengecil/menembus kartu). */
+.vo3d-sheet-body .capability-row { display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: start; gap: 8px 14px; }
+.vo3d-sheet-body .capability-row > :last-child { min-width: max-content; justify-self: end; }
+.vo3d-sheet-body .capability-row .state-label, .vo3d-sheet-body .capability-status > * { white-space: nowrap; }
+.vo3d-sheet-body .capability-row strong { display: block; text-transform: none; }
+@media (max-width: 720px) {
+  .vo3d-sheet-body .capability-row { grid-template-columns: minmax(0, 1fr); }
+  .vo3d-sheet-body .capability-row > :last-child { justify-self: start; grid-row: 1; }
+}

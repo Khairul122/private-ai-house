@@ -52,8 +52,12 @@ function seedLocalProfile(remote: FreelancerProfile, jobs: Array<{ id: number; n
   };
 }
 
-function seedPolicy(policy: AutonomyPolicy, profile: ServiceProfile, now: Date): AutonomyPolicy {
+function seedPolicy(policy: AutonomyPolicy, profile: ServiceProfile, now: Date, ownerEdited: boolean): AutonomyPolicy {
   const expiry = Date.parse(policy.expiresAt);
+  // Once the owner saved the policy, restarts must not overwrite their limits with profile defaults.
+  const limits = ownerEdited
+    ? { keywords: policy.keywords, minPrice: policy.minPrice, maxPrice: policy.maxPrice, activeHours: policy.activeHours }
+    : { keywords: [], minPrice: profile.minPrice, maxPrice: profile.maxPrice, activeHours: { start: 0, end: 24 } };
   return {
     ...policy,
     version: policy.version + 1,
@@ -62,10 +66,7 @@ function seedPolicy(policy: AutonomyPolicy, profile: ServiceProfile, now: Date):
     allowedActions: ['bid.submit'],
     primaryField: profile.primaryField,
     specializations: profile.specializations,
-    keywords: [],
-    minPrice: profile.minPrice,
-    maxPrice: profile.maxPrice,
-    activeHours: { start: 0, end: 24 },
+    ...limits,
     simulationOnly: false,
     allowUnknownDeadline: true,
   };
@@ -200,7 +201,7 @@ export class FreelancerAutopilot {
         return;
       }
       if (currentPolicy.state !== 'active') {
-        const policy = seedPolicy(currentPolicy, profile, this.now());
+        const policy = seedPolicy(currentPolicy, profile, this.now(), await repository.hasAudit('policy.updated', 'policy'));
         await repository.savePolicy(policy);
         await repository.appendAudit({ type: 'autopilot.policy_bootstrapped', resourceId: 'policy', status: 'recorded', reason: 'Kebijakan bid otomatis dibentuk dari ringkasan dan keahlian profil Freelancer; batas harga, kuota, zona waktu, serta jam mengikuti nilai lokal yang tersimpan.', policyVersion: policy.version, payloadHash: hashPayload({ specializations: policy.specializations, minPrice: policy.minPrice, maxPrice: policy.maxPrice, dailyBidLimit: policy.dailyBidLimit, weeklyBidLimit: policy.weeklyBidLimit }) });
       } else if (currentPolicy.simulationOnly || !currentPolicy.allowedActions.includes('bid.submit')) {
@@ -345,7 +346,7 @@ export class FreelancerAutopilot {
           }
         } catch (error) {
           const statusCode = typeof error === 'object' && error !== null && 'statusCode' in error && typeof error.statusCode === 'number' ? error.statusCode : null;
-          await repository.appendAudit({ type: 'marketplace.production.submit_bid', resourceId: project.id, status: 'failed', reason: statusCode === null ? 'Bid otomatis tidak menerima respons yang dapat dipastikan; proyek dikunci agar tidak dikirim ulang otomatis.' : `Bid otomatis menghasilkan HTTP ${statusCode}.`, policyVersion: policy.version, payloadHash });
+          await repository.appendAudit({ type: 'marketplace.production.submit_bid', resourceId: project.id, status: 'failed', reason: statusCode === null ? 'Bid otomatis tidak menerima respons yang dapat dipastikan; proyek dikunci agar tidak dikirim ulang otomatis.' : `Bid otomatis menghasilkan HTTP ${statusCode}. ${error instanceof Error ? error.message.slice(0, 260) : ''}`.trim(), policyVersion: policy.version, payloadHash });
           await repository.setPipelineStatus(project.id, 'reconciliation_required');
         }
       }

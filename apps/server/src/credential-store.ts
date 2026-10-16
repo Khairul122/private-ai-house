@@ -53,7 +53,7 @@ export function readCredentialStatus(storePath: string, platform = process.platf
 function runCredentialAction(action: string, storePath: string, scriptPath: string, input = ''): Promise<string> {
   if (process.platform !== 'win32') return Promise.reject(new Error('Windows credential store is unavailable.'));
   return new Promise((resolve, reject) => {
-    const child = spawn(process.env.FVH_POWERSHELL_BIN ?? 'pwsh.exe', [
+    const child = spawn(process.env.FVH_POWERSHELL_BIN ?? 'powershell.exe', [
       '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath,
       '-Action', action, '-StorePath', storePath,
     ], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -118,11 +118,16 @@ export async function getLinkedInClientCredentials(storePath: string, scriptPath
 
 export async function getFreelancerAccessToken(storePath: string, scriptPath: string): Promise<string> {
   const token = await runCredentialAction('GetFreelancerAccessToken', storePath, scriptPath);
-  if (token.length < 16 || token.length > 4096 || /[\0\r\n]/.test(token)) {
-    throw new Error('Freelancer token is not configured in the secure store.');
-  }
+  if (token.length < 16 || token.length > 4096 || /[\0\r\n]/.test(token)) throw new Error('Freelancer token is not configured in the secure store.');
   return token;
 }
+
+export async function getLinkedInAccessToken(storePath: string, scriptPath: string): Promise<string> {
+  const token = await runCredentialAction('GetLinkedInAccessToken', storePath, scriptPath);
+  if (token.length < 100 || token.length > 3000 || /[\0\r\n]/.test(token)) throw new Error('LinkedIn access token is not configured in the secure store.');
+  return token;
+}
+
 
 export async function storeLinkedInAccessToken(storePath: string, scriptPath: string, accessToken: string, expiresAt: string): Promise<void> {
   if (accessToken.length < 100 || accessToken.length > 3000 || !Number.isFinite(Date.parse(expiresAt)) || Date.parse(expiresAt) <= Date.now()) {

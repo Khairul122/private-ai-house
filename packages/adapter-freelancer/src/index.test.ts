@@ -205,6 +205,15 @@ describe('FreelancerProductionWriteAdapter', () => {
     expect(requests.every(([url]) => !String(url).includes('freelancer-sandbox.com'))).toBe(true);
   });
 
+  it('keeps the provider error code and message of a rejected bid', async () => {
+    let calls = 0;
+    const fetcher = vi.fn(async () => (++calls === 1 ? jsonResponse({ result: { id: 42 } }) : new Response(JSON.stringify({ status: 'error', error_code: 'ProjectExceptionCodes.BID_LIMIT', message: 'Bid limit reached' }), { status: 400, headers: { 'Content-Type': 'application/json' } })));
+    const adapter = new FreelancerProductionWriteAdapter({ token: 'production-token-value-1234', fetcher });
+
+    await expect(adapter.run({ operation: 'submit_bid', projectId: 77, amount: 25, period: 3, milestonePercentage: 100, description: 'Live proposal.' }))
+      .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('ProjectExceptionCodes.BID_LIMIT: Bid limit reached') });
+  });
+
   it('updates profile jobs and posts a message only to the production host', async () => {
     const requests: Array<[string | URL | Request, RequestInit | undefined]> = [];
     const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {

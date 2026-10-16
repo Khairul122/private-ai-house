@@ -14,6 +14,7 @@ export const LEAD_ID = 'lead-agent';
 export const PODS = ROSTER.filter((entry) => entry.id !== LEAD_ID).map((entry, i) => ({ ...entry, x: POD_XS[i % 3]!, z: POD_ZS[Math.floor(i / 3)]! }));
 export const LEAD_DESK = { x: -4, z: 10.4 };
 const corridorZ = (podZ: number) => podZ + POD_SIZE / 2 + 0.75;
+export const OWNER_SPOT: Spot = { x: -17.1, z: 8.2, y: 0, facing: 0, seated: false, via: [[SPINE_X, corridorZ(POD_ZS[2]!)], [-17.1, corridorZ(POD_ZS[2]!)]] };
 
 export type ZoneId = 'workspace' | 'meeting' | 'lounge' | 'pantry' | 'lobby';
 export const ZONES: Array<{ id: ZoneId; label: string; x: number; z: number; w: number; d: number }> = [

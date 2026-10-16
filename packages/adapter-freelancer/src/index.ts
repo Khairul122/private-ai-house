@@ -535,8 +535,10 @@ class FreelancerWriteAdapter {
       throw this.makeError(undefined, `${this.options.environment} Freelancer tidak dapat dijangkau dari server lokal.`);
     }
     if (!response.ok) {
+      const body: unknown = await response.json().catch(() => null);
+      const detail = isRecord(body) ? [text(body.error_code), text(body.message)].filter(Boolean).join(': ').replace(/\s+/g, ' ').slice(0, 200) : '';
       await response.body?.cancel().catch(() => {});
-      throw this.makeError(response.status, `${this.options.environment} Freelancer mengembalikan HTTP ${response.status}.`);
+      throw this.makeError(response.status, `${this.options.environment} Freelancer mengembalikan HTTP ${response.status}${detail ? ': ' + detail : '.'}`);
     }
     return response;
   }

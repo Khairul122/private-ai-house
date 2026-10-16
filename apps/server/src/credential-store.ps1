@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet('Store', 'Status', 'VerifyFreelancer', 'GetFreelancerAccessToken', 'GetLinkedInClientCredentials', 'StoreLinkedInAccessToken', 'DeleteLinkedInAccessToken')]
+  [ValidateSet('Store', 'Status', 'VerifyFreelancer', 'GetFreelancerAccessToken', 'GetLinkedInClientCredentials', 'GetLinkedInAccessToken', 'StoreLinkedInAccessToken', 'DeleteLinkedInAccessToken')]
   [string]$Action,
 
   [Parameter(Mandatory = $true)]
@@ -57,6 +57,18 @@ if ($Action -eq 'GetLinkedInClientCredentials') {
 
 if ($Action -eq 'GetFreelancerAccessToken') {
   $secureToken = ConvertTo-SecureString -String $store.freelancerAccessToken
+  $tokenPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)
+  try {
+    [Runtime.InteropServices.Marshal]::PtrToStringBSTR($tokenPointer) | Write-Output
+  } finally {
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($tokenPointer)
+  }
+  exit 0
+}
+
+if ($Action -eq 'GetLinkedInAccessToken') {
+  if (-not $store.linkedinAccessToken) { throw 'LinkedIn access token is not configured.' }
+  $secureToken = ConvertTo-SecureString -String $store.linkedinAccessToken
   $tokenPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)
   try {
     [Runtime.InteropServices.Marshal]::PtrToStringBSTR($tokenPointer) | Write-Output

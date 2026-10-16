@@ -56,7 +56,7 @@ describe('FreelancerAutopilot', () => {
 
   it('keeps the owner-saved profile instead of reseeding it from Freelancer on restart', async () => {
     repository = await WorkspaceRepository.open();
-    await repository.saveProfile({ ...repository.getProfile(), primaryField: 'Backend Engineer', specializations: ['Laravel', 'Python'], facts: [{ label: 'Catatan', value: 'Isi pemilik', source: 'manual' }] });
+    await repository.saveProfile({ ...(await repository.getProfile()), primaryField: 'Backend Engineer', specializations: ['Laravel', 'Python'], facts: [{ label: 'Catatan', value: 'Isi pemilik', source: 'manual' }] });
     autopilot = new FreelancerAutopilot({
       repository, now: () => now, intervalMs: 60_000, readProfile: async () => profile,
       readProjects: async () => ({ projects: [], skipped: 0 }), submitBid: vi.fn(async () => ({ statusCode: 200 })),
@@ -65,6 +65,20 @@ describe('FreelancerAutopilot', () => {
     await autopilot.start();
 
     expect(await repository.getProfile()).toMatchObject({ primaryField: 'Backend Engineer', specializations: ['Laravel', 'Python'], facts: [{ value: 'Isi pemilik' }] });
+  });
+
+  it('keeps the owner-saved policy limits when the policy is bootstrapped again on restart', async () => {
+    repository = await WorkspaceRepository.open();
+    await repository.savePolicy({ ...(await repository.getPolicy()), keywords: ['PHP'], minPrice: 150, maxPrice: 900, activeHours: { start: 8, end: 20 } });
+    await repository.appendAudit({ type: 'policy.updated', resourceId: 'policy', status: 'recorded', reason: 'Batas kebijakan diperbarui; perlu aktivasi ulang.', policyVersion: 1, payloadHash: null });
+    autopilot = new FreelancerAutopilot({
+      repository, now: () => now, intervalMs: 60_000, readProfile: async () => profile,
+      readProjects: async () => ({ projects: [], skipped: 0 }), submitBid: vi.fn(async () => ({ statusCode: 200 })),
+    });
+
+    await autopilot.start();
+
+    expect(await repository.getPolicy()).toMatchObject({ state: 'active', simulationOnly: false, keywords: ['PHP'], minPrice: 150, maxPrice: 900, activeHours: { start: 8, end: 20 } });
   });
 
   it.each([

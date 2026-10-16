@@ -325,6 +325,10 @@ describe('local API', () => {
   it('rejects untrusted browser origins and malformed policy updates', async () => {
     const crossOrigin = await app.inject({ method: 'POST', url: '/api/policy/pause', headers: { origin: 'https://attacker.example' } });
     const sameOrigin = await app.inject({ method: 'GET', url: '/api/profile', headers: { origin: 'http://localhost' } });
+    await repository.savePolicy({ ...(await repository.getPolicy()), state: 'active', simulationOnly: false });
+    const liveEdit = await app.inject({ method: 'PUT', url: '/api/policy', payload: { allowedActions: ['bid.submit'], keywords: [], minimumConfidence: 0.5, minPrice: 100, maxPrice: 800, dailyBidLimit: 7, weeklyBidLimit: 12, timezone: 'Asia/Jakarta', activeHours: { start: 0, end: 24 }, noNegotiationTerms: [] } });
+    expect(liveEdit.json()).toMatchObject({ state: 'active', simulationOnly: false, dailyBidLimit: 7 });
+    await repository.savePolicy({ ...(await repository.getPolicy()), state: 'draft', simulationOnly: true });
     const invalidPolicy = await app.inject({ method: 'PUT', url: '/api/policy', payload: { maxPrice: -1 } });
 
     expect(crossOrigin.statusCode).toBe(403);

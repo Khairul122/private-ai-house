@@ -183,6 +183,24 @@ export class WorkspaceRepository {
     return draft;
   }
 
+  /** Newest draft of every project in one query (avoids a round trip per project against the remote database). */
+  async latestDrafts(): Promise<Map<string, BidDraft>> {
+    const rows = await this.database.query<{ project_id: string; draft_json: string }>('SELECT DISTINCT ON (project_id) project_id, draft_json FROM bid_drafts ORDER BY project_id, created_at DESC');
+    return new Map(rows.map((row) => [row.project_id, parseJson<BidDraft>(row.draft_json)]));
+  }
+
+  /** Same rule as evaluateProject, applied to many projects in a single statement. */
+  async evaluateProjects(items: Array<{ id: string; score: number; factors: unknown }>) {
+    if (!items.length) return;
+    await this.database.query(
+      `UPDATE projects p SET score = v.score, score_factors_json = v.factors,
+        pipeline_status = CASE WHEN p.pipeline_status = 'new' THEN 'scored'
+          WHEN p.pipeline_status = 'scored' AND EXISTS (SELECT 1 FROM bid_drafts d WHERE d.project_id = p.id) THEN 'draft_ready'
+          ELSE p.pipeline_status END
+       FROM unnest($1::text[], $2::int[], $3::text[]) AS v(id, score, factors) WHERE p.id = v.id`,
+      [items.map((item) => item.id), items.map((item) => item.score), items.map((item) => JSON.stringify(item.factors))]);
+  }
+
   async getLatestDraft(projectId: string): Promise<BidDraft | undefined> {
     const [row] = await this.database.query<{ draft_json: string }>('SELECT draft_json FROM bid_drafts WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1', [projectId]);
     return row ? parseJson<BidDraft>(row.draft_json) : undefined;
@@ -342,6 +360,21 @@ export class WorkspaceRepository {
         VALUES ($1, $2, $3, 'allowed', $4, $5, $6, $7)`,
       [randomUUID(), input.type, input.resourceId, input.reason, input.policyVersion, input.payloadHash, new Date(Date.now() - 1_000).toISOString()]);
       return true;
+    });
+  }
+
+  async replaceKnowledgeSource(source: { id: string; provider: KnowledgeProvider; label: string; referenceUrl: string; updatedAt: string }, chunks: KnowledgeChunk[]) {
+    await this.database.transaction(async (tx) => {
+      await tx.query('DELETE FROM knowledge_sources WHERE id = $1', [source.id]);
+      await tx.query('INSERT INTO knowledge_sources (id, provider, label, reference_url, updated_at) VALUES ($1, $2, $3, $4, $5)', [source.id, source.provider, source.label, source.referenceUrl, source.updatedAt]);
+      const createdAt = new Date().toISOString();
+      for (let start = 0; start < chunks.length; start += 200) {
+        const batch = chunks.slice(start, start + 200);
+        await tx.query(`INSERT INTO knowledge_chunks (id, source_id, path, source_ref, url, content_hash, content, created_at)
+          SELECT id, source_id, path, source_ref, url, content_hash, content, $8
+          FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[]) AS t(id, source_id, path, source_ref, url, content_hash, content)`,
+        [batch.map((c) => c.id), batch.map((c) => c.sourceId), batch.map((c) => c.path), batch.map((c) => c.sourceRef), batch.map((c) => c.url), batch.map((c) => c.contentHash), batch.map((c) => c.content), createdAt]);
+      }
     });
   }
 
