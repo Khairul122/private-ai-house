@@ -3,10 +3,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router';
 import { api, jsonRequest, type AuditEvent, type Autopilot, type BidDraft, type BusinessSyncStatus, type Capabilities, type ClientProject, type Inbox, type Insights, type Opportunity, type Policy, type Profile, type Work } from './api.js';
 import { deriveOfficeAgents, ROOM_LABELS, STATE_COLORS, STATE_LABELS, summarize, type AgentState } from './office-state.js';
-import { BOARDS, dayPhase, FLOOR, PODS, spotsFor, ZONES, type BoardId, type Spot } from './office-layout.js';
+import { BOARDS, dayPhase, FLOOR, LIFT, OWNER_SPOT, PODS, spotsFor, ZONES, type BoardId, type P2, type Spot } from './office-layout.js';
 import type { BoardContent, CameraCommand } from './VisualOffice.js';
 import { bindOwnerKeyboard, createOwnerInput, type OwnerDirection, type OwnerInput } from './owner-input.js';
 import OperationsPage from './OperationsPage.js';
+import BrowserBiddingCard from './BrowserBiddingCard.js';
+import type { BrowserBiddingStatus } from './browser-bidding-api.js';
 import type { OperationsData } from './operations-api.js';
 import { OPERATIONS_ROSTER } from '@fvh/domain';
 import { FLOOR_TWO_PODS } from './office-layout.js';
@@ -395,6 +397,7 @@ function AgentsPage() {
   }>('/dashboard') });
   const autopilot = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 30_000 });
   const profile = useQuery({ queryKey: ['profile'], queryFn: () => api<Profile>('/profile') });
+  const browserBidding = useQuery({queryKey:['browser-bidding'],queryFn:()=>api<BrowserBiddingStatus|null>('/browser-bidding'),refetchInterval:3000});
   const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: () => api<Capabilities>('/capabilities') });
   const sync = useQuery({ queryKey: ['business-sync'], queryFn: () => api<BusinessSyncStatus | null>('/business-sync'), refetchInterval: 30_000 });
   const inbox = useQuery({ queryKey: ['inbox'], queryFn: () => api<Inbox>('/inbox'), refetchInterval: 60_000 });
@@ -405,7 +408,7 @@ function AgentsPage() {
 
   const inboxWaiting = inbox.isError ? undefined : inbox.data?.needsReply.length;
   const derived = deriveOfficeAgents(autopilot.isError ? undefined : autopilot.data, dashboard.data.activity, {
-    sync: sync.isError ? undefined : sync.data, inboxWaiting, dueSoon: work.isError ? undefined : work.data?.dueSoon, hermes: capabilities.data.hermes, knowledge: knowledgeSync.isError ? undefined : knowledgeSync.data?.job,operations:operations.isError?undefined:operations.data,
+    sync: sync.isError ? undefined : sync.data, inboxWaiting, dueSoon: work.isError ? undefined : work.data?.dueSoon, hermes: capabilities.data.hermes, knowledge: knowledgeSync.isError ? undefined : knowledgeSync.data?.job,operations:operations.isError?undefined:operations.data,browserBidding:browserBidding.isError?undefined:browserBidding.data,
   });
   const agents = [
     {
@@ -498,6 +501,7 @@ function AgentsPage() {
       boundary: 'Beroperasi di lingkungan lokal & sandbox; tanpa kredensial live produksi.',
       metric: 'Tidak ada komponen runtime di aplikasi',
     },
+    {id:'browser-bid-operator',name:'Operator Browser Bid',dept:'Lantai 1',role:'Pengiriman bid melalui Chrome',task:'Mengirim proposal autopilot melalui tab kerja pada Chrome berprofil pemilik.',boundary:'Kebijakan, kuota, akun dan payload diperiksa sebelum klik; hasil tidak pasti ditahan.',metric:browserBidding.isError?'Status tidak tersedia':browserBidding.data?.reason ?? 'Worker belum tersedia.'},
     ...OPERATIONS_ROSTER.map(a=>({id:a.id,name:a.name,dept:`Lantai ${a.floor}`,role:a.role,task:a.role,boundary:'Pekerjaan dari data tersimpan. Pesan hanya untuk proyek yang diaktifkan pemilik; pembayaran tidak ditebak.',metric:operations.isError?'Status tidak tersedia':operations.data?.runtime.jobs[a.id]?.lastRunAt?`Terakhir ${formatDate(operations.data.runtime.jobs[a.id]!.lastRunAt!)}`:'Menunggu tugas sesuai peran.'})),
   ];
 
@@ -1342,6 +1346,7 @@ function CapabilitiesPage() {
       <p className="provider-limit">Autopilot hanya mengirim bid pada proyek fixed price USD yang lolos kebijakan: {!savedPolicy.isError && savedPolicy.data ? `USD ${savedPolicy.data.minPrice}–${savedPolicy.data.maxPrice}, maksimal ${savedPolicy.data.dailyBidLimit} bid per hari dan ${savedPolicy.data.weeklyBidLimit} per minggu` : 'harga dan kuota tidak tersedia'}, serta risiko, deadline, confidence, dan jam kerja. Aplikasi tidak pernah mengirim pesan ke klien.</p>
     </section>
     <HealthCard />
+    <BrowserBiddingCard />
     <div className="capability-grid">
       <section className="form-card">
         <div className="section-heading"><div><p className="eyebrow">Freelancer.com</p><h2>Capability marketplace</h2></div><StateLabel state={query.data.freelancerCredentials.verificationStatus} /></div>
@@ -1470,6 +1475,7 @@ function OwnerControls({ input, moving }: { input: OwnerInput; moving: boolean }
 function OfficeShell() {
   const operations=useQuery({queryKey:['operations'],queryFn:()=>api<OperationsData>('/operations'),refetchInterval:3000});
   const [floor,setFloor]=useState<1|2>(1);
+  const [arrival,setArrival]=useState<{floor:1|2;at:P2}|null>(null);
   const knowledgeSync = useQuery({ queryKey: ['knowledge-sync'], queryFn: () => api<{ job: { state: string; provider: string; current: string | null } | null }>('/knowledge/sync-status'), refetchInterval: 3_000 });
   const location = useLocation();
   const navigate = useNavigate();
@@ -1513,6 +1519,7 @@ function OfficeShell() {
   const policy = useQuery({ queryKey: ['policy'], queryFn: () => api<Policy>('/policy'), refetchInterval: 30_000 });
   const profile = useQuery({ queryKey: ['profile'], queryFn: () => api<Profile>('/profile'), refetchInterval: 30_000 });
   const knowledge = useQuery({ queryKey: ['knowledge'], queryFn: () => api<{ coverage: { sources: number; chunks: number } }>('/knowledge'), refetchInterval: 30_000 });
+  const browserBidding = useQuery({queryKey:['browser-bidding'],queryFn:()=>api<BrowserBiddingStatus|null>('/browser-bidding'),refetchInterval:3000});
   const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: () => api<Capabilities>('/capabilities'), refetchInterval: 3000 });
   const pause = useMutation({
     mutationFn: (action: 'pause' | 'resume') => api<Policy>(`/policy/${action}`, jsonRequest('POST')),
@@ -1529,7 +1536,7 @@ function OfficeShell() {
   const hermes = fresh(capabilities)?.hermes;
   const knowledgeJob = fresh(knowledgeSync)?.job;
   const operationsData=fresh(operations);
-  const allAgents = useMemo(() => deriveOfficeAgents(autopilotData, activityData, { sync: syncData, inboxWaiting, dueSoon, hermes, knowledge: knowledgeJob,operations:operationsData }), [autopilotData, activityData, syncData, inboxWaiting, dueSoon, hermes, knowledgeJob,operationsData]);
+  const allAgents = useMemo(() => deriveOfficeAgents(autopilotData, activityData, { sync: syncData, inboxWaiting, dueSoon, hermes, knowledge: knowledgeJob,operations:operationsData,browserBidding:browserBidding.isError?undefined:browserBidding.data }), [browserBidding.isError,browserBidding.data,autopilotData, activityData, syncData, inboxWaiting, dueSoon, hermes, knowledgeJob,operationsData]);
   const agents=useMemo(()=>allAgents.filter(a=>(a.floor ?? 1)===floor),[allAgents,floor]);
   const spots = useMemo(() => spotsFor(agents), [agents]);
   const ownerTarget = selectedId ? spots.get(selectedId) ?? null : null;
@@ -1616,6 +1623,11 @@ function OfficeShell() {
     setFollowId(null); setTour(false);
     setCommand((current) => ({ ...next, n: current.n + 1 }));
   };
+  const goToFloor = (n: 1 | 2, byLift = false) => {
+    ownerInput.stop(); setSelectedId(null); setPanel(null);
+    setArrival(byLift ? { floor: n, at: [LIFT.exit.x, LIFT.exit.z] } : null);
+    setFloor(n); fly({ kind: 'overview' });
+  };
   useEffect(() => {
     const board = BOARDS.find((slot) => slot.route === location.pathname);
     if(board) setFloor(board.floor ?? 1);
@@ -1697,7 +1709,7 @@ function OfficeShell() {
   return <div className="vo3d vo3d-app" ref={stage} style={{ background: phase.sky }}>
     <div className="vo3d-canvas" role="img" aria-label={`Kantor 3D Mission Control. ${summary}. Gunakan menu Papan dan daftar agen untuk navigasi dengan keyboard.`}>
       {webgl ? <Suspense fallback={<div className="vo3d-fallback">Memuat kantor visual...</div>}>
-        <VisualOffice key={floor} floor={floor} agents={agents} ready={!autopilot.isPending} selectedId={selectedId} ownerSelected={panel === 'owner'} ownerInput={ownerInput} ownerTarget={ownerTarget} ownerVisitVersion={ownerVisitVersion} onOwnerMoving={setOwnerMoving} followId={followId} onSelect={selectAgent} onOwnerSelect={openOwner} onCameraInteract={() => { setFollowId(null); setTour(false); }} command={command} view={view} tour={tour} phase={phase} reducedMotion={reducedMotion} boards={boards} onOpenBoard={openBoard} />
+        <VisualOffice key={floor} floor={floor} ownerStart={arrival?.floor===floor?arrival.at:[OWNER_SPOT.x,OWNER_SPOT.z]} onLift={()=>goToFloor(floor===1?2:1,true)} agents={agents} ready={!autopilot.isPending} selectedId={selectedId} ownerSelected={panel === 'owner'} ownerInput={ownerInput} ownerTarget={ownerTarget} ownerVisitVersion={ownerVisitVersion} onOwnerMoving={setOwnerMoving} followId={followId} onSelect={selectAgent} onOwnerSelect={openOwner} onCameraInteract={() => { setFollowId(null); setTour(false); }} command={command} view={view} tour={tour} phase={phase} reducedMotion={reducedMotion} boards={boards} onOpenBoard={openBoard} />
       </Suspense> : <div className="vo3d-fallback">WebGL tidak tersedia di browser ini. Gunakan menu Papan untuk membuka setiap kartu.</div>}
     </div>
 
@@ -1705,7 +1717,7 @@ function OfficeShell() {
       <h1><span className={`vo3d-live${autopilotData ? '' : ' is-off'}`} aria-hidden="true" />Mission Control</h1>
       <p><OfficeIcon name="sun" />{phase.label} · {time}</p>
       <p>{summary}</p>
-      <div className="vo3d-floor-picker" role="group" aria-label="Pilih lantai">{([1,2] as const).map(n=><button type="button" key={n} aria-pressed={floor===n} onClick={()=>{ownerInput.stop();setSelectedId(null);setPanel(null);setFloor(n);fly({kind:'overview'});}}>Lantai {n}</button>)}</div>
+      <div className="vo3d-floor-picker" role="group" aria-label="Pilih lantai">{([1,2] as const).map(n=><button type="button" key={n} aria-pressed={floor===n} onClick={()=>goToFloor(n)}>Lantai {n}</button>)}</div>
       <p className={dashboardData?.externalWrites ? 'vo3d-warn' : ''}>{externalLabel}</p>
       {health.isError && <p className="vo3d-warn">API lokal tidak terhubung.</p>}
       <Link to="/overview" className="vo3d-cta">Buka ringkasan</Link>

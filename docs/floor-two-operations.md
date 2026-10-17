@@ -9,7 +9,7 @@ Lantai 1: sepuluh peran sebelumnya dan Manajer Akuisisi. Lantai 2: Manajer Opera
 ## Menyiapkan penggunaan
 
 1. Daftarkan proyek nyata di Proyek & Pendapatan. Catat nilai dan mata uang, pembayaran yang diharapkan beserta jatuh tempo, serta pembayaran yang benar-benar diterima.
-2. Di Operasional Klien → Klien & progres, pilih proyek, isi nomor internasional (contoh format `628…`), pilih jenis pesan, dan aktifkan izin.
+2. Di Operasional Klien → Klien & progres atau WhatsApp, isi formulir **Nomor WhatsApp klien**. Pilih proyek yang sudah ada atau daftarkan nama klien, proyek, sumber dan mata uang langsung di formulir. Nomor Indonesia `08…` diubah ke `628…`; nomor internasional dapat diawali `+`. Simpan nomor, lalu aktifkan izin dan pilih jenis pesan bila diperlukan. Pesan otomatis dinonaktifkan pada pendaftaran baru sampai dipilih pemilik. Nomor tersimpan dapat diubah melalui **Ubah nomor / izin**.
 3. Hubungkan WhatsApp dan pindai QR dari Setelan → Perangkat tertaut di telepon. Koneksi baru belum boleh disebut terhubung sebelum socket melaporkan `open`.
 4. Catat progres faktual melalui formulir. Pembayaran baru/yang ditandai diterima dikonfirmasi dari transaksi tersimpan. Perubahan konfigurasi komunikasi memulai waktu izin baru agar kejadian lama tidak dikirim sebagai kabar baru.
 5. Isi identitas penerbit, petunjuk pembayaran, dan nama penanggung jawab sebelum membuat invoice. Invoice merupakan ringkasan tagihan proyek, bukan tagihan tambahan untuk setiap DP. Seluruh pembayaran diterima pada proyek dan mata uang yang sama diperhitungkan terhadap total invoice. Buka dokumen, gunakan Ctrl+P → Simpan sebagai PDF. Tanda tangan contoh tidak disalin; nama penanggung jawab ditampilkan sebagai penerbit dokumen digital.
@@ -29,6 +29,8 @@ Lantai 1: sepuluh peran sebelumnya dan Manajer Akuisisi. Lantai 2: Manajer Opera
 
 WhatsApp memakai Baileys `7.0.0-rc14`, bukan API resmi Meta. Library tanpa browser mengurangi kebutuhan RAM. Koneksi/session bisa berubah mengikuti WhatsApp Web; penggunaan akun tunduk pada aturan WhatsApp. QR hanya dikirim pada route lokal khusus, respons no-store, tanpa log. Auth credentials dan signal keys diserialisasi dengan BufferJSON dan disimpan terenkripsi Windows DPAPI, bukan `useMultiFileAuthState` plaintext. `integration-vault.ps1` menulis ciphertext sementara lalu menggantinya secara atomik.
 
+Badge di kartu operasional membedakan **HTTP endpoint lokal** dengan **sesi WhatsApp**. Kode HTTP diambil dari `Response.status` GET `/api/operations/whatsapp`, bukan angka tetap. Tanpa respons jaringan tidak ada kode HTTP. Body gagal/tidak valid tidak menghasilkan status sesi terhubung. Pemeriksaan diulang setiap 2 detik pada tab WhatsApp dan 5 detik pada bagian lain; hasil lebih dari 15 detik dilabeli lama dan sesi tidak diketahui. Badge menampilkan waktu observasi dan tombol pemeriksaan ulang. Warna hanya membantu membedakan hasil; teks tetap menyebut kode dan status nyata. Form tetap tersedia saat daftar proyek kosong agar pemilik dapat mengisi kontak tanpa berpindah kartu.
+
 Google memakai native fetch, OAuth state sekali pakai (10 menit), PKCE S256, offline token, scope `calendar.events.owned`. Akses Calendar diverifikasi sebelum status connected. Token dan client secret disimpan lewat vault DPAPI. Refresh token tersimpan untuk sesi berikutnya; aplikasi OAuth eksternal berstatus Testing dapat mempunyai batas umur refresh token Google.
 
 Acara hanya di kalender primary, dengan ID deterministik serta `extendedProperties.private.fvhTask`. Tidak ada attendees; `sendUpdates=none`. Judul, catatan dan jam acara yang dikelola aplikasi ditarik kembali bila tugas lokal belum diubah. Jika keduanya berubah, lokal didahulukan. Penarikan memakai compare-and-set agar tidak menimpa perubahan pemilik yang masuk saat request berlangsung. Acara yang dihapus di Google menghentikan sinkronisasi tugas lokal yang belum diubah, tanpa menandai tugas selesai. Acara pribadi lainnya tidak dibaca. Tugas sepanjang hari hasil edit Google memerlukan penyesuaian ke jam tertentu.
@@ -41,7 +43,7 @@ Invoice memakai bilangan bulat minor unit ISO 4217. `currencyDigits()` determini
 
 Proposal Hermes mengutamakan solusi, langkah, hasil serah terima, dan pertanyaan relevan. Resolver memeriksa metadata repo GitHub **tanpa token**, dengan cache dan timeout. Hanya repo yang terverifikasi public masuk `publicPortfolio`; tautan lain di teks proposal ditolak. Harga/durasi dan pengecekan kill switch tetap di jalur autopilot. Fallback tetap memberi rencana dan tautan publik yang tersedia, tanpa mengarang pengalaman.
 
-Kuota `BID_LIMIT_EXCEEDED` milik akun Freelancer. Pengiriman dengan Chrome pada akun sama tidak menambah kuota. Tidak ada jalur browser untuk melewati batas tersebut. Playwright juga tidak mendukung membuka profil utama Chrome yang sedang digunakan; profil itu tidak disalin atau dikunci oleh aplikasi.
+Kuota `BID_LIMIT_EXCEEDED` milik akun Freelancer. Pengiriman dengan Chrome pada akun sama tidak menambah kuota. Worker browser memakai profil khusus dan mematuhi batas yang sama; baca [pengiriman bid melalui Chrome](browser-bidding.md) untuk mode, login dan verifikasinya. Profil Chrome harian tidak disalin atau dikunci oleh aplikasi.
 
 ## Sumber API
 

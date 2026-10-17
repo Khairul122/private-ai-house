@@ -12,8 +12,12 @@ const POD_ZS = [-9.5, -3, 3.5];
 export const LEAD_ID = 'lead-agent';
 // The lead has its own desk (LEAD_DESK); the other nine agents fill the 3×3 pod grid.
 export const PODS = ROSTER.filter((entry) => entry.id !== LEAD_ID && !entry.floor).map((entry, i) => ({ ...entry, x: POD_XS[i % 3]!, z: POD_ZS[Math.floor(i / 3)]! }));
+export const BROWSER_DESK = {x:-16,z:9.2};
 export const MANAGER_DESK = {x:-9,z:9.2};
 export const FLOOR_TWO_PODS = PODS.map((pod,index)=>{const entry=ROSTER.filter(a=>a.floor===2 && a.id!=='delivery-manager')[index];return {...pod,...(entry ?? {id:`vacant-${index}`,name:'Meja tersedia',role:'Belum ditempati',color:'#8b928e'})};});
+/** Lift at the back end of the central corridor, shared by both floors; stepping onto its doorstep rides it to the other floor. */
+export const LIFT = { x: 1.5, z: -12, w: 2.4, d: 1.8, h: 2.5, exit: { x: 1.5, z: -8.6 } };
+export const liftDoorReached = (x: number, z: number) => Math.abs(x - LIFT.x) <= LIFT.w / 2 - 0.3 && z <= LIFT.z + LIFT.d / 2 + 0.55;
 export const LEAD_DESK = { x: -4, z: 10.4 };
 const corridorZ = (podZ: number) => podZ + POD_SIZE / 2 + 0.75;
 export const OWNER_SPOT: Spot = { x: -17.1, z: 8.2, y: 0, facing: 0, seated: false, via: [[SPINE_X, corridorZ(POD_ZS[2]!)], [-17.1, corridorZ(POD_ZS[2]!)]] };
@@ -37,6 +41,7 @@ const BREAK_SLOTS: Spot[] = [
   { x: 9, z: 3.4, y: 0.5, facing: towardTv(9, 3.4), seated: true, via: LOUNGE_VIA(3.4) },
   { x: 10.8, z: 2.4, y: 0.3, facing: towardTv(10.8, 2.4), seated: true, via: LOUNGE_VIA(2.4) },
   ...[7.6, 9, 10.4, 11.8].map((z) => ({ x: 11.2, z, y: 0, facing: Math.PI / 2, seated: false, via: [[SPINE_X, z], [9.5, z]] as P2[] })),
+  { x: 9.5, z: 11.8, y: 0, facing: Math.PI / 2, seated: false, via: [[SPINE_X, 11.8], [9.5, 11.8]] },
 ];
 
 const MEETING_SEATS: Spot[] = [6.75, 8.25, 9.75, 11.25].flatMap((x) => [
@@ -47,8 +52,10 @@ const MEETING_SEATS: Spot[] = [6.75, 8.25, 9.75, 11.25].flatMap((x) => [
 const LOBBY_SLOTS: Spot[] = [-16.5, -15, -13.5, -12, -10.5].flatMap((x) => [9.4, 10.6].map((z) => ({
   x, z, y: 0, facing: 0, seated: false, via: [[SPINE_X, corridorZ(POD_ZS[2]!)], [x, corridorZ(POD_ZS[2]!)]] as P2[],
 })));
+LOBBY_SLOTS.push({x:-11,z:7.7,y:0,facing:0,seated:false,via:[[SPINE_X,6.75],[-11,6.75]]});
 
 function podSeat(id: string): Spot {
+  if(id==='browser-bid-operator') return {x:BROWSER_DESK.x,z:BROWSER_DESK.z-1,y:0.5,facing:0,seated:true,via:[[SPINE_X,6.75],[BROWSER_DESK.x+1.8,6.75],[BROWSER_DESK.x+1.8,BROWSER_DESK.z-1]]};
   if(id==='floor-one-manager') return {x:MANAGER_DESK.x,z:MANAGER_DESK.z-1,y:0.5,facing:0,seated:true,via:[[SPINE_X,corridorZ(POD_ZS[2]!)],[MANAGER_DESK.x+1.8,corridorZ(POD_ZS[2]!)],[MANAGER_DESK.x+1.8,MANAGER_DESK.z-1]]};
   if (id === LEAD_ID || id==='delivery-manager') return { x: LEAD_DESK.x, z: LEAD_DESK.z - 1, y: 0.5, facing: 0, seated: true, via: [[SPINE_X, corridorZ(POD_ZS[2]!)], [LEAD_DESK.x + 1.8, corridorZ(POD_ZS[2]!)], [LEAD_DESK.x + 1.8, LEAD_DESK.z - 1]] };
   const pod = [...PODS,...FLOOR_TWO_PODS].find((entry) => entry.id === id)!;

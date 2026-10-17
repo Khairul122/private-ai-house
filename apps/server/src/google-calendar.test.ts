@@ -36,9 +36,29 @@ describe('Google Calendar',()=>{
     event={...event,summary:'Diubah di Google',updated:'2026-10-16T04:00:00Z'};
     await google.sync([task]);expect((await store.get<OwnerTask>('task',task.id))?.title).toBe('Diubah di Google');
     expect(fetcher.mock.calls.filter(([,i])=>i?.method==='POST')).toHaveLength(1);
+    const stale=(await store.get<OwnerTask>('task',task.id))!;
+    const ownerEdit={...stale,title:'Perubahan pemilik yang lebih baru',updatedAt:'2099-01-01T00:00:00Z'};
+    await store.save('task',task.id,ownerEdit);event={...event,summary:'Google terlambat',updated:'2026-10-16T05:00:00Z'};
+    await google.sync([stale]);expect((await store.get<OwnerTask>('task',task.id))?.title).toBe(ownerEdit.title);
+    const otherVault=new MemoryVault();await otherVault.write('google-token',JSON.stringify({accessToken:'fixture-other',refreshToken:'fixture-other-grant',expiresAt:Date.now()+3600_000}));
+    event=null;expect(await new GoogleCalendarService(otherVault,store,fetcher).sync([ownerEdit])).toBe(1);
+    expect((await store.get<OwnerTask>('task',task.id))?.syncGoogle).toBe(true);
   });
   it('does not claim connection from a saved token when Calendar rejects it',async()=>{
     repo=await WorkspaceRepository.open();const vault=new MemoryVault();await vault.write('google-token',JSON.stringify({accessToken:'fixture',refreshToken:'fixture',expiresAt:Date.now()+3600_000}));
     const google=new GoogleCalendarService(vault,new OperationsRepository(repo.sql),async()=>new Response('{}',{status:403}));await google.restore();expect(google.status().connected).toBe(false);
+    expect(google.status().tokenStored).toBe(true);await google.disconnect();expect(google.status().tokenStored).toBe(false);
+  });
+  it('does not restore tokens from an in-flight refresh after disconnect',async()=>{
+    repo=await WorkspaceRepository.open();const vault=new MemoryVault();
+    await vault.write('google-client',JSON.stringify({clientId:'fixture.apps.googleusercontent.com',clientSecret:'fixture-secret'}));
+    await vault.write('google-token',JSON.stringify({accessToken:'fixture-expired',refreshToken:'fixture-refresh',expiresAt:0}));
+    let release:(value:Response)=>void=()=>undefined;
+    const held=new Promise<Response>(resolve=>{release=resolve;});
+    const fetcher=vi.fn<typeof fetch>(async input=>String(input).endsWith('/token')?held:new Response('{}'));
+    const google=new GoogleCalendarService(vault,new OperationsRepository(repo.sql),fetcher);
+    const verification=google.verify();await vi.waitFor(()=>expect(fetcher).toHaveBeenCalled());
+    await google.disconnect();release(new Response(JSON.stringify({access_token:'fixture-new',expires_in:3600})));
+    await expect(verification).rejects.toThrow();expect(await vault.read('google-token')).toBeNull();expect(google.status().connected).toBe(false);
   });
 });

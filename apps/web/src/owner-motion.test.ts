@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { OWNER_SPOT, PODS, spotsFor, type P2, type Spot } from './office-layout.js';
+import { LIFT, liftDoorReached, OWNER_SPOT, PODS, spotsFor, type P2, type Spot } from './office-layout.js';
 import { deriveOfficeAgents } from './office-state.js';
 import type { Autopilot } from './api.js';
 import { createOwnerMotion, ownerCanStand, ownerCanWalk, ownerVisitDestination, planOwnerPath, setOwnerDestination, stepOwnerMotion, stopOwnerMotion } from './owner-motion.js';
@@ -111,5 +111,28 @@ describe('Owner movement', () => {
     expect(state.path).toEqual([]);
     expect([state.x, state.z]).toEqual(position);
     expect(state.moving).toBe(false);
+  });
+});
+
+describe('Lift access', () => {
+  it('can be reached from the corridor, is solid, and its exit is outside the doorstep', () => {
+    expect(ownerCanStand(LIFT.x, LIFT.z)).toBe(false);
+    expect(ownerCanStand(LIFT.exit.x, LIFT.exit.z)).toBe(true);
+    expect(liftDoorReached(LIFT.exit.x, LIFT.exit.z)).toBe(false);
+    const state = createOwnerMotion([LIFT.exit.x, LIFT.exit.z]);
+    let reached = false;
+    for (let i = 0; i < 300 && !reached; i++) { stepOwnerMotion(state, { ...idle, up: true }, [1, 0], 1 / 30); reached = liftDoorReached(state.x, state.z); }
+    expect(reached).toBe(true);
+  });
+
+  it('is not triggered by walking past it or along the pod walls', () => {
+    expect(liftDoorReached(-3, -9.5)).toBe(false);
+    expect(liftDoorReached(3, -10.9)).toBe(false);
+    expect(liftDoorReached(LIFT.x, -9.6)).toBe(false);
+  });
+
+  it('keeps every agent seat and the default start out of the lift', () => {
+    expect(ownerCanStand(OWNER_SPOT.x, OWNER_SPOT.z)).toBe(true);
+    for (const pod of PODS) expect(liftDoorReached(pod.x, pod.z)).toBe(false);
   });
 });

@@ -3,6 +3,7 @@ import type { AutonomyPolicy, BidDraft, ProjectOpportunity } from '@fvh/domain';
 import type { FreelancerProfile, FreelancerWriteResult } from '@fvh/adapter-freelancer';
 import { createId, hashPayload, type AiDraftingPort } from '@fvh/application';
 import type { WorkspaceRepository, ServiceProfile } from '@fvh/persistence';
+import type { BrowserBidInput } from './browser-bid-types.js';
 
 type AutopilotDependencies = {
   repository: WorkspaceRepository;
@@ -10,6 +11,8 @@ type AutopilotDependencies = {
   readProjects: (query: string, limit: number) => Promise<{ projects: ProjectOpportunity[]; skipped: number }>;
   syncProfileJobs?: (jobIds: number[]) => Promise<FreelancerWriteResult>;
   submitBid: (input: { operation: 'submit_bid'; projectId: number; amount: number; period: number; milestonePercentage: number; description: string }) => Promise<FreelancerWriteResult>;
+  guardedSubmitBid?: (input: BrowserBidInput, authorize: () => Promise<void>) => Promise<FreelancerWriteResult>;
+  bidTransportReady?: () => { ready: boolean; reason: string };
   /** Hermes drafting; when absent or failing, the built-in template writes the proposal. */
   draftProposal?: AiDraftingPort['draftBid'];
   publicPortfolio?: (evidence:Parameters<AiDraftingPort['draftBid']>[0]['evidence'])=>Promise<Array<{label:string;url:string}>>;
@@ -359,6 +362,8 @@ export class FreelancerAutopilot {
         }
         eligible += 1;
         if (quotaCooldown) { count('Menunggu kuota akun Freelancer; jeda satu jam sejak penolakan API terakhir'); continue; }
+        const transport = this.dependencies.bidTransportReady?.();
+        if (transport && !transport.ready) { count(transport.reason); continue; }
         const written = await this.writeProposal(project, activePolicy, bid, project.score);
         const proposal = written.proposal;
         if (this.stopping) break;
@@ -380,9 +385,16 @@ export class FreelancerAutopilot {
         await repository.createDraft(draft);
         await repository.setPipelineStatus(project.id, 'policy_check');
         try {
-          const result = await this.dependencies.submitBid({ operation: 'submit_bid', projectId: Number(project.id.replace(/^freelancer:/, '')), amount: bid.amount, period: bid.period, milestonePercentage: 100, description: proposal });
+          const input: BrowserBidInput = { operation: 'submit_bid', projectId: Number(project.id.replace(/^freelancer:/, '')), amount: bid.amount, period: bid.period, milestonePercentage: 100, description: proposal };
+          const authorize = async () => {
+            const current = await repository.getPolicy();
+            const usage = await repository.bidUsage(this.now(), current.timezone);
+            const decision = evaluatePolicy({ policy: current, project, action: 'bid.submit', confidence: scoreProject(project, current.specializations).score / 100, proposedPrice: bid.amount, dailyUsed: usage.today, weeklyUsed: usage.week, now: this.now(), capability: 'supported', executionMode: 'external' });
+            if (this.stopping || current.simulationOnly || current.version !== activePolicy.version || !decision.allowed) throw new Error('Kebijakan atau status automasi berubah sebelum submit; bid dibatalkan.');
+          };
+          const result = this.dependencies.guardedSubmitBid ? await this.dependencies.guardedSubmitBid(input, authorize) : await this.dependencies.submitBid(input);
           const success = result.statusCode === 200;
-          await repository.appendAudit({ type: 'marketplace.production.submit_bid', resourceId: project.id, status: success ? 'recorded' : 'failed', reason: `Bid otomatis menghasilkan HTTP ${result.statusCode}.${result.resultId ? ` ID hasil: ${result.resultId}.` : ''} Isi proposal tidak disimpan pada audit.`, policyVersion: activePolicy.version, payloadHash });
+          await repository.appendAudit({ type: 'marketplace.production.submit_bid', resourceId: project.id, status: success ? 'recorded' : 'failed', reason: `Bid otomatis melalui ${'transport' in result && result.transport==='browser'?'browser':'API'} menghasilkan HTTP ${result.statusCode}.${result.resultId ? ` ID hasil: ${result.resultId}.` : ''} Isi proposal tidak disimpan pada audit.`, policyVersion: activePolicy.version, payloadHash });
           if (success) {
             if (result.resultId?.trim()) {
               await repository.setPipelineStatus(project.id, 'submitted');

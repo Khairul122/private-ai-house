@@ -2,7 +2,7 @@ import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { BOARD_SIZE, BOARDS, FLOOR, FLOOR_TWO_PODS, LEAD_DESK, LEAD_ID, MANAGER_DESK, OWNER_SPOT, PODS, POD_SIZE, planPath, spotsFor, ZONES, type BoardId, type BoardSlot, type dayPhase, type P2, type Spot } from './office-layout.js';
+import { BOARD_SIZE, BOARDS, FLOOR, FLOOR_TWO_PODS, BROWSER_DESK, LEAD_DESK, LIFT, liftDoorReached, LEAD_ID, MANAGER_DESK, OWNER_SPOT, PODS, POD_SIZE, planPath, spotsFor, ZONES, type BoardId, type BoardSlot, type dayPhase, type P2, type Spot } from './office-layout.js';
 import { STATE_COLORS, type OfficeAgent } from './office-state.js';
 import type { OwnerInput } from './owner-input.js';
 import { createOwnerMotion, setOwnerDestination, stepOwnerMotion, stopOwnerMotion } from './owner-motion.js';
@@ -15,6 +15,8 @@ type V3 = [number, number, number];
 
 export type VisualOfficeProps = {
   floor: 1 | 2;
+  ownerStart: P2;
+  onLift: () => void;
   agents: OfficeAgent[];
   ready: boolean;
   selectedId: string | null;
@@ -116,6 +118,26 @@ function Label({ text, p, dot, size = 0.03, onClick }: { text: string; p: V3; do
     {...(onClick ? { onClick: (event: ThreeEvent<MouseEvent>) => { event.stopPropagation(); onClick(); } } : {})}>
     <spriteMaterial map={texture} depthTest={false} transparent sizeAttenuation={false} />
   </sprite>;
+}
+
+function Lift({ floor, onUse }: { floor: 1 | 2; onUse: () => void }) {
+  const { x, z, w, d, h } = LIFT;
+  const front = z + d / 2;
+  const target = floor === 1 ? 2 : 1;
+  return <group onClick={(event) => { event.stopPropagation(); onUse(); }}
+    onPointerOver={(event) => { event.stopPropagation(); document.body.style.cursor = 'pointer'; }}
+    onPointerOut={() => { document.body.style.cursor = ''; }}>
+    <B p={[x, 0.04, z]} s={[w, 0.08, d]} c="#b9bec4" />
+    <B p={[x, h / 2, z - d / 2 + 0.05]} s={[w, h, 0.1]} c="#6f7a84" />
+    {[-1, 1].map((sx) => <B key={sx} p={[x + sx * (w / 2 - 0.05), h / 2, z]} s={[0.1, h, d]} c={GLASS} o={0.55} />)}
+    <B p={[x, h + 0.06, z]} s={[w + 0.1, 0.12, d + 0.1]} c={FRAME} />
+    <B p={[x, 0.09, z]} s={[w - 0.3, 0.02, d - 0.3]} c="#ffe9a8" e="#ffd36b" shadow={false} />
+    {[-1, 1].map((sx) => <B key={sx} p={[x + sx * (w / 2 - 0.3), (h - 0.15) / 2, front - 0.05]} s={[0.6, h - 0.15, 0.08]} c="#aab3bb" />)}
+    <B p={[x, h - 0.1, front - 0.03]} s={[w, 0.2, 0.1]} c={FRAME} />
+    <B p={[x + w / 2 + 0.15, 1.2, front - 0.02]} s={[0.12, 0.24, 0.05]} c="#2f9e5b" e="#2f9e5b" shadow={false} />
+    <B p={[x, 0.025, front + 0.35]} s={[w - 0.6, 0.03, 0.5]} c="#2f9e5b" shadow={false} />
+    <Label text={`Lift · ke Lantai ${target}`} p={[x, h + 0.25, front]} dot="#2f9e5b" size={0.034} onClick={onUse} />
+  </group>;
 }
 
 function Pod({ x, z, color, name, screenOn, night, showLabel }: { x: number; z: number; color: string; name: string; screenOn: boolean; night: boolean; showLabel: boolean }) {
@@ -253,6 +275,7 @@ function Building({ agents, phase, selectedId, floor }: { agents: OfficeAgent[];
     <MeetingRoom active={agents.some((agent) => agent.room === 'meeting')} />
     <Lounge /><Pantry /><Lobby />
     <LeadDesk manager={floor===2} active={agents.some((agent) => agent.id === (floor===1?LEAD_ID:'delivery-manager') && agent.room === 'workspace')} />
+    <group position={[BROWSER_DESK.x,0,BROWSER_DESK.z]}><B p={[0,0.75,0]} s={[2.8,0.12,1]} c="#67523f"/><B p={[0,0.36,0]} s={[0.15,0.72,0.8]} c="#343a40"/><Chair p={[0,0,-0.95]}/><Label text={floor===1?'Operator Browser Bid':'Meja tersedia'} p={[0,2.1,0.3]}/></group>
     <group position={[MANAGER_DESK.x,0,MANAGER_DESK.z]}><B p={[0,0.75,0]} s={[2.8,0.12,1]} c="#67523f"/><B p={[0,0.36,0]} s={[0.15,0.72,0.8]} c="#343a40"/><Chair p={[0,0,-0.95]}/><Label text={floor===1?'Manajer Akuisisi':'Meja koordinasi'} p={[0,2.1,0.3]}/></group>
     <Label text={`LANTAI ${floor} · ${floor===1?'AKUISISI PROYEK':'DELIVERY & KEUANGAN'}`} p={[1.5,3.5,8]} />
     {ZONES.filter((zone) => zone.id !== 'workspace').map((zone) => <Label key={zone.id} text={zone.label} p={[zone.x, 2.4, zone.z - zone.d / 2 + 0.3]} />)}
@@ -370,7 +393,8 @@ function Agent({ agent, index, spot, selected, hovered, onSelect, onHover, reduc
   </group>;
 }
 
-function OwnerCharacter({ destination, request, selected, hovered, input, onMoving, onSelect, onHover, reducedMotion, positions }: {
+function OwnerCharacter({ start, onLift, destination, request, selected, hovered, input, onMoving, onSelect, onHover, reducedMotion, positions }: {
+  start: P2; onLift: () => void;
   destination: Spot | null; selected: boolean; hovered: boolean;
   request: number; onMoving: (moving: boolean) => void;
   input: OwnerInput;
@@ -382,10 +406,11 @@ function OwnerCharacter({ destination, request, selected, hovered, input, onMovi
   const legR = useRef<THREE.Group>(null);
   const armL = useRef<THREE.Group>(null);
   const armR = useRef<THREE.Group>(null);
-  const sim = useRef(createOwnerMotion());
+  const sim = useRef(createOwnerMotion(start));
+  const inLift = useRef(false);
   const lastStop = useRef(input.stopVersion);
   const moving = useRef(false);
-  const livePosition = useMemo(() => new THREE.Vector3(OWNER_SPOT.x, 0, OWNER_SPOT.z), []);
+  const livePosition = useMemo(() => new THREE.Vector3(start[0], 0, start[1]), []);
 
   useEffect(() => {
     positions.set('owner', livePosition);
@@ -401,6 +426,9 @@ function OwnerCharacter({ destination, request, selected, hovered, input, onMovi
     if (lastStop.current !== input.stopVersion || !input.enabled) { stopOwnerMotion(state); lastStop.current = input.stopVersion; }
     const right: P2 = [frame.camera.matrixWorld.elements[0]!, frame.camera.matrixWorld.elements[2]!];
     stepOwnerMotion(state, input.read(), right, rawDt, reducedMotion);
+    const atDoor = liftDoorReached(state.x, state.z);
+    if (atDoor && !inLift.current) onLift();
+    inLift.current = atDoor;
     if (moving.current !== state.moving) { moving.current = state.moving; onMoving(state.moving); }
     if (root.current) { root.current.position.set(state.x, state.bob, state.z); root.current.rotation.y = state.heading; }
     livePosition.set(state.x, 0, state.z);
@@ -591,7 +619,7 @@ function Lights({ phase }: { phase: Phase }) {
   </>;
 }
 
-export default function VisualOffice({ floor, agents, ready, selectedId, ownerSelected, ownerInput, ownerTarget, ownerVisitVersion, onOwnerMoving, followId, onSelect, onOwnerSelect, onCameraInteract, command, view, tour, phase, reducedMotion, boards, onOpenBoard }: VisualOfficeProps) {
+export default function VisualOffice({ floor, ownerStart, onLift, agents, ready, selectedId, ownerSelected, ownerInput, ownerTarget, ownerVisitVersion, onOwnerMoving, followId, onSelect, onOwnerSelect, onCameraInteract, command, view, tour, phase, reducedMotion, boards, onOpenBoard }: VisualOfficeProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [hoveredBoard, setHoveredBoard] = useState<BoardId | null>(null);
   const spots = useMemo(() => spotsFor(agents), [agents]);
@@ -600,13 +628,14 @@ export default function VisualOffice({ floor, agents, ready, selectedId, ownerSe
   return <Canvas shadows dpr={[1, 2]} camera={{ position: [20, 34, 38], fov: 38, near: 0.5, far: 400 }} onPointerMissed={() => onSelect(null)}>
     <Lights phase={phase} />
     <Building agents={agents} phase={phase} selectedId={selectedId} floor={floor}/>
+    <Lift floor={floor} onUse={onLift} />
     {BOARDS.filter(slot=>(slot.floor ?? 1)===floor).map((slot) => { const content = boards.find((board) => board.id === slot.id); return content ? <Board key={slot.id} slot={slot} content={content} hovered={hoveredBoard === slot.id} onHover={setHoveredBoard} onOpen={onOpenBoard} /> : null; })}
     {ready && agents.map((agent, index) => {
       const spot = spots.get(agent.id);
       return spot ? <Agent key={agent.id} agent={agent} index={index} spot={spot} selected={agent.id === selectedId} hovered={agent.id === hoveredId}
         onSelect={onSelect} onHover={setHoveredId} reducedMotion={reducedMotion} positions={positions} /> : null;
     })}
-    <OwnerCharacter destination={ownerTarget} request={ownerVisitVersion} selected={ownerSelected} hovered={hoveredId === 'owner'} input={ownerInput} onMoving={onOwnerMoving} onSelect={onOwnerSelect} onHover={setHoveredId} reducedMotion={reducedMotion} positions={positions} />
+    <OwnerCharacter start={ownerStart} onLift={onLift} destination={ownerTarget} request={ownerVisitVersion} selected={ownerSelected} hovered={hoveredId === 'owner'} input={ownerInput} onMoving={onOwnerMoving} onSelect={onOwnerSelect} onHover={setHoveredId} reducedMotion={reducedMotion} positions={positions} />
     <CameraRig command={command} view={view} tour={tour} spots={spots} reducedMotion={reducedMotion} followId={followId} positions={positions} onInteract={onCameraInteract} />
   </Canvas>;
 }

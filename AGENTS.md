@@ -145,6 +145,7 @@ Pipeline status: `new, scored, draft_ready, policy_check, submitted, in_conversa
 |---|---|
 | `GET /api/health` | Mode, status AI (`ai: hermes/disabled`), autopilot |
 | `GET /api/autopilot` | `state, lastRunAt, nextRunAt, lastMessage, cycleInProgress, draftsInProgress, …` |
+| `GET /api/browser-bidding` · `PUT /api/browser-bidding/mode` · `POST /api/browser-bidding/open` · `/check` · `/close` | Worker Playwright tersambung ke Chrome berprofil pemilik melalui izin debugging; mode API, fallback 401/403/429, atau browser. Tidak ada submit bebas. Baca `docs/browser-bidding.md`. |
 | `GET /api/business-sync` | Status BusinessSync (null jika tidak tersedia) |
 | `GET /api/dashboard` | Hitungan, kebijakan, `bidUsage {today, week}` (zona waktu kebijakan), `externalWrites` |
 | `GET /api/insights/bids` | Hasil bid (`winRate` null bila belum ada keputusan), alasan skip, waktu cek terakhir |
@@ -196,6 +197,7 @@ Satu sumber kebenaran: `deriveOfficeAgents(autopilot, activity, { sync, hermes, 
 | Agen | Sinyal nyata | Aturan |
 |---|---|---|
 | **Lead Agent (Hermes)** | `capabilities.hermes` | nonaktif → Offline (alasan dari server); `draftsInProgress > 0` → Bekerja; aktif → Idle; data gagal → Tidak diketahui |
+| Operator Browser Bid (lantai 1) | `/api/browser-bidding` | submitting → Bekerja; busy lain → Meninjau; ready/quota habis → Idle; perlu login/ditutup/error → Offline; sumber gagal → Tidak diketahui. Meja khusus di `BROWSER_DESK`. |
 | Market Scout | autopilot | running + `cycleInProgress` → Bekerja; running → Idle; paused/blocked/error → Offline (alasan spesifik); starting/undefined → Tidak diketahui |
 | Bid Strategist | autopilot + sync | `sync.step === 'outcomes'` → Meninjau; selain itu seperti Market Scout tapi siklus → Berkolaborasi |
 | Compliance Auditor | autopilot | seperti Market Scout, siklus → Berkolaborasi |
@@ -266,6 +268,7 @@ Tes penting: `office-state.test.ts` (aturan status), `office-layout.test.ts` (ku
 ## 14. Batasan yang diketahui & ide berikutnya
 
 - Sinyal kerja: autopilot, BusinessSync, Hermes, sinkronisasi Knowledge Hub dan worker operasional. Untuk perubahan invoice, WhatsApp QR, Google OAuth/Calendar, antrean pesan atau manajer lantai, baca `docs/floor-two-operations.md` sebelum mengedit. Persona yang tidak mempunyai job aktif tetap idle/on-demand.
+- Worker bid browser: baca `docs/browser-bidding.md`. Pemilik meminta memakai Chrome berprofil yang sudah login; jangan launch profil kosong atau menyalin profil. Sambungkan ke sesi Chrome yang berjalan setelah pemilik memberi izin debugging; worker memakai tab sendiri dan disconnect tidak menutup Chrome pemilik. Guard kebijakan sebelum klik dan sebelum melepas POST; sukses harus memiliki HTTP 200 serta ID bid yang cocok. Jangan mengekspor sesi, memilih upgrade, menandatangani perjanjian, atau retry hasil tidak pasti. Kuota akun habis bukan pemicu fallback.
 - Deteksi menang/kalah belum pernah teramati pada data nyata (belum ada bid diputuskan).
 - Kanal/sesi Hermes (mis. Telegram) tidak dilaporkan → ditampilkan "Tidak tersedia".
 - API lokal tanpa autentikasi (dilindungi loopback + Host + Origin) — cukup untuk lokal satu pengguna.

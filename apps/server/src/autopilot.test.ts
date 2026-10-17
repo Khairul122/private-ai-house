@@ -221,6 +221,29 @@ describe('FreelancerAutopilot', () => {
     expect(submitBid).toHaveBeenCalledTimes(1);
   });
 
+  it('does not draft or claim a browser bid while the transport is not ready', async () => {
+    repository = await WorkspaceRepository.open();
+    await repository.savePolicy({ ...(await repository.getPolicy()), state: 'active', simulationOnly: false, allowedActions: ['bid.submit'], specializations: ['Python'], allowUnknownDeadline: true });
+    const submitBid = vi.fn(); const guardedSubmitBid = vi.fn();
+    autopilot = new FreelancerAutopilot({ repository, now: () => now, readProfile: async () => profile, readProjects: async () => ({ projects: [project], skipped: 0 }), submitBid, guardedSubmitBid, bidTransportReady: () => ({ ready: false, reason: 'Login diperlukan.' }) });
+    await autopilot.start();
+    expect(guardedSubmitBid).not.toHaveBeenCalled(); expect(submitBid).not.toHaveBeenCalled();
+    expect(await repository.hasAudit('marketplace.production.submit_bid', project.id)).toBe(false);
+  });
+
+  it('rechecks the kill switch through the browser callback before clicking submit', async () => {
+    repository = await WorkspaceRepository.open();
+    await repository.savePolicy({ ...(await repository.getPolicy()), state: 'active', simulationOnly: false, allowedActions: ['bid.submit'], specializations: ['Python'], allowUnknownDeadline: true });
+    const clicked = vi.fn(); const submitBid = vi.fn();
+    autopilot = new FreelancerAutopilot({ repository, now: () => now, readProfile: async () => profile, readProjects: async () => ({ projects: [project], skipped: 0 }), submitBid,
+      guardedSubmitBid: async (_input, guard) => { await repository!.savePolicy({ ...(await repository!.getPolicy()), state: 'paused' }); await guard(); clicked(); return { statusCode: 200, resultId: '9999' }; },
+    });
+    await autopilot.start();
+    expect(clicked).not.toHaveBeenCalled(); expect(submitBid).not.toHaveBeenCalled();
+    expect((await repository.bidUsage(now, 'Asia/Jakarta')).today).toBe(0);
+    expect((await repository.listProjects()).find(item=>item.id===project.id)?.pipelineStatus).toBe('reconciliation_required');
+  });
+
   it('stops a pending draft before any live claim when the server shuts down', async () => {
     repository = await WorkspaceRepository.open();
     const submitBid = vi.fn();

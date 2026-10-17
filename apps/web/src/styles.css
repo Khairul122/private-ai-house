@@ -968,6 +968,13 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .calendar-day-log { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
 .calendar-day-log h4 { margin: 0 0 8px; font-size: 14px; }
 .operations-page { min-width: 0; }
+.operations-wa-status { padding:16px; margin-bottom:20px; border:1px solid #7a8580; border-radius:8px; background:#fff; color:#243b35; }
+.operations-status-line { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+.operations-status-badge { display:inline-block; padding:5px 9px; border:1px solid #7a8580; border-radius:4px; color:#243b35; background:#f2f4f2; font-size:13px; font-weight:600; }
+.operations-status-badge[data-tone="ok"] { color:#20543b; background:#e7f2e9; border-color:#47735a; }
+.operations-status-badge[data-tone="error"] { color:#832d25; background:#fff0ed; border-color:#a3473e; }
+.operations-wa-status .operations-actions { align-items:center; justify-content:space-between; margin:8px 0 12px; }
+.operations-wa-status small { line-height:1.6; }
 .operations-tabs { display:flex; flex-wrap:wrap; gap:8px; padding:0 0 20px; }
 .operations-tabs button, .vo3d-floor-picker button { min-height:44px; padding:9px 13px; border:1px solid #7a8580; border-radius:8px; color:#243b35; background:#fff; font:inherit; cursor:pointer; }
 .operations-tabs button[aria-pressed="true"], .vo3d-floor-picker button[aria-pressed="true"] { background:#314c42; color:#fff; border-color:#314c42; }

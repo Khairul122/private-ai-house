@@ -21,6 +21,8 @@ import { OperationsService } from './operations.js';
 import { registerOperationsRoutes } from './operations-routes.js';
 import type { WhatsAppService } from './whatsapp.js';
 import type { GoogleCalendarService } from './google-calendar.js';
+import type { BrowserBiddingService } from './browser-bidding.js';
+import { registerBrowserBiddingRoutes } from './browser-bidding-routes.js';
 
 const paramsSchema = z.object({ id: z.string().min(1).max(150) });
 const FOLLOW_UP_DAYS = 3;
@@ -44,6 +46,7 @@ type FreelancerSandboxWriteCheck = { statusCode: number | null; checkedAt: strin
 type FreelancerProductionWriteCheck = FreelancerSandboxWriteCheck;
 
 export type AppOptions = {
+  browserBidding?: BrowserBiddingService;
   operations?: OperationsService;
   whatsapp?: WhatsAppService;
   googleCalendar?: GoogleCalendarService;
@@ -164,6 +167,7 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
   });
   app.get('/api/business-sync', async () => options.businessSync?.getStatus() ?? null);
   registerOperationsRoutes(app, {repository,operations,whatsapp:options.whatsapp,google:options.googleCalendar});
+  registerBrowserBiddingRoutes(app,options.browserBidding,repository);
   // Thread project ids are bare Freelancer ids; local project ids are 'freelancer:<id>'.
   const threadProjectIds = async () => new Set((await repository.listClientThreads()).map((thread) => thread.projectId).filter((id): id is string => id !== null).map((id) => `freelancer:${id}`));
   const dayDiff = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);

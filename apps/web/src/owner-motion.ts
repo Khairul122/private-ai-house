@@ -1,4 +1,4 @@
-import { FLOOR, LEAD_DESK, MANAGER_DESK, OWNER_SPOT, PODS, POD_SIZE, type P2, type Spot } from './office-layout.js';
+import { FLOOR, BROWSER_DESK, LEAD_DESK, LIFT, MANAGER_DESK, OWNER_SPOT, PODS, POD_SIZE, type P2, type Spot } from './office-layout.js';
 import type { OwnerMoveInput } from './owner-input.js';
 
 const RADIUS = 0.38;
@@ -8,6 +8,8 @@ const box = (x: number, z: number, w: number, d: number): Obstacle => ({ minX: x
 
 // Ground footprints of the solid furniture and partitions rendered in VisualOffice.
 const obstacles: Obstacle[] = [
+  box(LIFT.x, LIFT.z, LIFT.w, LIFT.d),
+  box(BROWSER_DESK.x,BROWSER_DESK.z,2.8,1),box(BROWSER_DESK.x,BROWSER_DESK.z-0.95,0.6,0.6),
   box(MANAGER_DESK.x,MANAGER_DESK.z,2.8,1),box(MANAGER_DESK.x,MANAGER_DESK.z-0.95,0.6,0.6),
   ...PODS.flatMap(({ x, z }) => [
     box(x, z - POD_SIZE / 2, POD_SIZE, 0.12), box(x - POD_SIZE / 2, z, 0.12, POD_SIZE), box(x + POD_SIZE / 2, z, 0.12, POD_SIZE),
@@ -94,8 +96,8 @@ export function ownerVisitDestination(target: Spot): P2 | null {
   return null;
 }
 
-export function createOwnerMotion() {
-  return { x: OWNER_SPOT.x, z: OWNER_SPOT.z, heading: OWNER_SPOT.facing, facing: OWNER_SPOT.facing, path: [] as P2[], targetKey: '', gait: 0, blend: 0, swing: 0, bob: 0, moving: false };
+export function createOwnerMotion(start: P2 = [OWNER_SPOT.x, OWNER_SPOT.z]) {
+  return { x: start[0], z: start[1], heading: OWNER_SPOT.facing, facing: OWNER_SPOT.facing, path: [] as P2[], targetKey: '', gait: 0, blend: 0, swing: 0, bob: 0, moving: false };
 }
 export type OwnerMotion = ReturnType<typeof createOwnerMotion>;
 

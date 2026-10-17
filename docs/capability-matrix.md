@@ -15,6 +15,7 @@ Updated 16 October 2026 against provider documentation, implementation, and auth
 | LinkedIn OIDC lite profile | `connected`, API sync verified | Authenticated `/userinfo` was read and indexed as one replaceable Knowledge Hub source on 16 October. Optional claims are validated. Page-load connection status checks token presence and expiry; full employment history/skills still require the user's export. |
 | Hermes Agent CLI drafting | `active`, consent supplied | Runtime capabilities report Hermes active with the owner's existing data consent. The local profile writes proposals only when requested by the manual drafting flow or an eligible autopilot candidate. Account bid-quota cooldown prevents unnecessary drafting after a confirmed quota rejection. |
 | Local simulated bid | `supported` | Deterministic policy check plus audit payload hash; never calls a marketplace endpoint and never marks a bid externally submitted. |
+| Freelancer bid through existing Chrome | `implemented`, account connection verified; live submit pending | Added 17 October. Owner enabled Chrome debugging and allowed the connection; Playwright attached to the logged-in profile and created its own tab. At 10.02 WIB the worker verified `khairulhuda01`, dashboard HTTP 200, and zero bids remaining. Eight local Chrome fixture cases verify submission boundaries and that disconnect preserves existing tabs. No production form submission was performed. See [browser bidding](browser-bidding.md). |
 
 ## Live verification record
 

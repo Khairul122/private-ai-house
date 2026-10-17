@@ -1,6 +1,7 @@
 import type { AuditEvent, Autopilot, BusinessSyncStatus } from './api.js';
 import { OPERATIONS_ROSTER } from '@fvh/domain';
 import type { OperationsData } from './operations-api.js';
+import type { BrowserBiddingStatus } from './browser-bidding-api.js';
 
 export type AgentState = 'working' | 'reviewing' | 'collaborating' | 'idle' | 'offline' | 'unknown';
 // Lobby is the neutral spot for agents whose state cannot be determined.
@@ -37,6 +38,7 @@ export const ROSTER: RosterEntry[] = [
   { id: 'compliance-auditor', name: 'Compliance Auditor', role: 'Auditor Kebijakan & Keamanan', color: '#d62828' },
   { id: 'qa-engineer', name: 'QA Engineer', role: 'Verifikator Kontrak & Smoke', color: '#277da1' },
   { id: 'lead-agent', name: 'Lead Agent', role: 'Koordinator Tim AI (Hermes)', color: '#343a40' },
+  { id: 'browser-bid-operator', name: 'Operator Browser Bid', role: 'Pengiriman bid melalui Chrome', color: '#476b68', floor: 1 },
   ...OPERATIONS_ROSTER,
 ];
 
@@ -73,6 +75,7 @@ function roomFor(state: AgentState): RoomId {
 function activityFor(id: string, activity: AuditEvent[]): AuditEvent[] {
   if (id === 'chief-of-staff') return activity.slice(0, 3);
   const matches = (event: AuditEvent): boolean => {
+    if (id === 'browser-bid-operator') return event.type.startsWith('browser.') || event.type === 'marketplace.production.submit_bid' && event.reason.includes('melalui browser');
     if (id === 'market-scout') return ['marketplace.projects_synced', 'marketplace.sync_failed', 'autopilot.cycle'].includes(event.type);
     if (id === 'bid-strategist') return event.type.startsWith('bid.') || event.type === 'marketplace.production.submit_bid';
     if (id === 'compliance-auditor') return event.type === 'autopilot.bid_skipped' || event.type.startsWith('policy.');
@@ -87,6 +90,7 @@ function activityFor(id: string, activity: AuditEvent[]): AuditEvent[] {
 
 /** Extra real signals beyond the autopilot. `undefined` means the source could not be loaded. */
 export type OfficeContext = {
+  browserBidding?: BrowserBiddingStatus | null | undefined;
   operations?: Pick<OperationsData,'runtime'|'whatsapp'|'google'> | undefined;
   sync?: BusinessSyncStatus | null | undefined;
   hermes?: { active: boolean; reason: string; draftsInProgress?: number | undefined } | undefined;
@@ -118,7 +122,14 @@ export function deriveOfficeAgents(autopilot: Autopilot | undefined, activity: A
   return ROSTER.map((entry) => {
     let derived: Derived;
     const signal=context.operations?.runtime.jobs[entry.id];
-    if (entry.id === 'lead-agent' && context.operations?.runtime.jobs['lead-operations']?.busy) derived={state:'reviewing',reason:'Hermes meninjau laporan manajer.',task:'Kolaborasi dengan manajer lantai 1 dan 2.'};
+    if (entry.id === 'browser-bid-operator') {
+      const browser=context.browserBidding;
+      if(!browser) derived={state:'unknown',reason:'Status worker browser tidak tersedia.'};
+      else if(browser.busy) derived={state:browser.state==='submitting'?'working':'reviewing',reason:browser.reason,task:browser.reason};
+      else if(browser.state==='ready' || browser.state==='quota_exhausted') derived={state:'idle',reason:browser.reason};
+      else derived={state:'offline',reason:browser.reason};
+    }
+    else if (entry.id === 'lead-agent' && context.operations?.runtime.jobs['lead-operations']?.busy) derived={state:'reviewing',reason:'Hermes meninjau laporan manajer.',task:'Kolaborasi dengan manajer lantai 1 dan 2.'};
     else if (OPERATIONS_ROSTER.some(a=>a.id===entry.id)) {
       if(!context.operations) derived={state:'unknown',reason:'Status operasional tidak tersedia.'};
       else if(signal?.busy) derived={state:entry.id.includes('manager')?'collaborating':'working',reason:signal.reason,task:signal.reason};

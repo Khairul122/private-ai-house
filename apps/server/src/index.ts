@@ -21,6 +21,7 @@ import { DpapiIntegrationVault } from './integration-vault.js';
 import { WhatsAppService } from './whatsapp.js';
 import { GoogleCalendarService } from './google-calendar.js';
 import { PublicPortfolioResolver } from './portfolio.js';
+import { BrowserBiddingService } from './browser-bidding.js';
 
 function findProjectRoot(start: string): string {
   let directory = resolve(start);
@@ -85,7 +86,14 @@ const drafting = hermesEnabled ? new HermesCliDraftingAdapter({
   timeoutMs: 180_000,
 }) : undefined;
 const portfolio = new PublicPortfolioResolver();
+const browserBidding = new BrowserBiddingService(dataDirectory,async()=>{
+  const account=await (await createFreelancerReader()).readOwnProfile();
+  if(!account.username) throw new Error('Username API belum tersedia.');
+  return {id:account.id,username:account.username};
+});
 const autopilot = new FreelancerAutopilot({
+  bidTransportReady:()=>browserBidding.readiness(),
+  guardedSubmitBid:(input,authorize)=>browserBidding.submit(input,authorize,async()=>new FreelancerProductionWriteAdapter({token:await getFreelancerToken()}).run(input)),
   publicPortfolio:(evidence)=>portfolio.select(evidence),
   repository,
   readProfile: async () => (await createFreelancerReader()).readOwnProfile(),
@@ -109,7 +117,7 @@ const operations = new OperationsService({repository,messenger:whatsapp,calendar
 const hasWebBuild = existsSync(webBuild);
 const app = await createApp({
   publicPortfolio:(evidence)=>portfolio.select(evidence),
-  operations,whatsapp,googleCalendar,
+  operations,whatsapp,googleCalendar,browserBidding,
   repository,
   getGitHubToken: () => readGitHubEnvironment(projectRoot).token ?? undefined,
   getCredentialStatus: () => {
@@ -192,7 +200,7 @@ const app = await createApp({
 if (hasWebBuild) {
   await app.register(fastifyStatic, { root: webBuild, prefix: '/' });
 }
-app.addHook('onClose',async()=>{whatsapp.close();await operations.close();});
+app.addHook('onClose',async()=>{autopilot.stop();whatsapp.close();await browserBidding.close();await operations.close();});
 
 if (!['127.0.0.1', 'localhost', '::1'].includes(host)) throw new Error('FVH_HOST must stay on loopback for the local single-user app.');
 await app.listen({ host, port });
@@ -200,6 +208,7 @@ app.log.info({ host, port }, 'Freelancer Virtual House API is ready');
 void (async () => {
   await app.inject({ method: 'POST', url: '/api/freelancer/verify' });
   businessSync.start();
+  await browserBidding.restore();
   await googleCalendar.restore().catch(()=>undefined);
   await whatsapp.restore().catch(()=>undefined);
   await operations.start();

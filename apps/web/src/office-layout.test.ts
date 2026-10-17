@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Autopilot } from './api.js';
 import { BOARD_SIZE, BOARDS, dayPhase, FLOOR, planPath, spotsFor, SPINE_X } from './office-layout.js';
-import { deriveOfficeAgents } from './office-state.js';
+import { deriveOfficeAgents, ROSTER } from './office-state.js';
 
 const autopilot = (cycleInProgress: boolean): Autopilot => ({
   state: 'running', cycleInProgress, lastRunAt: null, nextRunAt: null, lastMessage: '', lastImported: 0, lastSubmitted: 0, specializations: [],
@@ -20,6 +20,13 @@ describe('office layout', () => {
     }
   });
 
+  it('keeps all idle floor-one employees in separate break spots including the browser operator', () => {
+    const agents=ROSTER.filter(a=>(a.floor ?? 1)===1 && a.id!=='qa-engineer').map(a=>({...a,state:'idle' as const,room:'lounge' as const,reason:'Fixture',task:null,recentActivity:[]}));
+    const spots=spotsFor(agents);
+    expect(new Set([...spots.values()].map(s=>s.x+','+s.z)).size).toBe(agents.length);
+    const working=spotsFor(agents.map(a=>a.id==='browser-bid-operator'?{...a,state:'working' as const,room:'workspace' as const}:a));
+    expect(Number.isFinite(working.get('browser-bid-operator')?.x)).toBe(true);
+  });
   it('routes between rooms through the corridor spine', () => {
     const working = spotsFor(deriveOfficeAgents(autopilot(true), [])).get('market-scout')!;
     const idle = spotsFor(deriveOfficeAgents(autopilot(false), [])).get('market-scout')!;
