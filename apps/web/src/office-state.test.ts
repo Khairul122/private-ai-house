@@ -12,7 +12,7 @@ const agent = (agents: ReturnType<typeof deriveOfficeAgents>, id: string) => age
 
 describe('office state', () => {
   it('derives the projects.co.id scout only from its current worker signal', () => {
-    const worker: ProjectsCoIdStatus = { mode: 'scan-only', state: 'ready', busy: false, reason: 'Fixture', username: 'KhairulHuda06', remaining: null, checkedAt: null, pageStatus: 200, lastScanAt: null, lastResult: null, autoAvailable: false, draftsInProgress: 0, projectCount: 4, readyDrafts: 2, blockedWrites: 0, draftUsage: { today: 1, week: 1, dailyLimit: 4, weeklyLimit: 12 } };
+    const worker: ProjectsCoIdStatus = { mode: 'scan-only', state: 'ready', busy: false, reason: 'Fixture', username: 'KhairulHuda06', remaining: null, checkedAt: null, pageStatus: 200, lastScanAt: null, lastResult: null, lastSearchTerms: [], searchTerms: [], autoAvailable: false, draftsInProgress: 0, projectCount: 4, readyDrafts: 2, blockedWrites: 0, draftUsage: { today: 1, week: 1, dailyLimit: 4, weeklyLimit: 12 } };
     const scout = (changes: Partial<ProjectsCoIdStatus> = {}) => agent(deriveOfficeAgents(autopilot(), [event('projects_co_id.scan_completed'), event('marketplace.production.submit_bid')], { projectsCoId: { ...worker, ...changes } }), 'projects-co-id-scout');
     expect(scout()).toMatchObject({ state: 'idle', room: 'lounge', task: '2 draf menunggu Anda kirim', floor: 1 });
     expect(scout({ busy: true, state: 'scanning' })).toMatchObject({ state: 'reviewing', room: 'workspace' });

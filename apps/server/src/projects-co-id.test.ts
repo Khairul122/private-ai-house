@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { WorkspaceRepository } from '@fvh/persistence';
 import { projectsCoIdSettingsSchema } from '@fvh/contracts';
-import { PROJECTS_CO_ID_DEFAULTS, scoreProject } from '@fvh/domain';
+import { PROJECTS_CO_ID_DEFAULTS, projectsCoIdDraftPolicy, projectsCoIdFieldsOf, projectsCoIdSearchTerms, projectsCoIdSettings, scoreProject, type AutonomyPolicy } from '@fvh/domain';
 import { chooseProjectsCoIdBid, mentionedRupiahAmounts, parseProjectsCoIdProject, projectsCoIdPath, validProjectsCoIdProposal, readRupiahBudget } from './projects-co-id-types.js';
 import { ProjectsCoIdService } from './projects-co-id.js';
 import { createApp } from './app.js';
@@ -40,9 +40,24 @@ describe('projects.co.id read-only integration', () => {
     expect(parseProjectsCoIdProject({ ...listing, text: listing.text.replace(/Select Deadline:[^\n]+/, 'Select Deadline: unknown') }, now)?.deadlineDays).toBeNull();
   });
 
+  it('builds search terms from fields, own keywords and profile skills, and fills settings saved before these options', () => {
+    const settings = { ...PROJECTS_CO_ID_DEFAULTS, fields: ['ai'], keywords: ['laravel', 'Scraping'], useProfileSkills: true };
+    expect(projectsCoIdSearchTerms(settings, ['Laravel', 'Python'])).toEqual(['AI', 'Machine Learning', 'Chatbot', 'OpenAI', 'LLM', 'laravel', 'Scraping', 'Python']);
+    expect(projectsCoIdSearchTerms({ ...settings, fields: [], keywords: [], useProfileSkills: false }, ['Laravel'])).toEqual([]);
+    const legacy = { username: 'KhairulHuda06', minPrice: 1, maxPrice: 2, dailyBidLimit: 1, weeklyBidLimit: 1, mode: 'drafts' } as AutonomyPolicy['projectsCoId'];
+    expect(projectsCoIdSettings({ projectsCoId: legacy })).toMatchObject({ fields: [], keywords: [], useProfileSkills: true, minimumScore: 50, minPrice: 1 });
+    expect(projectsCoIdSettingsSchema.parse(legacy)).toMatchObject({ fields: [], useProfileSkills: true, minimumScore: 50 });
+    expect(projectsCoIdDraftPolicy({ minimumConfidence: 0.9, projectsCoId: { ...PROJECTS_CO_ID_DEFAULTS, minimumScore: 30 } } as AutonomyPolicy).minimumConfidence).toBe(0.3);
+  });
+
+  it('classifies fields by whole terms, so "AI" does not match words like "detail"', () => {
+    expect(projectsCoIdFieldsOf({ title: 'Chatbot WhatsApp dengan OpenAI', description: 'Integrasi API', skills: ['Python'] })).toEqual(['ai', 'backend', 'data']);
+    expect(projectsCoIdFieldsOf({ title: 'Perbaiki detail email', description: 'tidak ada rincian', skills: [] })).toEqual([]);
+  });
+
   it('validates settings and keeps automatic submission unavailable', () => {
     expect(projectsCoIdSettingsSchema.safeParse(PROJECTS_CO_ID_DEFAULTS).success).toBe(true);
-    for (const changes of [{ mode: 'auto' }, { minPrice: -1 }, { maxPrice: 10 }, { dailyBidLimit: 1.5 }, { username: '' }, { url: 'https://evil.test' }]) {
+    for (const changes of [{ mode: 'auto' }, { fields: ['crypto'] }, { keywords: ['a&b=c'] }, { minimumScore: 101 }, { minPrice: -1 }, { maxPrice: 10 }, { dailyBidLimit: 1.5 }, { username: '' }, { url: 'https://evil.test' }]) {
       expect(projectsCoIdSettingsSchema.safeParse({ ...PROJECTS_CO_ID_DEFAULTS, ...changes }).success).toBe(false);
     }
   });

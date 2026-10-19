@@ -40,7 +40,8 @@ export class ProjectsCoIdPage {
       return url.origin === location.origin && url.pathname === '/user/home' && /^Logged in as\s+[A-Za-z0-9_-]+\s*$/.test(e.textContent?.trim() ?? '');
     }).map(e => e.textContent!.trim().replace(/^Logged in as\s+/, '')));
     const challenge = await this.page.locator('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="challenges.cloudflare.com"], input[name="bid[captcha]"]').first().isVisible().catch(() => false)
-      || await this.page.getByText(/verify you are human|checking your browser|just a moment|verifikasi bahwa anda manusia/i).first().isVisible().catch(() => false);
+      || /just a moment|tunggu sebentar/i.test(await this.page.title().catch(() => ''))
+      || await this.page.getByText(/verify you are human|checking your browser|just a moment|verifikasi bahwa anda manusia|performing security verification|melakukan verifikasi keamanan/i).first().isVisible().catch(() => false);
     this.assertOrigin();
     return { username: account.length === 1 ? account[0]! : null, remaining: null, pageStatus, checkedAt: new Date().toISOString(), challenge };
   }
@@ -69,12 +70,14 @@ export class ProjectsCoIdPage {
     const status = await this.navigate('/');
     return this.observe(status);
   }
-  async listOpenProjects(expectedUsername: string, authorize: () => Promise<void>, maxPages = 3): Promise<ProjectOpportunity[]> {
-    if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 3) throw new Error('Maksimum tiga halaman per pemindaian.');
+  /** Without searches: up to three listing pages. With searches: page one of up to three searches. */
+  async listOpenProjects(expectedUsername: string, authorize: () => Promise<void>, searches: string[] = []): Promise<ProjectOpportunity[]> {
+    if (searches.length > 3) throw new Error('Maksimum tiga halaman per pemindaian.');
+    const paths = searches.length ? searches.map(term => `/public/browse_projects/listing?search=${encodeURIComponent(term)}`) : [1, 2, 3].map(page => `/public/browse_projects/listing?page=${page}`);
     const projects = new Map<string, ProjectOpportunity>();
-    for (let number = 1; number <= maxPages; number++) {
+    for (let number = 1; number <= paths.length; number++) {
       await authorize();
-      const status = await this.navigate(`/public/browse_projects/listing?page=${number}`, authorize);
+      const status = await this.navigate(paths[number - 1]!, authorize);
       const observation = await this.observe(status);
       this.assertAccount(observation, expectedUsername);
       const items = await this.page.locator('#ds h2').evaluateAll(es => es.map(e => {
@@ -94,6 +97,7 @@ export class ProjectsCoIdPage {
         if (!projects.has(project.id)) { projects.set(project.id, project); added++; }
       }
       await authorize();
+      if (searches.length) continue;
       if (added === 0) break;
       const hasNext = await this.page.locator('.pagination a').evaluateAll((es, next) => es.some(e => e.getAttribute('href') === `javascript:dsLoadPage('page', '${next}');`), String(number + 1));
       if (!hasNext) break;

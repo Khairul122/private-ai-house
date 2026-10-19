@@ -22,6 +22,7 @@ let challenge = false;
 let ids = ['aa0001', 'aa0002'];
 let writes = 0;
 let listings = 0;
+const searches: string[] = [];
 const description = 'DATA UJI: membuat aplikasi TypeScript dengan alur akses, dokumentasi, pengujian dan kriteria selesai yang disepakati. '.repeat(5);
 const metadata = 'Published Budget: Rp 500,000 - 1,000,000<br>Published Date: 19/10/2026 13:34:26 WIB<br>Select Deadline: 18/11/2099 13:34:26 WIB<br>Finish Days: 7<br>Project Status: Published';
 const account = () => username ? `<a href="/user/home">Logged in as ${username}</a>` : '<a href="/public/home/login">Login</a>';
@@ -30,11 +31,13 @@ const site = createServer((req, res) => {
   if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method ?? '')) { writes++; res.statusCode = 405; res.end(); return; }
   const url = new URL(req.url!, 'http://localhost');
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  const header = `${account()}${challenge ? '<p>Verify you are human</p>' : ''}`;
+  // Interstitial text observed live on projects.co.id (19 Oct 2026), Indonesian Chrome locale.
+  const header = challenge ? '<title>Tunggu sebentar...</title><p>Melakukan verifikasi keamanan</p>' : account();
   const trap = '<script>fetch("/trap",{method:"POST",body:"must never arrive"}).catch(()=>{});</script>';
   if (url.pathname === '/') return res.end(header + trap);
   if (url.pathname === '/public/browse_projects/listing') {
     listings++;
+    if (url.searchParams.has('search')) searches.push(url.searchParams.get('search')!);
     const number = Number(url.searchParams.get('page') ?? 1);
     const id = ids[number - 1];
     return res.end(`${header}<div id="ds">${id ? `<div><a href="/public/browse_users/view/111111/owner-fixture">owner-fixture</a><div>${content(id)}</div></div>` : '<p>No record</p>'}</div>${number < ids.length ? `<div class="pagination"><a href="javascript:dsLoadPage('page', '${number + 1}');">Next</a></div>` : ''}${trap}`);
@@ -48,7 +51,7 @@ const address = site.address(); assert.ok(address && typeof address !== 'string'
 const origin = `http://127.0.0.1:${address.port}`;
 const repo = await WorkspaceRepository.open();
 const policy = await repo.getPolicy();
-await repo.savePolicy({ ...policy, state: 'active', allowedActions: ['bid.submit'], specializations: ['TypeScript'], minimumConfidence: 0.5, expiresAt: '2099-12-01T00:00:00Z', projectsCoId: PROJECTS_CO_ID_DEFAULTS });
+await repo.savePolicy({ ...policy, state: 'active', allowedActions: ['bid.submit'], specializations: ['TypeScript'], minimumConfidence: 0.5, expiresAt: '2099-12-01T00:00:00Z', projectsCoId: { ...PROJECTS_CO_ID_DEFAULTS, useProfileSkills: false } });
 await repo.saveProfile({ ...await repo.getProfile(), specializations: ['TypeScript'] });
 const directory = await mkdtemp(join(tmpdir(), 'fvh-projects-co-id-fixture-'));
 const context = await chromium.launchPersistentContext(directory, { channel: 'chrome', headless: true, args: ['--remote-debugging-port=0'] });
@@ -83,9 +86,15 @@ try {
   await repo.savePolicy({ ...await repo.getPolicy(), state: 'paused' }); const before = listings;
   await assert.rejects(service.scan()); assert.equal(listings, before);
   await repo.savePolicy({ ...await repo.getPolicy(), state: 'active' }); await service.setMode('scan-only'); await service.check();
+  // Field + profile search: three listing searches per scan, then the next three on the following scan.
+  await repo.savePolicy({ ...await repo.getPolicy(), projectsCoId: { ...(await repo.getPolicy()).projectsCoId!, fields: ['ai'], useProfileSkills: true } });
+  ids = ['aa0005']; await service.scan(); await service.check(); await service.scan();
+  assert.deepEqual(searches, ['AI', 'Machine Learning', 'Chatbot', 'OpenAI', 'LLM', 'TypeScript']);
+  assert.deepEqual((await service.status()).lastSearchTerms, ['OpenAI', 'LLM', 'TypeScript']);
+  await repo.savePolicy({ ...await repo.getPolicy(), projectsCoId: { ...(await repo.getPolicy()).projectsCoId!, fields: [], useProfileSkills: false } });
   assert.equal(writes, 0); assert.ok((await service.status()).blockedWrites > 0);
   await service.close(); assert.equal(ownerTab.isClosed(), false); assert.equal(context.pages().length, 1);
-  console.log('PASS: 10 worker scenarios; all marketplace writes blocked; CDP disconnect preserves owner tab.');
+  console.log('PASS: 11 worker scenarios (incl. field/profile search rotation); all marketplace writes blocked; CDP disconnect preserves owner tab.');
   } else {
     for (const id of ['aa0001', 'aa0002', 'aa0003']) {
       const project = parseProjectsCoIdProject({ href: `${origin}/public/browse_projects/view/${id}/aplikasi-typescript`, title: `DATA UJI ${id}`, description, clientName: 'owner-fixture', skills: ['TypeScript'], text: metadata.replaceAll('<br>', '\n') }, new Date(), origin)!;
@@ -122,8 +131,33 @@ try {
   assert.equal(await card.getByRole('link', { name: 'Buka di projects.co.id' }).getAttribute('href'), 'https://projects.co.id/public/browse_projects/view/aa0001/aplikasi-typescript');
   assert.equal(await card.getByRole('link', { name: 'Buka di projects.co.id' }).getAttribute('rel'), 'noopener noreferrer');
   ownerTab.once('dialog', dialog => dialog.accept());
+  if (!process.argv.includes('--ui-only')) await card.getByText('Ditulis Hermes (Lead Agent)', { exact: true }).waitFor();
+  // Field filter: fixture briefs are TypeScript only, so the AI field must hide every row.
+  await ownerTab.getByLabel('Bidang', { exact: true }).selectOption('ai');
+  await ownerTab.getByText(/Tidak ada proyek sesuai filter/).waitFor();
+  await ownerTab.getByLabel('Bidang', { exact: true }).selectOption('all');
   await card.getByRole('button', { name: 'Sudah saya kirim' }).click();
+  await card.waitFor({ state: 'detached' });
+  await ownerTab.getByRole('button', { name: /Ditandai terkirim/ }).click();
   await ownerTab.getByText(/Ditandai terkirim oleh Anda ·/).waitFor();
+  const sent = ownerTab.locator('.projects-draft-row').filter({ has: ownerTab.getByRole('heading', { name: 'DATA UJI aa0001', exact: true }) });
+  ownerTab.once('dialog', dialog => dialog.accept());
+  await sent.getByRole('button', { name: 'Saya menang' }).click();
+  await ownerTab.getByRole('button', { name: /Menang/ }).click();
+  await ownerTab.getByText(/Ditandai menang oleh Anda ·/).waitFor();
+  const won = await repo.listClientProjects();
+  assert.deepEqual(won.map(p => [p.source, p.externalProjectId, p.value, p.currency]), [['projects_co_id', 'projects_co_id:aa0001', 500_000, 'IDR']]);
+  // Cross-card links keep the projects.co.id filter.
+  await ownerTab.getByRole('link', { name: 'Lihat di Proyek & Pendapatan' }).click();
+  await ownerTab.getByText('DATA UJI aa0001').first().waitFor();
+  await ownerTab.goto(webOrigin + 'pipeline?source=projects_co_id');
+  await ownerTab.getByLabel('Sumber').first().waitFor();
+  assert.equal(await ownerTab.getByLabel('Sumber').first().inputValue(), 'projects_co_id');
+  await ownerTab.getByText(/Ditandai menang|Berhasil/).first().waitFor();
+  await ownerTab.goto(webOrigin + 'policy');
+  await ownerTab.getByRole('checkbox', { name: /AI & Machine Learning/ }).waitFor();
+  await ownerTab.goto(webOrigin + 'projects-co-id');
+  await ownerTab.getByRole('heading', { name: 'Draf siap dikirim (2)' }).waitFor();
   await ownerTab.keyboard.press('Escape'); await ownerTab.waitForURL(webOrigin);
   await ownerTab.keyboard.press('Control+k');
   await ownerTab.getByRole('searchbox', { name: 'Cari agen atau papan' }).fill('projects.co.id');
@@ -135,6 +169,7 @@ try {
   await ownerTab.getByRole('button', { name: 'Hubungkan Chrome saya' }).click();
   await ownerTab.getByRole('button', { name: 'Periksa akun' }).click();
   await ownerTab.getByRole('button', { name: 'Pindai sekarang' }).click();
+  await ownerTab.getByLabel('Tahap', { exact: true }).selectOption('all');
   const manual = ownerTab.locator('.projects-draft-row').filter({ has: ownerTab.getByRole('heading', { name: 'DATA UJI aa0004', exact: true }) });
   await manual.getByRole('button', { name: 'Buat draf' }).click();
   await manual.getByRole('textbox').waitFor();
@@ -149,7 +184,7 @@ try {
   assert.ok(await ownerTab.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await ownerTab.screenshot({ path: join(artifacts, 'projects-co-id-fixture-mobile.png') });
   assert.deepEqual(errors, []); assert.equal(writes, 0);
-  console.log('PASS: boards/search, worker controls, manual draft/skip, edit/save, clipboard, fixed-origin link, owner confirmation/history, Escape, mobile overflow.');
+  console.log('PASS: boards/search, author label, field filter, sent → won → Proyek & Pendapatan, pipeline/policy links, worker controls, manual draft/skip, edit/save, clipboard, fixed-origin link, owner confirmation/history, Escape, mobile overflow.');
 } finally {
   await service.close(); await vite?.close(); await app?.close(); await repo.close(); await context.close();
   await new Promise<void>((resolve, reject) => site.close(error => error ? reject(error) : resolve()));

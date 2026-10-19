@@ -20,7 +20,7 @@ export function registerProjectsCoIdRoutes(app: FastifyInstance, service: Projec
     catch { return reply.code(409).send({ error: 'Mode belum disimpan. Tunggu worker selesai atau muat ulang kebijakan.' }); }
   });
   app.get('/api/projects-co-id/drafts', async (_req, reply) => service ? service.drafts() : reply.code(503).send({ error: 'Worker tidak tersedia.' }));
-  for (const action of ['draft', 'mark-sent', 'skip'] as const) app.post(`/api/projects-co-id/projects/:id/${action}`, async (req, reply) => {
+  for (const action of ['draft', 'mark-sent', 'skip', 'won'] as const) app.post(`/api/projects-co-id/projects/:id/${action}`, async (req, reply) => {
     if (!service) return reply.code(503).send({ error: 'Worker tidak tersedia.' });
     const params = projectParams.safeParse(req.params);
     const body = (action === 'draft' ? z.object({}).strict() : projectsCoIdOwnerActionSchema).safeParse(req.body ?? {});

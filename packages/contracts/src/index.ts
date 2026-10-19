@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { normalizeKeywords, validPolicyTimezone } from '@fvh/domain';
+import { normalizeKeywords, PROJECTS_CO_ID_FIELDS, validPolicyTimezone } from '@fvh/domain';
 
 const timezone = z.string().trim().min(3).max(80).refine(validPolicyTimezone, 'Zona waktu IANA tidak valid, misalnya Asia/Jakarta.');
 
@@ -21,6 +21,11 @@ export const projectsCoIdSettingsSchema = z.object({
   dailyBidLimit: z.number().int().min(0).max(50),
   weeklyBidLimit: z.number().int().min(0).max(200),
   mode: z.enum(['off', 'scan-only', 'drafts']),
+  fields: z.array(z.enum(PROJECTS_CO_ID_FIELDS.map(field => field.id) as [string, ...string[]])).max(PROJECTS_CO_ID_FIELDS.length).default([]).transform(ids => [...new Set(ids)]),
+  // Terms become a listing ?search= value, so keep them to plain words.
+  keywords: z.array(z.string().trim().regex(/^[\p{L}\p{N}][\p{L}\p{N} .+#/-]{0,39}$/u, 'Kata kunci projects.co.id hanya huruf, angka, spasi dan . + # / -')).max(20).default([]),
+  useProfileSkills: z.boolean().default(true),
+  minimumScore: z.number().int().min(0).max(100).default(50),
 }).strict().refine(value => value.maxPrice >= value.minPrice, { path: ['maxPrice'], message: 'Harga maksimum IDR harus sama atau lebih besar.' });
 
 export const projectsCoIdModeSchema = z.object({ mode: z.enum(['off', 'scan-only', 'drafts']) }).strict();
@@ -75,7 +80,7 @@ const currencyCode = z.string().trim().length(3).toUpperCase();
 export const createClientProjectSchema = z.object({
   title: z.string().trim().min(1).max(150),
   client: z.string().trim().min(1).max(120),
-  source: z.enum(['freelancer', 'direct', 'linkedin', 'other']),
+  source: z.enum(['freelancer', 'direct', 'linkedin', 'projects_co_id', 'other']),
   status: z.enum(['active', 'delivered', 'closed']).default('active'),
   deadline: isoDate.nullable(),
   value: z.number().finite().min(0).nullable(),

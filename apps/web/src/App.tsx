@@ -1,6 +1,6 @@
 import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router';
+import { Link, Navigate, Outlet, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { api, jsonRequest, type AuditEvent, type Autopilot, type BidDraft, type BusinessSyncStatus, type Capabilities, type ClientProject, type Inbox, type Insights, type Opportunity, type Policy, type Profile, type Work } from './api.js';
 import { deriveOfficeAgents, ROOM_LABELS, STATE_COLORS, STATE_LABELS, summarize, type AgentState } from './office-state.js';
 import { BOARDS, dayPhase, FLOOR, LIFT, OWNER_SPOT, PODS, spotsFor, ZONES, type BoardId, type P2, type Spot } from './office-layout.js';
@@ -12,7 +12,7 @@ import ProjectsCoIdPage from './ProjectsCoIdPage.js';
 import type { ProjectsCoIdStatus } from './projects-co-id-api.js';
 import type { BrowserBiddingStatus } from './browser-bidding-api.js';
 import type { OperationsData } from './operations-api.js';
-import { OPERATIONS_ROSTER, PROJECTS_CO_ID_DEFAULTS } from '@fvh/domain';
+import { OPERATIONS_ROSTER, PROJECTS_CO_ID_FIELDS, projectsCoIdSettings } from '@fvh/domain';
 import { FLOOR_TWO_PODS } from './office-layout.js';
 
 const VisualOffice = lazy(() => import('./VisualOffice.js'));
@@ -126,6 +126,21 @@ function StateLabel({ state, source }: { state: string; source?: Opportunity['so
   };
   return <span className={`state-label state-${state}`}>{source === 'projects_co_id' && state === 'submitted' ? 'Ditandai terkirim oleh Anda' : labels[state] ?? state}</span>;
 }
+
+type SourceKey = 'all' | 'freelancer' | 'projects_co_id';
+const SOURCE_OPTIONS: Array<[SourceKey, string]> = [['all', 'Semua sumber'], ['freelancer', 'Freelancer.com'], ['projects_co_id', 'projects.co.id']];
+/** Shared ?source= filter so boards and the projects.co.id card can deep-link into each page. */
+function useSourceFilter(): [SourceKey, (next: SourceKey) => void] {
+  const [params, setParams] = useSearchParams();
+  const value = params.get('source');
+  const source: SourceKey = value === 'freelancer' || value === 'projects_co_id' ? value : 'all';
+  return [source, next => setParams(current => { const copy = new URLSearchParams(current); if (next === 'all') copy.delete('source'); else copy.set('source', next); return copy; }, { replace: true })];
+}
+function SourceSelect({ value, onChange, labels = {} }: { value: SourceKey; onChange: (next: SourceKey) => void; labels?: Partial<Record<SourceKey, string>> }) {
+  return <label className="form-field"><span>Sumber</span><select value={value} onChange={event => onChange(event.target.value as SourceKey)}>{SOURCE_OPTIONS.map(([key, label]) => <option key={key} value={key}>{labels[key] ?? label}</option>)}</select></label>;
+}
+const matchesSource = (source: SourceKey, projectSource: Opportunity['source']) => source === 'all' || (source === 'projects_co_id' ? projectSource === 'projects_co_id' : projectSource !== 'projects_co_id');
+const projectLink = (project: Pick<Opportunity, 'id' | 'source'>) => project.source === 'projects_co_id' ? `/projects-co-id?project=${encodeURIComponent(project.id)}` : `/opportunities?project=${encodeURIComponent(project.id)}`;
 
 const opportunitySource = (source: Opportunity['source']) => source === 'projects_co_id' ? 'projects.co.id' : source === 'freelancer' ? 'Freelancer.com' : 'Fixture pengujian';
 
@@ -275,6 +290,7 @@ function OpportunitiesPage() {
   const location = useLocation();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('open');
+  const [source, setSource] = useSourceFilter();
   const [shown, setShown] = useState(20);
   const query = useQuery({ queryKey: ['projects', 'opportunities'], queryFn: () => api<Opportunity[]>('/projects'), refetchInterval: 30_000 });
   const autopilot = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 30_000 });
@@ -290,12 +306,13 @@ function OpportunitiesPage() {
   const selectedId = new URLSearchParams(location.search).get('project');
   if (selectedId) return <OpportunityDetail project={query.data.find((item) => item.id === selectedId)} />;
   const searchText = search.trim().toLowerCase();
-  const visible = query.data.filter((project) => (statusFilter === 'all' || project.status === statusFilter) && `${project.title} ${project.description} ${project.clientName} ${project.skills.join(' ')}`.toLowerCase().includes(searchText));
+  const visible = query.data.filter((project) => matchesSource(source, project.source) && (statusFilter === 'all' || project.status === statusFilter) && `${project.title} ${project.description} ${project.clientName} ${project.skills.join(' ')}`.toLowerCase().includes(searchText));
   return <>
     <PageIntro eyebrow="Antrean peluang" title="Peluang dipindai otomatis." description="Autopilot membaca pencarian yang cocok dengan profil Freelancer dan membuat bid tanpa form per proyek. Daftar ini diperbarui berkala." />
     <section className="filter-bar" aria-label="Filter peluang tersimpan">
       <label className="search-field"><span>Filter daftar lokal</span><input type="search" value={search} onChange={(event) => { setSearch(event.target.value); setShown(20); }} placeholder="Judul atau teknologi" /></label>
       <label className="form-field"><span>Status peluang</span><select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setShown(20); }}><option value="open">Terbuka</option><option value="closed">Ditutup</option><option value="expired">Kedaluwarsa</option><option value="all">Semua status</option></select></label>
+      <SourceSelect value={source} onChange={next => { setSource(next); setShown(20); }} />
       <div className="filter-note"><strong>{query.data.length}</strong> peluang tersimpan <span>{status?.lastRunAt ? 'Siklus terakhir ' + formatDate(status.lastRunAt) : 'Autopilot sedang menyiapkan siklus'}</span></div>
     </section>
     <section className="sync-panel form-card" aria-label="Status pemindaian otomatis Freelancer">
@@ -345,7 +362,7 @@ function OpportunityDetail({ project }: { project: Opportunity | undefined }) {
     <section><h3>Deskripsi</h3><p className="opp-description">{project.description}</p></section>
     <section><h3>Skill dibutuhkan</h3><div className="tag-row">{project.skills.map((skill) => <span className="skill-tag" key={skill}>{skill}</span>)}</div></section>
     <section><h3>Alasan skor</h3><ul className="opp-factors">{project.factors.map((factor) => <li key={factor.key}><span>{factor.label}</span><strong>{factor.value}</strong><em>{factor.points > 0 ? '+' : ''}{factor.points}</em></li>)}</ul></section>
-    {project.source === 'projects_co_id' ? <Link className="button button-primary" to="/projects-co-id">Buka draf projects.co.id</Link> : <ProposalPanel key={project.id} project={project} />}
+    {project.source === 'projects_co_id' ? <Link className="button button-primary" to={projectLink(project)}>Buka di kartu projects.co.id</Link> : <ProposalPanel key={project.id} project={project} />}
   </article>;
 }
 
@@ -374,22 +391,23 @@ function ProposalPanel({ project }: { project: Opportunity }) {
 function PipelinePage() {
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
+  const [source, setSource] = useSourceFilter();
   const [shown, setShown] = useState(30);
   const query = useQuery({ queryKey: ['pipeline'], queryFn: () => api<Array<Opportunity & { latestDraft: BidDraft | null }>>('/pipeline') });
   if (query.isPending) return <LoadingPanel />;
   if (query.isError) return <ErrorNotice message="Pipeline belum dapat dimuat." onRetry={() => query.refetch()} />;
   const projects = query.data;
-  const visible = projects.filter((project) => (filter === 'all' || project.pipelineStatus === filter) && `${project.title} ${project.clientName}`.toLowerCase().includes(search.toLowerCase()));
+  const visible = projects.filter((project) => matchesSource(source, project.source) && (filter === 'all' || project.pipelineStatus === filter) && `${project.title} ${project.clientName}`.toLowerCase().includes(search.toLowerCase()));
   return <>
     <PageIntro eyebrow="Pipeline bid" title="Status penawaran dan draf." description="Bid Freelancer dikonfirmasi dari respons marketplace. Untuk projects.co.id, penandaan terkirim berasal dari konfirmasi Anda dan tidak diverifikasi aplikasi." />
     <div className="pipeline-summary"><strong>{projects.filter((project) => project.latestDraft).length}</strong><span>draf lokal</span><span className="pipeline-divider" /><strong>{projects.filter((project) => project.source === 'freelancer' && project.pipelineStatus === 'submitted').length}</strong><span>terkonfirmasi dari Freelancer</span><strong>{projects.filter(project => project.source === 'projects_co_id' && project.pipelineStatus === 'submitted').length}</strong><span>ditandai terkirim oleh Anda</span></div>
-    <div className="form-grid"><label className="form-field"><span>Cari judul atau klien</span><input type="search" value={search} onChange={(event) => { setSearch(event.target.value); setShown(30); }} /></label><label className="form-field"><span>Tahap pipeline</span><select value={filter} onChange={(event) => { setFilter(event.target.value); setShown(30); }}><option value="all">Semua tahap</option>{[...new Set(projects.map((project) => project.pipelineStatus))].map((stage) => <option key={stage} value={stage}>{PIPELINE_STAGES.find(([key]) => key === stage)?.[1] ?? stage}</option>)}</select></label></div>
+    <div className="form-grid"><label className="form-field"><span>Cari judul atau klien</span><input type="search" value={search} onChange={(event) => { setSearch(event.target.value); setShown(30); }} /></label><label className="form-field"><span>Tahap pipeline</span><select value={filter} onChange={(event) => { setFilter(event.target.value); setShown(30); }}><option value="all">Semua tahap</option>{[...new Set(projects.map((project) => project.pipelineStatus))].map((stage) => <option key={stage} value={stage}>{PIPELINE_STAGES.find(([key]) => key === stage)?.[1] ?? stage}</option>)}</select></label><SourceSelect value={source} onChange={next => { setSource(next); setShown(30); }} /></div>
     <p className="form-help">{visible.length} proyek sesuai filter</p>{visible.length === 0 && <div className="empty-state"><h3>Tidak ada proyek sesuai filter</h3><p>Ubah pencarian atau tahap pipeline.</p></div>}
     <div className="pipeline-list">{visible.slice(0, shown).map((project) => (
       <article className="pipeline-row" key={project.id}>
         <div><p className="eyebrow">{project.clientName} / {opportunitySource(project.source)}</p><h2>{project.title}</h2><p>{project.latestDraft ? project.latestDraft.proposal.slice(0, 180) : 'Belum ada proposal. Siapkan draf dari antrean peluang.'}</p></div>
         <div className="pipeline-state"><StateLabel state={project.pipelineStatus} source={project.source} /><strong>{project.latestDraft ? formatMoney(project.latestDraft.proposedPrice, project.currency) : 'Belum ada harga'}</strong></div>
-        <Link to={project.source === 'projects_co_id' ? '/projects-co-id' : `/opportunities?project=${encodeURIComponent(project.id)}`} className="button button-secondary">{project.latestDraft ? 'Buka draf' : 'Lihat peluang'}</Link>
+        <Link to={projectLink(project)} className="button button-secondary">{project.latestDraft ? 'Buka draf' : 'Lihat peluang'}</Link>
       </article>
     ))}</div>
     {visible.length > shown && <button className="button button-secondary" type="button" onClick={() => setShown(shown + 30)}>Tampilkan 30 proyek berikutnya</button>}
@@ -556,6 +574,7 @@ const KANBAN_LIMIT = 12;
 
 function TaskBoardPage() {
   const [filter, setFilter] = useState('');
+  const [source, setSource] = useSourceFilter();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const pipeline = useQuery({ queryKey: ['pipeline'], queryFn: () => api<Array<Opportunity & { latestDraft: BidDraft | null }>>('/pipeline') });
 
@@ -563,6 +582,7 @@ function TaskBoardPage() {
   if (pipeline.isError) return <ErrorNotice message="Gagal memuat data papan tugas." onRetry={() => pipeline.refetch()} />;
 
   const projects = pipeline.data.filter((p) => {
+    if (!matchesSource(source, p.source)) return false;
     if (!filter.trim()) return true;
     const q = filter.toLowerCase();
     return p.title.toLowerCase().includes(q) || p.clientName.toLowerCase().includes(q) || p.skills.some((s) => s.toLowerCase().includes(q));
@@ -606,6 +626,7 @@ function TaskBoardPage() {
         <span>Cari proyek, klien, atau skill di papan tugas</span>
         <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Contoh: React, Backend, API" />
       </label>
+      <SourceSelect value={source} onChange={setSource} />
       <div className="filter-note">
         <strong>{projects.length}</strong> kartu ditampilkan
       </div>
@@ -644,7 +665,7 @@ function TaskBoardPage() {
                   </div>
                   <div className="kanban-card-action">
                     <Link
-                      to={`/opportunities?project=${encodeURIComponent(p.id)}`}
+                      to={projectLink(p)}
                       className="button button-secondary"
                     >
                       {p.latestDraft ? 'Buka draf' : 'Buat draf'}
@@ -681,6 +702,8 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
   const agendaQuery = useQuery({ queryKey: ['agenda', 'summary'], queryFn: () => api<AgendaSummary>('/agenda/activity?days=180'), refetchInterval: 60_000 });
   const autopilot = autopilotQuery.isError ? undefined : autopilotQuery.data;
   const agenda = agendaQuery.isError ? undefined : agendaQuery.data;
+  const projectsQuery = useQuery({ queryKey: ['projects', 'calendar'], queryFn: () => api<Opportunity[]>('/projects') });
+  const listings = projectsQuery.isError ? undefined : projectsQuery.data;
   const events = useMemo<CalendarEvent[]>(() => {
     const result: CalendarEvent[] = [];
     for(const task of ownerTasks ?? []) {
@@ -711,6 +734,13 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
       if (dateKey) result.push({ id: `project-${item.id}`, dateKey, title: `Tenggat: ${item.title}`, detail: `Klien: ${item.client}`, kind: 'deadline', time: null, href: '/work' });
     }
 
+    for (const item of listings ?? []) {
+      // Only listings still waiting on the owner; closesAt is the source's own close time.
+      if (item.source !== 'projects_co_id' || !item.closesAt || item.status !== 'open' || !['new', 'scored', 'draft_ready'].includes(item.pipelineStatus)) continue;
+      const dateKey = dateKeyInTimezone(item.closesAt, policy.timezone);
+      if (dateKey) result.push({ id: `listing-${item.id}`, dateKey, title: `Listing ditutup: ${item.title}`, detail: `projects.co.id · ${item.pipelineStatus === 'draft_ready' ? 'draf siap Anda kirim' : 'belum ada draf'}`, kind: 'deadline', time: timeInTimezone(item.closesAt, policy.timezone), href: `/projects-co-id?project=${encodeURIComponent(item.id)}` });
+    }
+
     for (const payment of work?.payments ?? []) {
       if (payment.status !== 'expected' || !payment.dueDate) continue;
       const dateKey = dateKeyInTimezone(payment.dueDate, policy.timezone);
@@ -724,7 +754,7 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
       }
     }
     return result.sort((left, right) => left.dateKey.localeCompare(right.dateKey) || (left.time ?? '99:99').localeCompare(right.time ?? '99:99'));
-  }, [policy, work, autopilot, agenda, ownerTasks]);
+  }, [policy, work, autopilot, agenda, ownerTasks, listings]);
   const eventsByDate = useMemo(() => {
     const grouped = new Map<string, CalendarEvent[]>();
     for (const event of events) grouped.set(event.dateKey, [...(grouped.get(event.dateKey) ?? []), event]);
@@ -1037,7 +1067,7 @@ function PolicyPage() {
   const [validityDays, setValidityDays] = useState(30);
   const [extendValidity, setExtendValidity] = useState(false);
   // Raw text of the comma lists, so a typed trailing comma/space is not stripped on every keystroke.
-  const [listText, setListText] = useState<{ keywords?: string; noNegotiationTerms?: string }>({});
+  const [listText, setListText] = useState<{ keywords?: string; noNegotiationTerms?: string; projectsKeywords?: string }>({});
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
   const refresh = async () => Promise.all([
     queryClient.invalidateQueries({ queryKey: ['policy'] }),
@@ -1047,7 +1077,7 @@ function PolicyPage() {
   const save = useMutation({
     mutationFn: (value: Policy) => api<Policy>('/policy', jsonRequest('PUT', {
       allowedActions: value.allowedActions,
-      projectsCoId: value.projectsCoId ?? PROJECTS_CO_ID_DEFAULTS,
+      projectsCoId: projectsCoIdSettings(value),
       keywords: value.keywords,
       minimumConfidence: value.minimumConfidence,
       minPrice: value.minPrice,
@@ -1080,7 +1110,7 @@ function PolicyPage() {
   if (policyQuery.isPending) return <LoadingPanel label="Membaca kebijakan autopilot..." />;
   if (policyQuery.isError) return <ErrorNotice message="Kebijakan belum dapat dimuat." onRetry={() => policyQuery.refetch()} />;
   const policy = draft ?? policyQuery.data;
-  const projectsSettings = policy.projectsCoId ?? PROJECTS_CO_ID_DEFAULTS;
+  const projectsSettings = projectsCoIdSettings(policy);
   const setProjectsSettings = (patch: Partial<typeof projectsSettings>) => setDraft({ ...policy, projectsCoId: { ...projectsSettings, ...patch } });
   const autopilot = autopilotQuery.isError ? undefined : autopilotQuery.data;
   const setList = (key: 'keywords' | 'noNegotiationTerms', value: string) => { setListText({ ...listText, [key]: value }); setDraft({ ...policy, [key]: [...new Map(value.split(/[,\n]/).map((item) => item.trim()).filter(Boolean).map((item) => [item.toLowerCase(), item])).values()] }); };
@@ -1112,14 +1142,22 @@ function PolicyPage() {
           <label className="form-field"><span>Kata kunci proyek ({policy.keywords.length}/300)</span><textarea rows={6} value={listText.keywords ?? policy.keywords.join(', ')} onChange={(event) => setList('keywords', event.target.value)} placeholder="Python, Laravel, API" /><small>Pisahkan dengan koma atau baris baru. Minimal satu kata cocok; kosong berarti tanpa filter kata kunci.</small></label>
           <details className="keyword-catalog"><summary>Tambahkan katalog coding</summary>{presets.isError ? <ErrorNotice message="Katalog tidak dapat dimuat." onRetry={() => presets.refetch()} /> : <><p className="form-help">Pilih bidang yang relevan atau seluruh katalog. Kata kunci tidak menambahkan klaim keahlian ke profil.</p><div className="form-actions"><button className="button button-secondary" type="button" disabled={!presets.data} onClick={() => setList('keywords', [...policy.keywords, ...(presets.data?.keywords ?? [])].join(', '))}>Tambahkan seluruh katalog ({presets.data?.keywords.length ?? '…'})</button>{presets.data?.groups.map((group) => <button className="button button-secondary" type="button" key={group.id} onClick={() => setList('keywords', [...policy.keywords, ...group.keywords].join(', '))}>{group.label} ({group.keywords.length})</button>)}</div></>}</details>
           <label className="form-field"><span>Istilah non-negosiasi</span><input value={listText.noNegotiationTerms ?? policy.noNegotiationTerms.join(', ')} onChange={(event) => setList('noNegotiationTerms', event.target.value)} placeholder="pembayaran di muka, onsite" /></label>
-          <fieldset className="projects-policy-fields"><legend>projects.co.id: draf lokal dalam Rupiah</legend>
+          <fieldset className="projects-policy-fields" id="projects-co-id-policy"><legend>projects.co.id: pencarian dan draf lokal dalam Rupiah</legend>
             <p className="form-help">Akun {projectsSettings.username}. Mode diatur di <Link to="/projects-co-id">kartu projects.co.id</Link>. Kuota ini membatasi draf otomatis, terpisah dari bid Freelancer. Menyimpan tidak mengubah status aktif atau jeda kebijakan.</p>
             <div className="form-grid">
               <label className="form-field"><span>Harga minimum IDR</span><NumField min="1" step="1000" value={projectsSettings.minPrice} onChange={value => setProjectsSettings({ minPrice: value })} /></label>
               <label className="form-field"><span>Harga maksimum IDR</span><NumField min="1" step="1000" value={projectsSettings.maxPrice} onChange={value => setProjectsSettings({ maxPrice: value })} /></label>
               <label className="form-field"><span>Draf otomatis / hari</span><NumField min="0" max="50" value={projectsSettings.dailyBidLimit} onChange={value => setProjectsSettings({ dailyBidLimit: value })} /></label>
               <label className="form-field"><span>Draf otomatis / minggu</span><NumField min="0" max="200" value={projectsSettings.weeklyBidLimit} onChange={value => setProjectsSettings({ weeklyBidLimit: value })} /></label>
+              <label className="form-field"><span>Skor minimum untuk draf (%)</span><NumField min="0" max="100" step="1" value={projectsSettings.minimumScore} onChange={value => setProjectsSettings({ minimumScore: value })} /></label>
             </div>
+            <fieldset className="projects-field-options"><legend>Bidang yang dicari</legend>
+              <p className="form-help">Setiap bidang menambah istilah pencarian di projects.co.id. Tanpa bidang, kata kunci dan skill profil, Scout membaca daftar proyek terbaru.</p>
+              {PROJECTS_CO_ID_FIELDS.map(field => <label className="check-row" key={field.id}><input type="checkbox" checked={projectsSettings.fields.includes(field.id)} onChange={event => setProjectsSettings({ fields: event.target.checked ? [...projectsSettings.fields, field.id] : projectsSettings.fields.filter(id => id !== field.id) })} /><span>{field.label} <small>({field.terms.join(', ')})</small></span></label>)}
+            </fieldset>
+            <label className="form-field"><span>Kata kunci tambahan projects.co.id ({projectsSettings.keywords.length}/20)</span><textarea rows={3} value={listText.projectsKeywords ?? projectsSettings.keywords.join(', ')} onChange={event => { setListText({ ...listText, projectsKeywords: event.target.value }); setProjectsSettings({ keywords: [...new Map(event.target.value.split(/[,\n]/).map(item => item.trim()).filter(Boolean).map(item => [item.toLowerCase(), item])).values()] }); }} placeholder="Laravel, scraping, dashboard" /><small>Huruf, angka, spasi dan . + # / - saja; maksimal 40 karakter per kata kunci.</small></label>
+            <label className="check-row"><input type="checkbox" checked={projectsSettings.useProfileSkills} onChange={event => setProjectsSettings({ useProfileSkills: event.target.checked })} /><span>Pakai spesialisasi <Link to="/profile">Profil</Link> sebagai pencarian ({policy.specializations.join(', ') || 'belum ada'})</span></label>
+            <p className="form-help">Setiap pemindaian membuka paling banyak tiga pencarian; istilah lain dipakai bergiliran pada pemindaian berikutnya.</p>
           </fieldset>
           <label className="check-row"><input type="checkbox" checked={extendValidity} onChange={(event) => setExtendValidity(event.target.checked)} /><span>Perbarui masa berlaku saat disimpan</span></label>{extendValidity && <label className="form-field"><span>Berlaku sejak sekarang (hari)</span><NumField min="1" max="365" value={validityDays} onChange={setValidityDays} /></label>}
           <div className="form-actions"><button className="button button-primary" type="submit" disabled={(!draft && !extendValidity) || save.isPending}>{save.isPending ? 'Menyimpan...' : 'Simpan kebijakan ke Supabase'}</button><button className="button button-secondary" type="button" disabled={activate.isPending || policy.state !== 'draft' || !!draft} onClick={() => activate.mutate('simulation')}>Aktifkan simulasi lokal</button>{(policy.state === 'draft' || policy.simulationOnly) && <button className="button button-primary" type="button" disabled={activate.isPending || policy.state === 'paused' || !!draft} onClick={() => activate.mutate('live')}>Aktifkan bid live sesuai batas tersimpan</button>}{(draft || extendValidity) && <button className="button button-text" type="button" onClick={() => { setDraft(null); setListText({}); setExtendValidity(false); }}>Batalkan perubahan</button>}</div>
@@ -1245,12 +1283,15 @@ function KnowledgePage() {
 function ActivityPage() {
   const [limit, setLimit] = useState(100);
   const [filter, setFilter] = useState<'all' | 'allowed' | 'blocked' | 'recorded' | 'failed'>('all');
-  const [search, setSearch] = useState('');
+  const [source, setSource] = useSourceFilter();
+  const [search, setSearch] = useState(() => new URLSearchParams(window.location.search).get('q') ?? '');
   const query = useQuery({ queryKey: ['activity', limit], queryFn: () => api<AuditEvent[]>('/activity?limit=' + limit) });
   if (query.isPending) return <LoadingPanel label="Membaca jejak aktivitas..." />;
   if (query.isError) return <ErrorNotice message="Log aktivitas belum dapat dimuat." onRetry={() => query.refetch()} />;
 
+  const fromProjectsCoId = (e: AuditEvent) => e.type.startsWith('projects_co_id.') || e.resourceId.startsWith('projects_co_id');
   const filteredEvents = query.data.filter((e) => {
+    if (source !== 'all' && fromProjectsCoId(e) !== (source === 'projects_co_id')) return false;
     if (filter !== 'all' && e.status !== filter) return false;
     if (!search.trim()) return true;
     const q = search.toLowerCase();
@@ -1266,7 +1307,7 @@ function ActivityPage() {
       <button type="button" aria-pressed={filter === 'recorded'} className={`filter-tab ${filter === 'recorded' ? 'active' : ''}`} onClick={() => setFilter('recorded')}>Tercatat ({query.data.filter((e) => e.status === 'recorded').length})</button>
       <button type="button" aria-pressed={filter === 'failed'} className={`filter-tab ${filter === 'failed' ? 'active' : ''}`} onClick={() => setFilter('failed')}>Gagal ({query.data.filter((e) => e.status === 'failed').length})</button>
     </div>
-    <label className="search-field activity-search"><span>Cari jejak aktivitas</span><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Alasan, tipe, atau resource ID" /></label>
+    <div className="form-grid"><label className="search-field activity-search"><span>Cari jejak aktivitas</span><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Alasan, tipe, atau resource ID" /></label><SourceSelect value={source} onChange={setSource} labels={{ freelancer: 'Freelancer & sistem' }} /></div>
     <p className="form-help" role="status">{filteredEvents.length} dari {query.data.length} catatan ditampilkan.</p>
     <section className="activity-section">
       <ActivityRows events={filteredEvents} />
@@ -1955,7 +1996,7 @@ function InboxPage() {
   </>;
 }
 
-const SOURCE_LABELS: Record<ClientProject['source'], string> = { freelancer: 'Freelancer', direct: 'Langsung', linkedin: 'LinkedIn', other: 'Lainnya' };
+const SOURCE_LABELS: Record<ClientProject['source'], string> = { freelancer: 'Freelancer', direct: 'Langsung', linkedin: 'LinkedIn', projects_co_id: 'projects.co.id', other: 'Lainnya' };
 
 function deadlineLabel(days: number | null) {
   if (days === null) return 'Tanpa tenggat';

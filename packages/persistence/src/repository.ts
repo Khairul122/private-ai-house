@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { AuditEvent, AutonomyPolicy, BidDraft, PipelineStatus, ProjectOpportunity } from '@fvh/domain';
-import { chooseProjectsCoIdBid, evaluatePolicy, PROJECTS_CO_ID_DEFAULTS, projectsCoIdDraftPolicy } from '@fvh/domain';
+import { chooseProjectsCoIdBid, evaluatePolicy, projectsCoIdDraftPolicy, projectsCoIdSettings } from '@fvh/domain';
 import type { KnowledgeChunk, KnowledgeProvider } from '@fvh/knowledge';
 import { createDatabase, type Database, type Queryable } from './database.js';
 
@@ -28,7 +28,7 @@ export type BidOutcome = {
 
 export type SkipReasonSummary = { reason: string; total: number; recent: number };
 export type ClientThread = { threadId: string; projectId: string | null; lastSenderId: string; lastMessageAt: string; preview: string; syncedAt: string };
-export type ClientProjectSource = 'freelancer' | 'direct' | 'linkedin' | 'other';
+export type ClientProjectSource = 'freelancer' | 'direct' | 'linkedin' | 'projects_co_id' | 'other';
 export type ClientProjectStatus = 'active' | 'delivered' | 'closed';
 export type ClientProject = {
   id: string; title: string; client: string; source: ClientProjectSource; externalProjectId: string | null;
@@ -194,7 +194,7 @@ export class WorkspaceRepository {
     return this.database.transaction(async tx => {
       const [row] = await tx.query<{ policy_json: string }>('SELECT policy_json FROM autonomy_policies WHERE workspace_id = $1 FOR UPDATE', [WORKSPACE_ID]);
       const policy = parseJson<AutonomyPolicy>(row!.policy_json);
-      const settings = policy.projectsCoId ?? PROJECTS_CO_ID_DEFAULTS;
+      const settings = projectsCoIdSettings(policy);
       if (policy.version !== policyVersion || settings.mode === 'off' || (automatic && settings.mode !== 'drafts')) throw new Error('Kebijakan berubah; draf tidak disimpan.');
       const [stored] = await tx.query<{ project_json: string; pipeline_status: PipelineStatus }>('SELECT project_json, pipeline_status FROM projects WHERE id = $1 FOR UPDATE', [draft.projectId]);
       if (!stored || !['new', 'scored'].includes(stored.pipeline_status) || (await tx.query('SELECT 1 FROM bid_drafts WHERE project_id = $1 LIMIT 1', [draft.projectId])).length) throw new Error('Proyek sudah diproses atau sudah memiliki draf.');
@@ -214,13 +214,30 @@ export class WorkspaceRepository {
     });
   }
 
-  async markProjectsCoIdProject(id: string, action: 'mark-sent' | 'skip') {
+  async markProjectsCoIdProject(id: string, action: 'mark-sent' | 'skip' | 'won') {
     return this.database.transaction(async tx => {
-      const [row] = await tx.query<{ pipeline_status: PipelineStatus }>("SELECT pipeline_status FROM projects WHERE id = $1 AND platform = 'projects_co_id' FOR UPDATE", [id]);
+      const [row] = await tx.query<{ pipeline_status: PipelineStatus; project_json: string }>("SELECT pipeline_status, project_json FROM projects WHERE id = $1 AND platform = 'projects_co_id' FOR UPDATE", [id]);
       if (!row) throw new Error('Proyek projects.co.id tidak ditemukan.');
+      if (action === 'won') {
+        if (row.pipeline_status === 'won') return;
+        if (row.pipeline_status !== 'submitted') throw new Error('Tandai terkirim sebelum menandai menang.');
+        const [draftRow] = await tx.query<{ draft_json: string }>('SELECT draft_json FROM bid_drafts WHERE project_id = $1 ORDER BY created_at DESC LIMIT 1', [id]);
+        const draft = parseJson<BidDraft>(draftRow!.draft_json);
+        const project = parseJson<ProjectOpportunity>(row.project_json);
+        const now = new Date();
+        const deadline = new Date(now.getTime() + draft.durationDays * 86_400_000).toISOString().slice(0, 10);
+        await tx.query('UPDATE projects SET pipeline_status = $1 WHERE id = $2', ['won', id]);
+        await tx.query(`INSERT INTO client_projects (id, title, client, source, external_project_id, status, deadline, value, currency, created_at)
+          VALUES ($1, $2, $3, 'projects_co_id', $4, 'active', $5, $6, 'IDR', $7) ON CONFLICT DO NOTHING`,
+        [randomUUID(), project.title.slice(0, 150), project.clientName.slice(0, 120), id, deadline, draft.proposedPrice, now.toISOString()]);
+        await tx.query(`INSERT INTO audit_events (id, type, resource_id, status, reason, policy_version, payload_hash, created_at)
+          VALUES ($1, 'projects_co_id.owner_marked_won', $2, 'recorded', $3, NULL, NULL, $4)`,
+        [randomUUID(), id, 'Ditandai menang oleh pemilik; proyek aktif dibuat dengan nilai draf. Tidak diverifikasi aplikasi.', now.toISOString()]);
+        return;
+      }
       const target = action === 'mark-sent' ? 'submitted' : 'skipped';
       if (row.pipeline_status === target) return;
-      if (['submitted', 'skipped'].includes(row.pipeline_status)) throw new Error('Proyek sudah ditandai selesai.');
+      if (['submitted', 'skipped', 'won'].includes(row.pipeline_status)) throw new Error('Proyek sudah ditandai selesai.');
       if (action === 'mark-sent' && !(await tx.query('SELECT 1 FROM bid_drafts WHERE project_id = $1 LIMIT 1', [id])).length) throw new Error('Buat draf sebelum menandai terkirim.');
       await tx.query('UPDATE projects SET pipeline_status = $1 WHERE id = $2', [target, id]);
       await tx.query(`INSERT INTO audit_events (id, type, resource_id, status, reason, policy_version, payload_hash, created_at)

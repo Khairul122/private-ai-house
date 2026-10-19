@@ -93,4 +93,24 @@ describe('projects.co.id draft worker', () => {
     expect((await repo.listProjects()).filter(p => p.pipelineStatus === 'draft_ready')).toHaveLength(1);
     expect(await repo.bidUsage(new Date(), 'Asia/Jakarta', 'projects_co_id.draft_created')).toEqual({ today: 1, week: 1 });
   });
+  it('rotates three searches per scan through all configured terms and records who wrote the draft', async () => {
+    await repo.savePolicy({ ...await repo.getPolicy(), projectsCoId: { ...PROJECTS_CO_ID_DEFAULTS, mode: 'drafts', fields: ['ai'], useProfileSkills: false } });
+    await service.open(); await service.scan();
+    expect(driver.listOpenProjects.mock.calls[0]![2]).toEqual(['AI', 'Machine Learning', 'Chatbot']);
+    expect((await service.status()).lastSearchTerms).toEqual(['AI', 'Machine Learning', 'Chatbot']);
+    await service.check(); await service.scan();
+    expect(driver.listOpenProjects.mock.calls[1]![2]).toEqual(['OpenAI', 'LLM', 'AI']);
+    expect((await repo.getLatestDraft(project().id))?.author).toBe('hermes');
+    draft.mockRejectedValueOnce(new Error('timeout')); driver.listOpenProjects.mockResolvedValue([project('556012')]);
+    await service.check(); await service.scan();
+    expect((await repo.getLatestDraft(project('556012').id))?.author).toBe('template');
+  });
+  it('marks won only after sent, and creates one active IDR project from the draft', async () => {
+    await service.open(); await service.scan();
+    await expect(service.ownerAction(project().id, 'won')).rejects.toThrow(/terkirim/);
+    await service.ownerAction(project().id, 'mark-sent'); await service.ownerAction(project().id, 'won'); await service.ownerAction(project().id, 'won');
+    expect(await repo.listClientProjects()).toEqual([expect.objectContaining({ source: 'projects_co_id', externalProjectId: project().id, value: 500_000, currency: 'IDR', status: 'active' })]);
+    expect((await service.drafts())[0]?.pipelineStatus).toBe('won');
+    await expect(service.ownerAction(project().id, 'mark-sent')).rejects.toThrow();
+  });
 });

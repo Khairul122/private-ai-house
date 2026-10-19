@@ -82,6 +82,8 @@ export type Opportunity = {
   riskScore: number;
   status: 'open' | 'closed' | 'expired';
   source: 'fixture' | 'freelancer' | 'projects_co_id';
+  createdAt?: string;
+  closesAt?: string | null;
   pipelineStatus: string;
   score: number;
   factors: Array<{ key: string; label: string; points: number; value: string }>;
@@ -114,6 +116,7 @@ export type BidDraft = {
   assumptions: string[];
   status: 'draft_ready';
   createdAt: string;
+  author?: 'hermes' | 'template';
 };
 
 export type AuditEvent = {
@@ -155,7 +158,7 @@ export type Inbox = {
 };
 
 export type ClientProject = {
-  id: string; title: string; client: string; source: 'freelancer' | 'direct' | 'linkedin' | 'other'; externalProjectId: string | null;
+  id: string; title: string; client: string; source: 'freelancer' | 'direct' | 'linkedin' | 'projects_co_id' | 'other'; externalProjectId: string | null;
   status: 'active' | 'delivered' | 'closed'; deadline: string | null; value: number | null; currency: string; createdAt: string; daysToDeadline: number | null;
 };
 

@@ -15,6 +15,10 @@ export type ProjectsCoIdStatus = {
   pageStatus: number | null;
   lastScanAt: string | null;
   lastResult: { imported: number; at: string } | null;
+  /** Searches used by the last scan; empty means the unfiltered newest listing. */
+  lastSearchTerms: string[];
+  /** All terms from Kebijakan fields, keywords and (optionally) profile skills. */
+  searchTerms: string[];
   autoAvailable: false;
   draftsInProgress: number;
   projectCount: number;
@@ -83,7 +87,7 @@ export function parseProjectsCoIdProject(item: ProjectsCoIdListing, now: Date, o
     // These are brief heuristics, never an assertion about the owner's reputation.
     briefQuality: Math.min(1, 0.25 + Math.min(item.description.length / 1200, 0.55) + Math.min(item.skills.length / 10, 0.2)),
     riskScore: Math.min(1, (item.description.length < 160 ? 0.3 : 0) + (deadlineDays === 0 ? 0.1 : 0) + (/crypto|gambling|adult|akun|account|adsense|godev/i.test(item.title + ' ' + item.description) ? 0.35 : 0)),
-    sourceSlug: path![2],
+    sourceSlug: path![2], closesAt: deadline?.toISOString() ?? null,
     status: deadlineDays !== null && deadlineDays < 0 ? 'expired' : status === 'Published' ? 'open' : 'closed', source: 'projects_co_id', createdAt: published.toISOString(),
   };
 }
