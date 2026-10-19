@@ -35,15 +35,21 @@ function toTask(raw: z.infer<typeof taskRow>): HermesKanbanTask {
 
 export class HermesKanban {
   private cached: { at: number; value: Promise<HermesKanbanStatus> } | null = null;
+  private last: HermesKanbanStatus | null = null;
   constructor(private readonly run: HermesKanbanRunner, private readonly now: () => Date = () => new Date()) {}
 
-  /** Board snapshot, cached briefly because each call starts a Hermes process. */
+  /**
+   * Board snapshot. Each read starts two Hermes processes (~10 s), so after the first read the last
+   * snapshot is served at once while a refresh runs; `checkedAt` tells the reader how old it is.
+   */
   status(): Promise<HermesKanbanStatus> {
     const at = this.now().getTime();
-    if (this.cached && at - this.cached.at < 30_000) return this.cached.value;
-    const value = this.read();
-    this.cached = { at, value };
-    return value;
+    if (!this.cached || at - this.cached.at >= 30_000) {
+      const value = this.read();
+      this.cached = { at, value };
+      void value.then(result => { this.last = result; });
+    }
+    return this.last ? Promise.resolve(this.last) : this.cached.value;
   }
 
   private async read(): Promise<HermesKanbanStatus> {
@@ -54,7 +60,6 @@ export class HermesKanban {
       const team = z.array(z.object({ name: z.string() }).passthrough()).parse(JSON.parse(assignees)).map(a => a.name).filter(name => name.startsWith(TEAM_PREFIX)).sort();
       return { available: true, reason: team.length ? `${team.length} karyawan di board ${HERMES_BOARD}.` : 'Tim Hermes belum dibuat. Jalankan scripts/hermes-team.ts.', board: HERMES_BOARD, checkedAt, team, tasks };
     } catch {
-      this.cached = null;
       return { available: false, reason: 'Kanban Hermes tidak dapat dibaca. Periksa instalasi Hermes dan board fvh-house.', board: HERMES_BOARD, checkedAt, team: [], tasks: [] };
     }
   }
@@ -80,6 +85,7 @@ export class HermesKanban {
       // A runtime cap keeps a stuck worker from holding a card (and model quota) indefinitely.
       const created = taskRow.parse(JSON.parse(await this.run(['create', input.title, '--body-file', bodyPath, '--assignee', input.assignee, '--created-by', 'mission-control', '--max-runtime', '30m', '--idempotency-key', input.key, '--json'])));
       this.cached = null;
+      this.last = null;
       return toTask(created);
     } finally {
       await rm(directory, { recursive: true, force: true });

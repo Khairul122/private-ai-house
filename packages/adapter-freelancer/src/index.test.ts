@@ -73,12 +73,14 @@ describe('FreelancerReadAdapter', () => {
         {
           id: 839101, title: 'Build a TypeScript API', description: '<p>Inventory endpoints with pagination.</p>',
           budget: { minimum: 300, maximum: 600, currency_code: 'USD' },
-          job_details: [{ name: 'TypeScript' }, { name: 'API' }], user_details: { username: 'buyer' },
+          job_details: [{ name: 'TypeScript' }, { name: 'API' }], owner_id: 5512309,
           time_submitted: 1_791_936_000, time_expire: 1_793_232_000,
         },
         { id: '839102', description: 'Missing title' },
         null,
-      ] } });
+      ], users: {
+        '5512309': { id: 5512309, username: 'buyer', display_name: 'Buyer Co.', location: { city: 'Austin', country: { name: 'United States', code: 'us' } } },
+      } } });
     });
     const adapter = new FreelancerReadAdapter({ token: 'test-token-value-1234', fetcher, now: () => new Date('2026-10-14T00:00:00.000Z') });
 
@@ -89,9 +91,26 @@ describe('FreelancerReadAdapter', () => {
     expect(parsedUrl.pathname).toBe('/api/projects/0.1/projects/active/');
     expect(parsedUrl.searchParams.get('query')).toBe('TypeScript & API');
     expect(parsedUrl.searchParams.get('limit')).toBe('12');
+    expect(parsedUrl.searchParams.get('user_details')).toBe('true');
+    expect(parsedUrl.searchParams.get('user_country_details')).toBe('true');
     expect(init).toMatchObject({ method: 'GET' });
-    expect(result).toMatchObject({ skipped: 2, projects: [{ id: 'freelancer:839101', title: 'Build a TypeScript API', clientName: 'buyer', budgetMin: 300, budgetMax: 600, currency: 'USD', skills: ['TypeScript', 'API'], source: 'freelancer' }] });
+    expect(result).toMatchObject({ skipped: 2, projects: [{ id: 'freelancer:839101', title: 'Build a TypeScript API', clientName: 'Buyer Co.', clientCountry: 'United States', budgetMin: 300, budgetMax: 600, currency: 'USD', skills: ['TypeScript', 'API'], source: 'freelancer' }] });
     expect(result.projects[0]?.deadlineDays).toBeGreaterThan(0);
+  });
+
+  it('falls back to "Tidak tersedia" when the owner is missing from the users map', async () => {
+    const adapter = new FreelancerReadAdapter({
+      token: 'test-token-value-1234',
+      fetcher: async () => jsonResponse({ result: {
+        projects: [{ id: 839104, title: 'Owner not returned', owner_id: 7700001 }],
+        users: { '5512309': { id: 5512309, username: 'someone-else' } },
+      } }),
+      now: () => new Date('2026-10-14T00:00:00.000Z'),
+    });
+
+    const result = await adapter.searchActiveProjects('TypeScript');
+
+    expect(result.projects[0]).toMatchObject({ clientName: 'Tidak tersedia', clientCountry: null });
   });
 
   it('does not mistake free-bid expiration for a project deadline', async () => {

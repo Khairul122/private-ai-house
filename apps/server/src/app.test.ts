@@ -208,6 +208,23 @@ describe('local API', () => {
     expect(settings.json().capabilities.freelancer).toMatchObject({ writes: 'partial', writeOperations: { submit_bid: 'supported', edit_profile: 'unknown', send_message: 'unknown' } });
   });
 
+  it('keeps an older production HTTP 200 behind newer quota failures and a busy audit log', async () => {
+    await repository.appendAudit({ type: 'marketplace.production.submit_bid', resourceId: 'freelancer:71', status: 'recorded', createdAt: '2026-10-13T01:00:00.000Z', reason: 'Bid otomatis melalui API menghasilkan HTTP 200. ID hasil: 9001. Isi proposal tidak disimpan pada audit.', policyVersion: 2, payloadHash: null });
+    await repository.appendAudit({ type: 'marketplace.production.edit_profile', resourceId: 'freelancer-profile-sync', status: 'recorded', createdAt: '2026-10-12T01:00:00.000Z', reason: 'Sinkronisasi idempotent daftar job profil menghasilkan HTTP 200; daftar yang sama dengan profil saat dibaca dikirim ulang.', policyVersion: 2, payloadHash: null });
+    await repository.sql.query(`INSERT INTO audit_events (id, type, resource_id, status, reason, created_at)
+      SELECT 'skip-' || n, 'autopilot.bid_skipped', 'p' || n, 'blocked', 'daily_limit_reached', '2026-10-13T02:00:00.' || lpad(n::text, 3, '0') || 'Z' FROM generate_series(1, 1100) AS n`);
+    await repository.appendAudit({ type: 'marketplace.production.submit_bid', resourceId: 'freelancer:72', status: 'allowed', createdAt: '2026-10-14T03:00:00.000Z', reason: 'Bid live sedang dikirim oleh autopilot.', policyVersion: 2, payloadHash: null });
+    await repository.appendAudit({ type: 'marketplace.production.submit_bid', resourceId: 'freelancer:72', status: 'failed', createdAt: '2026-10-14T03:00:01.000Z', reason: 'Bid otomatis menghasilkan HTTP 400. production Freelancer mengembalikan HTTP 400: ProjectExceptionCodes.BID_LIMIT_EXCEEDED: You have used all of your bids.', policyVersion: 2, payloadHash: null });
+
+    const marketplace = (await app.inject({ method: 'GET', url: '/api/capabilities' })).json().marketplace as Array<{ operation: string; status: string; evidence: string }>;
+    const bid = marketplace.find((item) => item.operation === 'submit_bid');
+
+    expect(bid).toMatchObject({ status: 'supported', productionVerification: { statusCode: 200, resultId: '9001', lastFailure: { statusCode: 400, errorCode: 'BID_LIMIT_EXCEEDED' } } });
+    expect(bid?.evidence).toContain('kuota bid akun habis');
+    expect(marketplace.find((item) => item.operation === 'edit_profile')?.status).toBe('supported');
+    expect(marketplace.find((item) => item.operation === 'send_message')?.status).toBe('unknown');
+  });
+
   it('requires the dedicated sandbox token and exposes provider failures without promoting the capability', async () => {
     const verifySandboxWrite = vi.fn(async () => { throw new FreelancerSandboxWriteError(403, 'denied'); });
     const noTokenApp = await createApp({ verifyFreelancerSandboxWrite: verifySandboxWrite });

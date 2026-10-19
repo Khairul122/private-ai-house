@@ -145,7 +145,7 @@ function dateCreated(project: JsonRecord, now: Date): string {
   return now.toISOString();
 }
 
-function normalizeProject(project: JsonRecord, now: Date): ProjectOpportunity | undefined {
+function normalizeProject(project: JsonRecord, now: Date, users: JsonRecord = {}): ProjectOpportunity | undefined {
   const externalId = identifier(project.id);
   const title = text(project.title);
   if (!externalId || !title) return undefined;
@@ -159,8 +159,11 @@ function normalizeProject(project: JsonRecord, now: Date): ProjectOpportunity | 
   const projectType = rawProjectType?.includes('hour') ? 'hourly' : rawProjectType?.includes('fixed') ? 'fixed' : 'unknown';
   const description = text(project.description) ?? text(project.full_description) ?? '';
   const skills = skillNames(project);
-  const owner = isRecord(project.owner) ? project.owner : isRecord(project.user_details) ? project.user_details : {};
-  const clientName = text(owner.display_name) ?? text(owner.username) ?? text(owner.public_name) ?? 'Klien Freelancer';
+  // Search results carry only owner_id; the owner itself sits in result.users keyed by that id.
+  const ownerId = identifier(project.owner_id);
+  const listedOwner = ownerId ? users[ownerId] : undefined;
+  const owner = isRecord(listedOwner) ? listedOwner : isRecord(project.owner) ? project.owner : isRecord(project.user_details) ? project.user_details : {};
+  const clientName = text(owner.display_name) ?? text(owner.username) ?? text(owner.public_name) ?? 'Tidak tersedia';
   const ownerCountryDetails = isRecord(owner.country) ? owner.country : {};
   const ownerCountry = text(ownerCountryDetails.name) ?? text(ownerCountryDetails.code) ?? text(ownerCountryDetails.iso_code) ?? text(owner.country);
   const ownerLocation = isRecord(owner.location) ? owner.location : {};
@@ -419,12 +422,14 @@ export class FreelancerReadAdapter {
       full_description: 'true',
       job_details: 'true',
       user_details: 'true',
+      user_country_details: 'true',
     }).toString();
     const response = await this.request(url);
     const result = resultRecord(await response.json());
     const records = projectsFromResult(result);
     if (!records) throw new FreelancerReadError('invalid_response', 'Respons proyek Freelancer tidak memiliki daftar proyek yang dapat dibaca.');
-    const normalized = records.filter(isRecord).map((project) => normalizeProject(project, this.now())).filter((project): project is ProjectOpportunity => Boolean(project));
+    const users = isRecord(result.users) ? result.users : {};
+    const normalized = records.filter(isRecord).map((project) => normalizeProject(project, this.now(), users)).filter((project): project is ProjectOpportunity => Boolean(project));
     return { projects: normalized, skipped: records.length - normalized.length };
   }
 

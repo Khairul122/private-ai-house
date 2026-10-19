@@ -444,8 +444,8 @@ export class WorkspaceRepository {
       FROM audit_events WHERE type = 'autopilot.bid_skipped' GROUP BY reason ORDER BY total DESC`, [sinceIso]));
   }
 
-  async countAuditByStatus(status: AuditEvent['status']): Promise<number> {
-    const [row] = await this.database.query<{ total: number }>('SELECT COUNT(*)::int AS total FROM audit_events WHERE status = $1', [status]);
+  async countAuditByStatus(status: AuditEvent['status'], excludeTypes: string[] = []): Promise<number> {
+    const [row] = await this.database.query<{ total: number }>('SELECT COUNT(*)::int AS total FROM audit_events WHERE status = $1 AND NOT (type = ANY($2::text[]))', [status, excludeTypes]);
     return row!.total;
   }
 

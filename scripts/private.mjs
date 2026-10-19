@@ -87,13 +87,25 @@ async function stop() {
   console.log(stillRunning ? 'Sebagian layanan masih berjalan; tutup terminal `pnpm dev` secara manual.' : 'Mission Control dihentikan.');
 }
 
+// Production restarts the API after an unexpected exit; more than 5 crashes in 10 minutes means a real fault, so it stops.
 function supervise() {
   const log = createWriteStream(logFile);
   const [command, args] = pnpm(dev ? 'dev' : '--filter @fvh/server start');
-  const child = spawn(command, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, FORCE_COLOR: '0', ...(dev ? {} : { NODE_ENV: 'production' }) } });
-  child.stdout.pipe(log);
-  child.stderr.pipe(log);
-  child.on('exit', (code) => { log.end(`\nMission Control berhenti (kode ${code ?? 'sinyal'}).\n`); });
+  const crashes = [];
+  const run = () => {
+    const child = spawn(command, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, FORCE_COLOR: '0', ...(dev ? {} : { NODE_ENV: 'production' }) } });
+    child.stdout.pipe(log, { end: false });
+    child.stderr.pipe(log, { end: false });
+    child.on('exit', (code) => {
+      const now = Date.now();
+      while (crashes.length && now - crashes[0] > 10 * 60_000) crashes.shift();
+      crashes.push(now);
+      if (dev || code === 0 || crashes.length > 5) return log.end(`\nMission Control berhenti (kode ${code ?? 'sinyal'}).\n`);
+      log.write(`\nMission Control berhenti tak terduga (kode ${code ?? 'sinyal'}); dijalankan ulang dalam 5 detik.\n`);
+      setTimeout(run, 5000);
+    });
+  };
+  run();
 }
 
 const command = process.argv[2];

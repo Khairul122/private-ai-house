@@ -30,6 +30,20 @@ describe('Hermes kanban', () => {
     expect(calls).toHaveLength(2);
   });
 
+  it('serves the last snapshot at once while refreshing, and drops it after a new card', async () => {
+    const calls: string[][] = [];
+    let clock = Date.parse('2026-10-20T00:00:00Z');
+    const kanban = new HermesKanban(fakeRunner(calls), () => new Date(clock));
+    const first = await kanban.status();
+    clock += 31_000;
+    const stale = await kanban.status();
+    expect(stale.checkedAt).toBe(first.checkedAt);
+    expect(calls.filter(args => args[0] === 'list')).toHaveLength(2);
+    await kanban.create({ title: 'Tes', body: 'x', assignee: 'fvh-market-scout', key: 'k' });
+    clock += 1_000;
+    expect((await kanban.status()).checkedAt).toBe('2026-10-20T00:00:32.000Z');
+  });
+
   it('reports unavailable instead of stale or invented cards when Hermes fails', async () => {
     const kanban = new HermesKanban(async () => { throw new Error('no hermes'); });
     expect(await kanban.status()).toMatchObject({ available: false, tasks: [], team: [] });

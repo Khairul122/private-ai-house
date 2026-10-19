@@ -120,11 +120,12 @@ const whatsapp = new WhatsAppService(integrationVault);
 const googleCalendar = new GoogleCalendarService(integrationVault,new OperationsRepository(repository.sql));
 const operations = new OperationsService({repository,messenger:whatsapp,calendar:googleCalendar,...(drafting?{review:(facts:string[])=>drafting.reviewOperations(facts)}:{})});
 const hasWebBuild = existsSync(webBuild);
+const hermesKanban = hermesEnabled ? new HermesKanban(hermesKanbanRunner(draftingConfig.executable)) : undefined;
 const app = await createApp({
   publicPortfolio:(evidence)=>portfolio.select(evidence),
   operations,whatsapp,googleCalendar,browserBidding,projectsCoId,
   // Cards carry stored app data to the Hermes team, so they follow the same consent as drafting.
-  ...(hermesEnabled ? { hermesKanban: new HermesKanban(hermesKanbanRunner(draftingConfig.executable)) } : {}),
+  ...(hermesKanban ? { hermesKanban } : {}),
   repository,
   getGitHubToken: () => readGitHubEnvironment(projectRoot).token ?? undefined,
   getCredentialStatus: () => {
@@ -212,13 +213,17 @@ app.addHook('onClose',async()=>{autopilot.stop();whatsapp.close();await browserB
 if (!['127.0.0.1', 'localhost', '::1'].includes(host)) throw new Error('FVH_HOST must stay on loopback for the local single-user app.');
 await app.listen({ host, port });
 app.log.info({ host, port }, 'Freelancer Virtual House API is ready');
+// A failing integration (e.g. a dropped Supabase connection) must neither crash the API nor stop the later steps.
+const startupStep = (name: string, run: () => unknown) => Promise.resolve().then(run)
+  .catch((error: unknown) => console.error(`Langkah start "${name}" gagal: ${error instanceof Error ? error.message : 'tidak diketahui'}`));
 void (async () => {
-  await app.inject({ method: 'POST', url: '/api/freelancer/verify' });
-  businessSync.start();
-  await browserBidding.restore();
-  await projectsCoId.restore();
-  await googleCalendar.restore().catch(()=>undefined);
-  await whatsapp.restore().catch(()=>undefined);
-  await operations.start();
+  void hermesKanban?.status(); // warm the ~10 s first read so the office does not wait on it
+  await startupStep('freelancer-verify', () => app.inject({ method: 'POST', url: '/api/freelancer/verify' }));
+  await startupStep('business-sync', () => businessSync.start());
+  await startupStep('browser-bidding', () => browserBidding.restore());
+  await startupStep('projects-co-id', () => projectsCoId.restore());
+  await startupStep('google-calendar', () => googleCalendar.restore());
+  await startupStep('whatsapp', () => whatsapp.restore());
+  await startupStep('operations', () => operations.start());
   void autopilot.start();
 })();

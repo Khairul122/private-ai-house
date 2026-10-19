@@ -85,7 +85,7 @@ export class BusinessSync {
         if (outcome === 'won') {
           const project = await repository.getProject(previous.projectId);
           const created = await repository.createClientProject({
-            title: project?.title ?? 'Proyek Freelancer', client: project?.clientName ?? 'Klien Freelancer', source: 'freelancer',
+            title: project?.title ?? 'Proyek Freelancer', client: project?.clientName ?? 'Tidak tersedia', source: 'freelancer',
             externalProjectId: previous.projectId, status: 'active', deadline: null, value: previous.amount,
             currency: previous.currency ?? project?.currency ?? 'USD',
           });

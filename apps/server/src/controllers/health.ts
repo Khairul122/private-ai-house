@@ -39,7 +39,8 @@ export function healthController({ options, repository, now, draftingMode, threa
           openProjects: projects.filter((project) => project.status === 'open').length,
           drafts: draftCount,
           submittedBids: projects.filter((project) => project.source === 'freelancer' && project.pipelineStatus === 'submitted').length,
-          policySkips: await repository.countAuditByStatus('blocked'),
+          // Read-only gate hits on the projects.co.id tab are safety events, not policy decisions.
+          policySkips: await repository.countAuditByStatus('blocked', ['projects_co_id.write_blocked']),
           knowledgeSources: sources.length,
         },
         policy: { state: policy.state, version: policy.version, simulationOnly: policy.simulationOnly },

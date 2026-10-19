@@ -7,6 +7,8 @@ import { BrowserBidError } from '../models/browser-bid-types.js';
 import { ProjectsCoIdPage } from '../lib/projects-co-id-page.js';
 import { validProjectsCoIdProposal, projectsCoIdPath, PROJECTS_CO_ID_ORIGIN, PROJECTS_CO_ID_AUTO_REASON, type ProjectsCoIdStatus } from '../models/projects-co-id-types.js';
 
+const BLOCKED_AUDIT_WINDOW_MS = 10 * 60_000;
+
 export class ProjectsCoIdService {
   private connection: BrowserBidConnection | null = null;
   private driver: ProjectsCoIdPage | null = null;
@@ -16,6 +18,17 @@ export class ProjectsCoIdService {
   private searchCursor = 0;
   private current: ProjectsCoIdStatus = { mode: 'scan-only', state: 'stopped', busy: false, reason: 'Hubungkan Chrome berprofil Anda untuk memindai.', username: null, remaining: null, checkedAt: null, pageStatus: null, lastScanAt: null, lastResult: null, lastSearchTerms: [], searchTerms: [], autoAvailable: false, draftsInProgress: 0, projectCount: 0, readyDrafts: 0, blockedWrites: 0, draftUsage: { today: 0, week: 0, dailyLimit: 4, weeklyLimit: 12 } };
   constructor(private repo: WorkspaceRepository, private connect = connectExistingChrome, private origin?: string, private draftProposal?: ((input: DraftingInput) => Promise<DraftingOutput>) | undefined) {}
+  // The site's own background POSTs (analytics, beacons) hit the read-only gate every few seconds;
+  // the live count is in status(), so Aktivitas gets one summary per window instead of a row per request.
+  private blockedSinceAudit = 0;
+  private blockedAuditAt = Number.NEGATIVE_INFINITY;
+  private recordBlockedWrite(now = Date.now()) {
+    this.blockedSinceAudit++;
+    if (now - this.blockedAuditAt < BLOCKED_AUDIT_WINDOW_MS) return;
+    const count = this.blockedSinceAudit;
+    this.blockedSinceAudit = 0; this.blockedAuditAt = now;
+    void this.repo.appendAudit({ type: 'projects_co_id.write_blocked', resourceId: 'projects_co_id', status: 'blocked', reason: `${count} request tulis pada tab worker dibatalkan oleh gate read-only sejak catatan terakhir.`, policyVersion: null, payloadHash: null }).catch(() => undefined);
+  }
   get busy() { return this.current.busy; }
   get draftsInProgress() { return this.current.draftsInProgress; }
   private async settings(): Promise<ProjectsCoIdSettings> {
@@ -74,9 +87,7 @@ export class ProjectsCoIdService {
       if (generation !== this.generation) { await connection.disconnect(); return; }
       this.connection = connection;
       connection.page.setDefaultTimeout(10_000);
-      this.driver = new ProjectsCoIdPage(connection.page, this.origin, () => {
-        void this.repo.appendAudit({ type: 'projects_co_id.write_blocked', resourceId: 'projects_co_id', status: 'blocked', reason: 'Request tulis pada tab worker dibatalkan oleh gate read-only.', policyVersion: null, payloadHash: null }).catch(() => undefined);
-      });
+      this.driver = new ProjectsCoIdPage(connection.page, this.origin, () => this.recordBlockedWrite());
       await this.driver.protect();
       connection.onDisconnect(() => { if (this.connection === connection) void this.close(); });
       await this.restore();

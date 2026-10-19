@@ -19,21 +19,26 @@ const freelancerSandboxWriteSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('send_message'), threadId: safeFreelancerIdSchema, message: z.string().trim().min(1).max(4_000) }),
 ]);
 
+// Reads per type: high-volume audit (skips, cycles) must not push older HTTP 200 evidence out of a global window.
 export async function readProductionWriteChecks(repository: WorkspaceRepository): Promise<Map<FreelancerWriteOperation, FreelancerProductionWriteCheck>> {
   const checks = new Map<FreelancerWriteOperation, FreelancerProductionWriteCheck>();
-  const operations = new Set<FreelancerWriteOperation>(['submit_bid', 'edit_profile', 'send_message']);
-  for (const event of await repository.listAudit(1_000)) {
-    const prefix = 'marketplace.production.';
-    if (!event.type.startsWith(prefix) || event.status === 'allowed') continue;
-    const operation = event.type.slice(prefix.length) as FreelancerWriteOperation;
-    if (!operations.has(operation) || checks.get(operation)?.statusCode === 200) continue;
-    const statusCode = event.reason.match(/HTTP (\d{3})/)?.[1];
-    if (checks.has(operation) && statusCode !== '200') continue;
-    const resultId = event.reason.match(/ID hasil: (\d{1,30})/)?.[1];
+  for (const operation of ['submit_bid', 'edit_profile', 'send_message'] as const) {
+    // ponytail: newest 1000 outcomes per operation; a dedicated "latest 200" query if failures ever exceed that.
+    const events = (await repository.listAuditForType(`marketplace.production.${operation}`, 1_000)).filter((event) => event.status !== 'allowed');
+    const httpStatus = (reason: string) => Number(reason.match(/HTTP (\d{3})/)?.[1]) || null;
+    const latest = events[0];
+    const success = events.find((event) => event.status === 'recorded' && httpStatus(event.reason) === 200);
+    const chosen = success ?? latest;
+    if (!chosen) continue;
+    const resultId = chosen.reason.match(/ID hasil: (\d{1,30})/)?.[1];
+    // A newer failure (e.g. the account bid quota) is reported beside the success instead of erasing it.
+    const newerFailure = success && latest !== success ? latest : undefined;
+    const errorCode = newerFailure?.reason.match(/ExceptionCodes\.([A-Z_]{1,60})/)?.[1];
     checks.set(operation, {
-      statusCode: statusCode ? Number(statusCode) : null,
-      checkedAt: event.createdAt,
+      statusCode: httpStatus(chosen.reason),
+      checkedAt: chosen.createdAt,
       ...(resultId ? { resultId } : {}),
+      ...(newerFailure ? { lastFailure: { statusCode: httpStatus(newerFailure.reason), checkedAt: newerFailure.createdAt, ...(errorCode ? { errorCode } : {}) } } : {}),
     });
   }
   return checks;

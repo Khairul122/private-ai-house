@@ -98,7 +98,7 @@ export function proposalFor(project: ProjectOpportunity, specialties: string[], 
   const isIndonesianClient = country === 'id' || country === 'idn' || country.includes('indonesia');
   const matched = project.skills.filter((skill) => specialties.some((specialty) => specialty.toLocaleLowerCase() === skill.toLocaleLowerCase()));
   const skills=matched.slice(0,3).join(', ');
-  const clientName = project.clientName && project.clientName !== 'Klien Freelancer' ? project.clientName : undefined;
+  const clientName = project.clientName && !['Klien Freelancer', 'Tidak tersedia'].includes(project.clientName) ? project.clientName : undefined;
 
   if (isIndonesianClient) {
     return [

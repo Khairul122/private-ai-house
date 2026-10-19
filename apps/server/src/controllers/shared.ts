@@ -9,7 +9,7 @@ export const paramsSchema = z.object({ id: z.string().min(1).max(150) });
 export const allowedDevOrigins = new Set(['http://127.0.0.1:5173', 'http://localhost:5173', 'http://127.0.0.1:5174', 'http://localhost:5174']);
 
 export type FreelancerSandboxWriteCheck = { statusCode: number | null; checkedAt: string; resultId?: string; resultStatus?: string };
-export type FreelancerProductionWriteCheck = FreelancerSandboxWriteCheck;
+export type FreelancerProductionWriteCheck = FreelancerSandboxWriteCheck & { lastFailure?: { statusCode: number | null; checkedAt: string; errorCode?: string } };
 
 /** State shared by several controllers. createApp builds exactly one per app instance. */
 export type AppContext = {

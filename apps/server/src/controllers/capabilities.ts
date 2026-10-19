@@ -1,7 +1,10 @@
 import { getFreelancerCapabilities } from '@fvh/adapter-freelancer';
 import type { FreelancerSandboxWriteOperation, FreelancerWriteOperation } from '@fvh/adapter-freelancer';
 import { PROJECTS_CO_ID_AUTO_REASON } from '../models/projects-co-id-types.js';
-import { linkedinVerification, type AppContext } from './shared.js';
+import { linkedinVerification, type AppContext, type FreelancerProductionWriteCheck } from './shared.js';
+
+const lastFailureNote = (failure: FreelancerProductionWriteCheck['lastFailure']) => !failure ? ''
+  : ` Percobaan terakhir pada ${failure.checkedAt} ${failure.statusCode ? `menghasilkan HTTP ${failure.statusCode}` : 'tidak terkonfirmasi'}${failure.errorCode ? ` (${failure.errorCode})` : ''}${failure.errorCode === 'BID_LIMIT_EXCEEDED' ? '; kuota bid akun habis, bukan kemampuan yang hilang' : ''}.`;
 
 export function capabilitiesController({ options, repository, now, draftingMode, state, freelancerSandboxWriteChecks, freelancerProductionWriteChecks, refreshProductionWriteChecks }: AppContext) {
   return {
@@ -19,7 +22,7 @@ export function capabilitiesController({ options, repository, now, draftingMode,
           ...(productionVerification ? {
             status: productionVerification.statusCode === 200 ? 'supported' : 'unknown',
             evidence: productionVerification.statusCode === 200
-              ? `Permintaan live Freelancer berhasil dengan HTTP 200 pada ${productionVerification.checkedAt}.${productionVerification.resultId ? ` ID hasil: ${productionVerification.resultId}.` : ''}`
+              ? `Permintaan live Freelancer berhasil dengan HTTP 200 pada ${productionVerification.checkedAt}.${productionVerification.resultId ? ` ID hasil: ${productionVerification.resultId}.` : ''}${lastFailureNote(productionVerification.lastFailure)}`
               : `Permintaan live terakhir belum terkonfirmasi${productionVerification.statusCode ? ` (HTTP ${productionVerification.statusCode})` : ''}; capability tetap belum terverifikasi.`,
             productionVerification,
           } : {}),

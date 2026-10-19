@@ -22,6 +22,13 @@ describe('WorkspaceRepository', () => {
     expect((await repository.getPolicy()).keywords).not.toContain('stale');
   });
 
+  it('counts audit rows by status while leaving out excluded event types', async () => {
+    const repo = repository = await WorkspaceRepository.open();
+    const event = (type: string) => repo.appendAudit({ type, resourceId: 'r', status: 'blocked', reason: 'x', policyVersion: null, payloadHash: null });
+    await event('autopilot.bid_skipped'); await event('projects_co_id.write_blocked'); await event('projects_co_id.write_blocked');
+    expect(await repository.countAuditByStatus('blocked')).toBe(3);
+    expect(await repository.countAuditByStatus('blocked', ['projects_co_id.write_blocked'])).toBe(1);
+  });
   it('creates an empty local workspace with an inactive policy', async () => {
     repository = await WorkspaceRepository.open();
 

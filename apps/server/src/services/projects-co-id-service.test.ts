@@ -3,8 +3,8 @@ import type { Page } from 'playwright-core';
 import { WorkspaceRepository } from '@fvh/persistence';
 import { PROJECTS_CO_ID_DEFAULTS, type ProjectOpportunity } from '@fvh/domain';
 import type { DraftingInput } from '@fvh/application';
-const driver = vi.hoisted(() => ({ inspect: vi.fn(), listOpenProjects: vi.fn(), readProject: vi.fn(), protect: vi.fn() }));
-vi.mock('../lib/projects-co-id-page.js', () => ({ ProjectsCoIdPage: class { inspect = driver.inspect; listOpenProjects = driver.listOpenProjects; readProject = driver.readProject; protect = driver.protect; blockedWrites = 0; } }));
+const driver = vi.hoisted(() => ({ inspect: vi.fn(), listOpenProjects: vi.fn(), readProject: vi.fn(), protect: vi.fn(), onBlockedWrite: undefined as (() => void) | undefined }));
+vi.mock('../lib/projects-co-id-page.js', () => ({ ProjectsCoIdPage: class { constructor(_page: unknown, _origin: unknown, onBlockedWrite?: () => void) { driver.onBlockedWrite = onBlockedWrite; } inspect = driver.inspect; listOpenProjects = driver.listOpenProjects; readProject = driver.readProject; protect = driver.protect; blockedWrites = 0; } }));
 import { ProjectsCoIdService } from './projects-co-id.js';
 import { validProjectsCoIdProposal } from '../models/projects-co-id-types.js';
 
@@ -31,6 +31,12 @@ describe('projects.co.id draft worker', () => {
   });
   afterEach(async () => { await service.close(); await repo.close(); });
 
+  it('summarises blocked background writes in Aktivitas instead of one row per request', async () => {
+    await service.open();
+    for (let i = 0; i < 50; i++) driver.onBlockedWrite!();
+    await vi.waitFor(async () => expect((await repo.listAudit(100)).filter(e => e.type === 'projects_co_id.write_blocked')).toHaveLength(1));
+    expect((await repo.listAudit(100)).find(e => e.type === 'projects_co_id.write_blocked')?.reason).toMatch(/^1 request tulis/);
+  });
   it('requires the actual matching account and stops on a challenge', async () => {
     for (const [changes, state] of [[{ username: null }, 'login_required'], [{ username: 'other' }, 'account_mismatch'], [{ challenge: true }, 'challenge']] as const) {
       driver.inspect.mockResolvedValue({ username: 'KhairulHuda06', remaining: null, pageStatus: 200, checkedAt: new Date().toISOString(), challenge: false, ...changes });
