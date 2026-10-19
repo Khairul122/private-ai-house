@@ -100,16 +100,16 @@ const AGENDA_LABELS: Array<[keyof AgendaSummary['days'][string], (count: number)
 ];
 
 function OperationsCalendar({ policy, work, workPending, workError }: { policy: Policy; work: Work | undefined; workPending: boolean; workError: boolean }) {
-  const ownerAgenda=useQuery({queryKey:['operations'],queryFn:()=>api<OperationsData>('/operations'),refetchInterval:30_000});
+  const ownerAgenda=useQuery({queryKey:['operations'],queryFn:()=>api<OperationsData>('/operations'),refetchInterval:10_000});
   const ownerTasks=ownerAgenda.isError?undefined:ownerAgenda.data?.tasks;
-  const autopilotQuery = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 30_000 });
+  const autopilotQuery = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 10_000 });
   const [view, setView] = useState<CalendarView>('month');
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
   const [logLimit, setLogLimit] = useState(30);
-  const agendaQuery = useQuery({ queryKey: ['agenda', 'summary'], queryFn: () => api<AgendaSummary>('/agenda/activity?days=180'), refetchInterval: 60_000 });
+  const agendaQuery = useQuery({ queryKey: ['agenda', 'summary'], queryFn: () => api<AgendaSummary>('/agenda/activity?days=180'), refetchInterval: 30_000 });
   const autopilot = autopilotQuery.isError ? undefined : autopilotQuery.data;
   const agenda = agendaQuery.isError ? undefined : agendaQuery.data;
-  const projectsQuery = useQuery({ queryKey: ['projects', 'calendar'], queryFn: () => api<Opportunity[]>('/projects') });
+  const projectsQuery = useQuery({ queryKey: ['projects', 'calendar'], queryFn: () => api<Opportunity[]>('/projects'), refetchInterval: 30_000 });
   const listings = projectsQuery.isError ? undefined : projectsQuery.data;
   const events = useMemo<CalendarEvent[]>(() => {
     const result: CalendarEvent[] = [];
@@ -174,7 +174,7 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
   const { year, month } = dateKeyParts(currentDateKey);
   const monthCells = calendarMonthCells(year, month);
   const currentEvents = eventsByDate.get(currentDateKey) ?? [];
-  const dayLog = useQuery({ queryKey: ['agenda', 'day', currentDateKey], enabled: view === 'day', queryFn: () => api<{ date: string; events: AuditEvent[] }>('/agenda/activity?date=' + currentDateKey) });
+  const dayLog = useQuery({ queryKey: ['agenda', 'day', currentDateKey], enabled: view === 'day', queryFn: () => api<{ date: string; events: AuditEvent[] }>('/agenda/activity?date=' + currentDateKey), refetchInterval: 30_000 });
   const heading = view === 'year'
     ? String(year)
     : view === 'month'
@@ -182,7 +182,7 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
       : calendarDateLabel(currentDateKey, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   const changePeriod = (amount: number) => setSelectedDateKey(moveCalendarDate(currentDateKey, view, amount));
 
-  return <section className="calendar-card calendar-browser" aria-labelledby="calendar-browser-title">
+  return <section className="calendar-card calendar-browser card-section" aria-labelledby="calendar-browser-title">
     <div className="calendar-browser-heading">
       <div><p className="eyebrow">Agenda ruang kerja</p><h2 id="calendar-browser-title">Kalender</h2><p>Zona waktu kebijakan: <strong>{policy.timezone}</strong></p></div>
       <div className="calendar-view-tabs" role="group" aria-label="Tampilan kalender">
@@ -247,6 +247,8 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
       {autopilotQuery.isPending && <span role="status">Memuat jadwal siklus server...</span>}
       {autopilotQuery.isError && <span>Jadwal siklus server tidak tersedia; data lama disembunyikan.</span>}
       {agendaQuery.isError && <span>Riwayat aktivitas tidak tersedia; data lama disembunyikan.</span>}
+      {ownerAgenda.isError && <span>Agenda pemilik tidak tersedia; kalender belum lengkap.</span>}
+      {projectsQuery.isError && <span>Penutupan listing tidak tersedia; kalender belum lengkap.</span>}
       {workPending && <span role="status">Memuat tenggat proyek dan pembayaran...</span>}
       {workError && <span>Tenggat proyek dan pembayaran tidak tersedia; data lama disembunyikan.</span>}
       <span>Penutupan listing Freelancer menggunakan hitungan dari sinkronisasi terakhir, bukan tanggal pasti.</span>
@@ -256,11 +258,11 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
 
 export default function CalendarPage() {
   const clockNow = useClock(30_000);
-  const operation = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 15_000 });
-  const policyQuery = useQuery({ queryKey: ['policy'], queryFn: () => api<Policy>('/policy') });
-  const projectsQuery = useQuery({ queryKey: ['projects', 'calendar'], queryFn: () => api<Opportunity[]>('/projects') });
-  const dashboardQuery = useQuery({ queryKey: ['dashboard'], queryFn: () => api<{ counts: { openProjects: number; drafts: number; policySkips: number }; bidUsage: { today: number; week: number } }>('/dashboard') });
-  const workQuery = useQuery({ queryKey: ['work'], queryFn: () => api<Work>('/work') });
+  const operation = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 10_000 });
+  const policyQuery = useQuery({ queryKey: ['policy'], queryFn: () => api<Policy>('/policy'), refetchInterval: 30_000 });
+  const projectsQuery = useQuery({ queryKey: ['projects', 'calendar'], queryFn: () => api<Opportunity[]>('/projects'), refetchInterval: 30_000 });
+  const dashboardQuery = useQuery({ queryKey: ['dashboard'], queryFn: () => api<{ counts: { openProjects: number; drafts: number; policySkips: number }; bidUsage: { today: number; week: number } }>('/dashboard'), refetchInterval: 10_000 });
+  const workQuery = useQuery({ queryKey: ['work'], queryFn: () => api<Work>('/work'), refetchInterval: 10_000 });
 
   if (policyQuery.isPending || projectsQuery.isPending || dashboardQuery.isPending) return <LoadingPanel label="Menyiapkan kalender dan jadwal operasi..." />;
   if (policyQuery.isError || projectsQuery.isError || dashboardQuery.isError) return <ErrorNotice message="Gagal memuat data kalender." />;
@@ -272,27 +274,28 @@ export default function CalendarPage() {
   const now = clockNow;
   const operationData = operation.isError ? undefined : operation.data;
   const isWithinHours = operationData?.state === 'running' && !operationData.waitingReason;
-  const deadlineProjects = projects.filter((p) => p.deadlineDays !== null).sort((a, b) => (a.deadlineDays ?? 0) - (b.deadlineDays ?? 0));
+  const deadlineProjects = projects.filter((p) => p.source !== 'projects_co_id' && p.deadlineDays !== null).sort((a, b) => (a.deadlineDays ?? 0) - (b.deadlineDays ?? 0));
   const expiryDate = new Date(policy.expiresAt);
   const daysUntilExpiry = Math.max(0, Math.ceil((expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
 
   return <>
     <PageIntro
-      eyebrow="Jadwal & Waktu"
-      title="Kalender kerja, server, dan proyek."
-      description="Lihat agenda per hari, bulan, dan tahun, termasuk jadwal autopilot, tenggat proyek, pembayaran, dan masa berlaku kebijakan."
+      eyebrow="Jadwal"
+      title="Kalender kerja"
+      description="Agenda pemilik, tenggat proyek, dan pembayaran dalam satu kalender."
+      action={<Link to="/operations" className="button button-primary">Kelola jadwal pemilik</Link>}
     />
 
     <div className="calendar-grid">
       <OperationsCalendar policy={policy} work={workQuery.isError ? undefined : workQuery.data} workPending={workQuery.isPending} workError={workQuery.isError} />
 
-      <section className="calendar-card">
-        <h3>Jam Kerja & Status Operasi</h3>
+      <section className="calendar-card card-section">
+        <h2>Jadwal automasi</h2>
         <div className={`hours-status-badge ${isWithinHours && policy.state === 'active' ? 'hours-active' : 'hours-inactive'}`}>
           <span className="mode-indicator" style={{ background: isWithinHours && policy.state === 'active' ? 'var(--success)' : 'var(--danger)' }} />
           {!operationData ? 'Status operasi tidak tersedia' : operationData.waitingReason ?? (isWithinHours ? `Operasi aktif (${policy.activeHours.start}:00 - ${policy.activeHours.end}:00)` : 'Operasi memerlukan perhatian')}
         </div>
-        <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 14px' }}>
+        <p className="form-help">
           Zona waktu kerja: <strong>{policy.timezone}</strong>. Hari aktif: {(policy.activeDays ?? [0, 1, 2, 3, 4, 5, 6]).map((day) => ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'][day]).join(', ')}. Bid mengikuti jadwal dan masa berlaku kebijakan.
         </p>
 
@@ -318,10 +321,10 @@ export default function CalendarPage() {
         <p className="form-help">Dihitung dari bid live yang tercatat berhasil di log audit.</p>
       </section>
 
-      <section className="calendar-card">
-        <h3>Masa Berlaku Kebijakan</h3>
-        <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 12px' }}>
-          Kebijakan automasi berlaku terbatas dan membutuhkan konfirmasi berkala untuk memastikan kontrol tetap di tangan pemilik.
+      <section className="calendar-card card-section">
+        <h2>Masa berlaku kebijakan</h2>
+        <p className="form-help">
+          Pengiriman bid mengikuti masa berlaku dan jadwal kebijakan tersimpan.
         </p>
         <div className="calendar-expiry">
           <div>
@@ -334,15 +337,15 @@ export default function CalendarPage() {
           </div>
         </div>
         <Link to="/policy" className="button button-secondary button-wide">
-          Kelola Batas & Perpanjang Kebijakan
+          Lihat kebijakan
         </Link>
       </section>
 
-      <section className="calendar-card calendar-wide">
+      <section className="calendar-card calendar-wide card-section">
         {(() => {
           const clientDeadlines = (workQuery.data?.projects ?? []).filter((item) => item.status === 'active' && item.daysToDeadline !== null);
           return <>
-            <h3>Tenggat Proyek Klien ({workQuery.isError ? '–' : clientDeadlines.length})</h3>
+            <h2>Tenggat proyek klien ({workQuery.isError || workQuery.isPending ? '–' : clientDeadlines.length})</h2>
             {workQuery.isError ? <p className="form-help">Data proyek klien tidak dapat dimuat.</p>
               : workQuery.isPending ? <p className="form-help">Memuat tenggat proyek klien...</p>
                 : clientDeadlines.length === 0 ? <p className="form-help">Belum ada tenggat proyek klien. <Link to="/work">Tambahkan proyek</Link></p>
@@ -354,8 +357,8 @@ export default function CalendarPage() {
         })()}
       </section>
 
-      <section className="calendar-card calendar-wide">
-        <h3>Penutupan Penawaran Proyek ({deadlineProjects.length})</h3>
+      <section className="calendar-card calendar-wide card-section">
+        <details className="card-disclosure"><summary>Penutupan listing Freelancer ({deadlineProjects.length})</summary>
         {deadlineProjects.length === 0 ? (
           <p className="form-help">Belum ada proyek dengan tenggat tercatat.</p>
         ) : (
@@ -379,7 +382,7 @@ export default function CalendarPage() {
               </li>
             ))}
           </ul>
-        )}
+        )}</details>
       </section>
     </div>
   </>;

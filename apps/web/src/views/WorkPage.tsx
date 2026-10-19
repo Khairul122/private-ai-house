@@ -8,9 +8,9 @@ const SOURCE_LABELS: Record<ClientProject['source'], string> = { freelancer: 'Fr
 
 export default function WorkPage() {
   const queryClient = useQueryClient();
-  const work = useQuery({ queryKey: ['work'], queryFn: () => api<Work>('/work'), refetchInterval: 60_000 });
-  const profile = useQuery({ queryKey: ['profile'], queryFn: () => api<Profile>('/profile') });
-  const currency = profile.data?.currency ?? 'USD';
+  const work = useQuery({ queryKey: ['work'], queryFn: () => api<Work>('/work'), refetchInterval: 10_000 });
+  const profile = useQuery({ queryKey: ['profile'], queryFn: () => api<Profile>('/profile'), refetchInterval: 30_000 });
+  const currency = (profile.isError ? undefined : profile.data)?.currency ?? 'USD';
   const [project, setProject] = useState({ title: '', client: '', source: 'direct' as ClientProject['source'], deadline: '', value: '', currency: '' });
   const [payment, setPayment] = useState({ projectId: '', amount: '', currency: '', status: 'expected' as 'expected' | 'received', dueDate: '', note: '' });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['work'] });
@@ -42,17 +42,18 @@ export default function WorkPage() {
   const mutationError = [createProject, updateProject, recordPayment, markReceived].find((mutation) => mutation.isError)?.error;
 
   return <>
-    <PageIntro eyebrow="Proyek berjalan" title="Proyek aktif dan pendapatan." description="Proyek Freelancer yang menang ditambahkan otomatis. Klien langsung atau LinkedIn dicatat manual di sini." />
+    <PageIntro eyebrow="Proyek berjalan" title="Proyek & pendapatan" description="Pantau tenggat, pembayaran tertunda, dan pemasukan per mata uang." />
     {mutationError && <ErrorNotice message={mutationError.message} />}
-    <section className="metrics-row" aria-label="Ringkasan proyek dan pendapatan">
+    <section className="card-summary-grid" aria-label="Ringkasan proyek dan pendapatan">
       <Metric label="Proyek aktif" value={active.length} note={`${finished.length} selesai atau ditutup`} tone="primary" />
       <Metric label="Tenggat ≤ 2 hari" value={dueSoon} note="Proyek aktif dengan tenggat dekat" />
       <Metric label={`Diterima ${income.month}`} value={money(income.received)} note="Per mata uang, tidak dijumlahkan lintas kurs" />
       <Metric label="Menunggu pembayaran" value={money(income.expected)} note={`${pendingPayments.length} pembayaran tercatat`} />
     </section>
 
-    <section className="activity-preview" aria-labelledby="active-projects-title">
-      <div className="section-heading"><div><p className="eyebrow">Diurutkan dari tenggat terdekat</p><h2 id="active-projects-title">Proyek aktif ({active.length})</h2></div></div>
+    <div className="card-toolbar"><p className="form-help">Data layar diperbarui {new Date(work.dataUpdatedAt).toLocaleString('id-ID')}</p><button type="button" className="button button-secondary" disabled={work.isFetching} onClick={() => void work.refetch()}>{work.isFetching ? 'Memperbarui...' : 'Perbarui proyek'}</button></div>
+    <section className="activity-preview card-section" aria-labelledby="active-projects-title">
+      <div className="section-heading"><div><p className="eyebrow">Proyek yang tercatat</p><h2 id="active-projects-title">Proyek aktif ({active.length})</h2></div></div>
       {active.length ? <ul className="deadlines-list">{active.map((item) => <li className="deadline-item" key={item.id}>
         <div><strong>{item.title}</strong><div className="item-sub">{item.client} · {SOURCE_LABELS[item.source]}{item.value !== null ? ` · ${formatMoney(item.value, item.currency)}` : ''}</div></div>
         <div className="item-aside">
@@ -63,10 +64,10 @@ export default function WorkPage() {
           </span>
         </div>
       </li>)}</ul> : <p className="form-help">Belum ada proyek aktif.</p>}
-      {finished.length > 0 && <details><summary>Selesai ({finished.length})</summary><ul className="deadlines-list">{finished.map((item) => <li className="deadline-item" key={item.id}><div>{item.title}<div className="item-sub">{item.client} · {item.status === 'delivered' ? 'Terkirim' : 'Ditutup'}</div></div></li>)}</ul></details>}
+      {finished.length > 0 && <details className="card-disclosure"><summary>Selesai ({finished.length})</summary><ul className="deadlines-list">{finished.map((item) => <li className="deadline-item" key={item.id}><div>{item.title}<div className="item-sub">{item.client} · {item.status === 'delivered' ? 'Terkirim' : 'Ditutup'}</div></div></li>)}</ul></details>}
     </section>
 
-    <section className="activity-preview" aria-labelledby="payments-title">
+    <section className="activity-preview card-section" aria-labelledby="payments-title">
       <div className="section-heading"><div><p className="eyebrow">Belum diterima</p><h2 id="payments-title">Pembayaran tertunda ({pendingPayments.length})</h2></div></div>
       {pendingPayments.length ? <ul className="deadlines-list">{pendingPayments.map((item) => <li className="deadline-item" key={item.id}>
         <div><strong>{formatMoney(item.amount, item.currency)}</strong><div className="item-sub">{titles.get(item.projectId) ?? 'Proyek'}{item.dueDate ? ` · jatuh tempo ${item.dueDate}` : ''}{item.note ? ` · ${item.note}` : ''}</div></div>
@@ -74,6 +75,8 @@ export default function WorkPage() {
       </li>)}</ul> : <p className="form-help">Belum ada pembayaran tertunda.</p>}
     </section>
 
+    <details className="card-disclosure"><summary>Tambah proyek atau catat pembayaran</summary>
+    <p className="form-help">Proyek Freelancer yang menang masuk otomatis. Catat proyek dari sumber lain dan pembayaran nyata di sini.</p>
     <div className="form-section">
       <form className="form-card" onSubmit={(event) => { event.preventDefault(); createProject.mutate(); }}>
         <div className="section-heading"><div><p className="eyebrow">Klien langsung, LinkedIn, atau lainnya</p><h2>Tambah proyek</h2></div></div>
@@ -103,5 +106,6 @@ export default function WorkPage() {
         </> : <p className="form-help">Tambahkan proyek terlebih dahulu.</p>}
       </form>
     </div>
+    </details>
   </>;
 }

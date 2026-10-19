@@ -11,7 +11,7 @@ export function formatDate(value: string) {
   return new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 }
 
-export const PIPELINE_STAGES: Array<[string, string]> = [['new', 'Baru'], ['scored', 'Dinilai'], ['draft_ready', 'Draf siap'], ['policy_check', 'Pemeriksaan'], ['submitted', 'Dikirim / ditandai Anda'], ['in_conversation', 'Percakapan'], ['skipped', 'Dilewati']];
+export const PIPELINE_STAGES: Array<[string, string]> = [['new', 'Baru'], ['scored', 'Dinilai'], ['draft_ready', 'Draf siap'], ['policy_check', 'Pemeriksaan'], ['submitted', 'Dikirim / ditandai Anda'], ['in_conversation', 'Percakapan'], ['won', 'Berhasil'], ['lost', 'Tidak lanjut'], ['skipped', 'Dilewati'], ['expired', 'Kedaluwarsa'], ['reconciliation_required', 'Perlu rekonsiliasi'], ['error', 'Kesalahan']];
 
 export function activityTitle(type: string) {
   const titles: Record<string, string> = {

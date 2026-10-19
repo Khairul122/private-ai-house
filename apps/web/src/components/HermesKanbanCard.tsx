@@ -19,7 +19,7 @@ const employee = (profile: string | null) => {
 const time = (value: string | null) => value ? new Date(value).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) : null;
 
 function TaskResult({ id }: { id: string }) {
-  const detail = useQuery({ queryKey: ['hermes-kanban', id], queryFn: () => api<HermesKanbanDetail>(`/hermes-kanban/tasks/${id}`) });
+  const detail = useQuery({ queryKey: ['hermes-kanban', id], queryFn: () => api<HermesKanbanDetail>(`/hermes-kanban/tasks/${id}`), refetchInterval: 30_000 });
   if (detail.isPending) return <p role="status">Memuat hasil…</p>;
   if (detail.isError) return <p role="alert">Hasil kartu tidak tersedia.</p>;
   return <div className="hermes-result">
@@ -71,13 +71,25 @@ export default function HermesKanbanCard() {
   }
 
   return <section className="form-card" aria-label="Kanban tim Hermes">
-    <div className="section-heading"><div><p className="eyebrow">Tim AI · board {data?.board ?? 'fvh-house'}</p><h2>Kanban Hermes</h2></div></div>
+    <div className="section-heading"><div><p className="eyebrow">Tim AI · board {data?.board ?? 'fvh-house'}</p><h2>Pekerjaan tim Hermes</h2></div></div>
     {query.isPending ? <p role="status">Memuat kanban Hermes…</p>
       : query.isError ? <p role="alert">Kanban Hermes tidak tersedia. <button type="button" className="button button-text" onClick={() => void query.refetch()}>Coba lagi</button></p>
       : !data ? <p>Kanban Hermes tidak aktif: Hermes dan persetujuan data harus aktif di <code>.env</code>.</p>
       : !data.available ? <p role="alert">{data.reason}</p>
       : <>
-        <p>Beri tujuan ke Chief of Staff untuk dibagi ke karyawan, atau langsung ke satu karyawan. Hasilnya usulan; karyawan tidak mengirim bid, pesan, atau invoice. {data.reason}</p>
+        <p className="card-status-note">{data.reason} Hasil pekerjaan berupa usulan untuk Anda tinjau.</p>
+        <div className="kanban-board">
+          {COLUMNS.map(column => {
+            const tasks = data.tasks.filter(task => column.statuses.includes(task.status));
+            return <div className="kanban-column" key={column.title}>
+              <div className="kanban-col-head"><h3>{column.title}</h3><span className="kanban-count">{tasks.length}</span></div>
+              <p className="kanban-hint">{column.hint}</p>
+              {tasks.length ? tasks.map(task => <TaskCard key={task.id} task={task} />) : <div className="kanban-empty">Tidak ada kartu</div>}
+            </div>;
+          })}
+        </div>
+        <details className="card-disclosure"><summary>Buat tugas untuk tim Hermes</summary>
+          <p className="form-help">Chief of Staff membagi tujuan ke tim, atau pilih satu karyawan. Setiap tugas memakai kuota model.</p>
         <form onSubmit={event => void submit(event)}><fieldset disabled={pending}>
           <div className="form-grid">
             <label className="form-field"><span>Tugas</span><input value={title} onChange={e => setTitle(e.target.value)} required minLength={3} maxLength={200} placeholder="Contoh: Pilih 3 peluang AI terbaik minggu ini" /></label>
@@ -90,16 +102,7 @@ export default function HermesKanbanCard() {
           <div className="form-actions"><button className="button button-primary" type="submit">{pending ? 'Mengirim…' : 'Kirim ke tim Hermes'}</button><span>Setiap kartu memakai kuota model.</span></div>
         </fieldset></form>
         {notice && <p className={`notice ${notice.error ? 'notice-error' : 'notice-success'}`} role={notice.error ? 'alert' : 'status'}>{notice.text}</p>}
-        <div className="kanban-board">
-          {COLUMNS.map(column => {
-            const tasks = data.tasks.filter(task => column.statuses.includes(task.status));
-            return <div className="kanban-column" key={column.title}>
-              <div className="kanban-col-head"><h3>{column.title}</h3><span className="kanban-count">{tasks.length}</span></div>
-              <p className="kanban-hint">{column.hint}</p>
-              {tasks.length ? tasks.map(task => <TaskCard key={task.id} task={task} />) : <div className="kanban-empty">Tidak ada kartu</div>}
-            </div>;
-          })}
-        </div>
+        </details>
       </>}
   </section>;
 }

@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { api, type BidDraft, type Opportunity } from '../api/api.js';
 import HermesKanbanCard from '../components/HermesKanbanCard.js';
-import { useSourceFilter, SourceSelect, matchesSource, projectLink } from '../components/source-filter.js';
+import { useSourceFilter, SourceSelect, matchesSource, projectLink, opportunitySource } from '../components/source-filter.js';
 import { StateLabel, ErrorNotice, LoadingPanel, PageIntro } from '../components/ui.js';
 import { formatMoney } from '../components/format.js';
 
@@ -13,7 +13,7 @@ export default function TaskBoardPage() {
   const [filter, setFilter] = useState('');
   const [source, setSource] = useSourceFilter();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const pipeline = useQuery({ queryKey: ['pipeline'], queryFn: () => api<Array<Opportunity & { latestDraft: BidDraft | null }>>('/pipeline') });
+  const pipeline = useQuery({ queryKey: ['pipeline'], queryFn: () => api<Array<Opportunity & { latestDraft: BidDraft | null }>>('/pipeline'), refetchInterval: 10_000 });
 
   if (pipeline.isPending) return <LoadingPanel label="Memuat papan tugas..." />;
   if (pipeline.isError) return <ErrorNotice message="Gagal memuat data papan tugas." onRetry={() => pipeline.refetch()} />;
@@ -36,33 +36,34 @@ export default function TaskBoardPage() {
       id: 'drafting',
       title: 'Draf & Review',
       filter: (p: Opportunity) => p.pipelineStatus === 'draft_ready' || p.pipelineStatus === 'policy_check',
-      hint: 'Draf lokal yang siap diperiksa atau dikirim',
+      hint: 'Draf lokal dan pemeriksaan kebijakan; bukan bukti pengiriman',
     },
     {
       id: 'active',
       title: 'Terkirim & Diskusi',
       filter: (p: Opportunity) => p.pipelineStatus === 'submitted' || p.pipelineStatus === 'in_conversation' || p.pipelineStatus === 'won',
-      hint: 'Bid terkirim atau dalam tahap komunikasi dengan klien',
+      hint: 'Freelancer terkonfirmasi; projects.co.id ditandai oleh Anda',
     },
     {
       id: 'archived',
       title: 'Selesai / Dilewati',
       filter: (p: Opportunity) => p.pipelineStatus === 'skipped' || p.pipelineStatus === 'lost' || p.pipelineStatus === 'expired' || p.pipelineStatus === 'reconciliation_required' || p.pipelineStatus === 'error',
-      hint: 'Peluang di luar batas kebijakan atau telah diarsipkan',
+      hint: 'Termasuk error dan hasil tidak pasti yang perlu diperiksa',
     },
   ];
 
   return <>
     <PageIntro
       eyebrow="Manajemen kerja"
-      title="Papan tugas seluruh siklus proyek."
-      description="Pantau alur kerja dari deteksi peluang, penyusunan draf, pemeriksaan kebijakan, hingga status akhir."
+      title="Papan tugas"
+      description="Tugas tim Hermes dan tahapan peluang diperbarui mengikuti aktivitas aplikasi."
     />
     <HermesKanbanCard />
-    <section className="filter-bar" aria-label="Filter papan tugas">
+    <div className="section-heading"><div><h2>Alur peluang dan penawaran</h2><p className="form-help">Buka kartu untuk membaca detail proyek, draf, atau hasilnya.</p></div><Link to="/pipeline" className="text-link">Lihat pipeline</Link></div>
+    <section className="filter-bar card-toolbar" aria-label="Filter papan tugas">
       <label className="search-field">
         <span>Cari proyek, klien, atau skill di papan tugas</span>
-        <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Contoh: React, Backend, API" />
+        <input type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Judul, klien, atau teknologi" />
       </label>
       <SourceSelect value={source} onChange={setSource} />
       <div className="filter-note">
@@ -88,7 +89,7 @@ export default function TaskBoardPage() {
               <>{colProjects.slice(0, expanded[col.id] ? colProjects.length : KANBAN_LIMIT).map((p) => (
                 <article className="kanban-card" key={p.id}>
                   <div className="kanban-card-top">
-                    <span className="kanban-card-client">{p.clientName}</span>
+                    <span className="kanban-card-client">{opportunitySource(p.source)} · {p.clientName}</span>
                     <StateLabel state={p.pipelineStatus} source={p.source} />
                   </div>
                   <h4>{p.title}</h4>
@@ -106,7 +107,7 @@ export default function TaskBoardPage() {
                       to={projectLink(p)}
                       className="button button-secondary"
                     >
-                      {p.latestDraft ? 'Buka draf' : 'Buat draf'}
+                      {p.latestDraft ? 'Buka draf' : 'Lihat peluang'}
                     </Link>
                   </div>
                 </article>

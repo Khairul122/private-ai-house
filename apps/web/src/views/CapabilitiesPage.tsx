@@ -1,20 +1,21 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, jsonRequest, type AuditEvent, type Autopilot, type Capabilities, type Policy } from '../api/api.js';
+import { api, jsonRequest, type AuditEvent, type Autopilot, type Capabilities } from '../api/api.js';
 import BrowserBiddingCard from '../components/BrowserBiddingCard.js';
-import { StateLabel, ErrorNotice, LoadingPanel, PageIntro } from '../components/ui.js';
+import { StateLabel, ErrorNotice, LoadingPanel, PageIntro, OperationStatus } from '../components/ui.js';
 import { formatDate } from '../components/format.js';
 
 type IntegrationCheck = { id: string; label: string; ok: boolean; status: number | null; detail: string; latencyMs: number; checkedAt: string };
+const operationLabels: Record<string, string> = { read_profile: 'Baca profil', search_projects: 'Cari proyek', read_projects: 'Baca proyek', read_portfolio: 'Baca portofolio', read_messages: 'Baca pesan', submit_bid: 'Kirim bid', edit_profile: 'Ubah profil', send_message: 'Kirim pesan' };
 
 function HealthCard() {
   const checkAll = useMutation({ mutationFn: () => api<IntegrationCheck[]>('/integrations/check', jsonRequest('POST')) });
-  const bids = useQuery({ queryKey: ['activity', 'bids'], queryFn: () => api<AuditEvent[]>('/activity?limit=20&type=marketplace.production.submit_bid'), refetchInterval: 60_000 });
+  const bids = useQuery({ queryKey: ['activity', 'bids'], queryFn: () => api<AuditEvent[]>('/activity?limit=20&type=marketplace.production.submit_bid'), refetchInterval: 30_000 });
   const recentBids = (bids.isError ? [] : bids.data ?? []).filter((event) => event.type === 'marketplace.production.submit_bid' && event.status !== 'allowed').slice(0, 6);
   const failed = recentBids.filter((event) => event.status === 'failed').length;
   return <section className="form-card health-card" aria-labelledby="health-title">
     <div className="section-heading">
-      <div><p className="eyebrow">Kesehatan integrasi</p><h2 id="health-title">Status dan kode HTTP</h2></div>
+      <div><p className="eyebrow">Kesehatan integrasi</p><h2 id="health-title">Periksa koneksi layanan</h2></div>
       <button type="button" className="button button-primary" disabled={checkAll.isPending} onClick={() => checkAll.mutate()}>{checkAll.isPending ? 'Memeriksa...' : 'Periksa semua integrasi'}</button>
     </div>
     {checkAll.isError && <ErrorNotice message={checkAll.error instanceof Error ? checkAll.error.message : 'Pemeriksaan gagal.'} onRetry={() => checkAll.mutate()} />}
@@ -25,8 +26,9 @@ function HealthCard() {
         <div className="health-meta"><b>{item.status === null ? 'Tanpa HTTP' : 'HTTP ' + item.status}</b><small>{item.latencyMs} ms · {formatDate(item.checkedAt)}</small></div>
       </li>)}</ul>
       : <p className="form-help">Tekan tombol untuk memeriksa Supabase, Freelancer, GitHub, LinkedIn, Hermes, dan autopilot. Hanya permintaan baca; tidak ada bid atau pesan yang dikirim.</p>}
+    <details className="card-disclosure"><summary>Riwayat pengiriman bid terakhir</summary>
     <h3 className="health-subtitle">Hasil pengiriman bid terakhir{recentBids.length ? ' (' + failed + ' gagal dari ' + recentBids.length + ')' : ''}</h3>
-    {bids.isError ? <p className="form-help">Riwayat bid belum dapat dimuat.</p>
+    {bids.isPending ? <p role="status">Memuat riwayat bid…</p> : bids.isError ? <p className="form-help">Riwayat bid belum dapat dimuat.</p>
       : recentBids.length === 0 ? <p className="form-help">Belum ada percobaan kirim bid yang tercatat.</p>
         : <ul className="health-list">{recentBids.map((event) => {
           const code = event.reason.match(/HTTP (\d{3})/)?.[1];
@@ -36,6 +38,7 @@ function HealthCard() {
             <div className="health-meta"><b>{code ? 'HTTP ' + code : 'Tanpa HTTP'}</b><small>{formatDate(event.createdAt)}</small></div>
           </li>;
         })}</ul>}
+    </details>
   </section>;
 }
 
@@ -55,9 +58,8 @@ export default function CapabilitiesPage() {
       window.history.replaceState({}, '', url.pathname + url.search + url.hash);
     }
   }, []);
-  const query = useQuery({ queryKey: ['capabilities'], queryFn: () => api<Capabilities>('/capabilities') });
-  const autopilot = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 30_000 });
-  const savedPolicy = useQuery({ queryKey: ['policy'], queryFn: () => api<Policy>('/policy') });
+  const query = useQuery({ queryKey: ['capabilities'], queryFn: () => api<Capabilities>('/capabilities'), refetchInterval: 30_000 });
+  const autopilot = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 10_000 });
   const verifyFreelancer = useMutation({
     mutationFn: () => api<{ message: string }>('/freelancer/verify', jsonRequest('POST')),
     onSuccess: async (result) => { setNoticeError(false); setNotice(result.message); await queryClient.invalidateQueries({ queryKey: ['capabilities'] }); },
@@ -85,34 +87,25 @@ export default function CapabilitiesPage() {
   if (query.isError) return <ErrorNotice message="Status integrasi belum dapat dimuat." onRetry={() => query.refetch()} />;
   const status = autopilot.isError ? undefined : autopilot.data;
   return <>
-    <PageIntro eyebrow="Koneksi dan capability" title="Autopilot bekerja dari profil Freelancer." description="Proyek dipindai otomatis. Bid hanya dikirim saat aturan profil, anggaran, tenggat, risiko, confidence, kuota, dan jam aktif terpenuhi." />
+    <PageIntro eyebrow="Integrasi" title="Koneksi dan operasi" description="Lihat aktivitas autopilot, hambatan pengiriman, dan akses setiap layanan." />
     {notice && <div className={'notice ' + (noticeError ? 'notice-error' : 'notice-success')} role={noticeError ? 'alert' : 'status'}>{notice}</div>}
-    <section className="form-card autopilot-card">
-      <div className="section-heading"><div><p className="eyebrow">Freelancer Auto-Pilot</p><h2>Siklus operasi</h2></div><StateLabel state={status?.state ?? 'unknown'} /></div>
-      <p className="form-help">{autopilot.isError ? 'Status operasi tidak tersedia. Data lama disembunyikan.' : status?.lastMessage ?? 'Memuat status operasi dari server.'}</p>
-      <dl className="cycle-stats">
-        <div><dt>Proyek dipindai (siklus terakhir)</dt><dd>{status ? status.lastImported : '–'}</dd></div>
-        <div><dt>Bid terkirim (siklus terakhir)</dt><dd>{status ? status.lastSubmitted : '–'}</dd></div>
-        <div><dt>Siklus terakhir</dt><dd>{status?.lastRunAt ? formatDate(status.lastRunAt) : 'Belum ada'}</dd></div>
-        <div><dt>Pindai berikutnya</dt><dd>{status?.nextRunAt ? formatDate(status.nextRunAt) : 'Belum dijadwalkan'}</dd></div>
-      </dl>
-      {status?.specializations.length ? <div><p className="cycle-label">Kata kunci pencarian</p><div className="tag-row">{status.specializations.map((item) => <span className="skill-tag" key={item}>{item}</span>)}</div></div> : null}
-      <p className="provider-limit">Autopilot hanya mengirim bid pada proyek fixed price USD yang lolos kebijakan: {!savedPolicy.isError && savedPolicy.data ? `USD ${savedPolicy.data.minPrice}–${savedPolicy.data.maxPrice}, maksimal ${savedPolicy.data.dailyBidLimit} bid per hari dan ${savedPolicy.data.weeklyBidLimit} per minggu` : 'harga dan kuota tidak tersedia'}, serta risiko, deadline, confidence, dan jam kerja. Aplikasi tidak pernah mengirim pesan ke klien.</p>
-    </section>
+    <OperationStatus data={status} unavailable={autopilot.isError} />
     <HealthCard />
     <BrowserBiddingCard />
     <div className="capability-grid">
       <section className="form-card">
-        <div className="section-heading"><div><p className="eyebrow">Freelancer.com</p><h2>Capability marketplace</h2></div><StateLabel state={query.data.freelancerCredentials.verificationStatus} /></div>
-        {query.data.marketplace.map((item) => <div className="capability-row" key={item.operation}><div><strong>{item.operation.replaceAll('_', ' ')}</strong><p>{item.evidence}</p></div><div className="capability-status">{item.sandboxVerification ? <span title={'Diperiksa ' + formatDate(item.sandboxVerification.checkedAt)} className={'sandbox-http-status ' + (item.sandboxVerification.statusCode === 200 ? 'sandbox-http-ok' : '')}>{item.sandboxVerification.statusCode === null ? 'Hasil tidak diketahui · Sandbox' : 'HTTP ' + item.sandboxVerification.statusCode + ' · Sandbox'}</span> : <StateLabel state={item.status} />}</div></div>)}
+        <div className="section-heading"><div><p className="eyebrow">Freelancer.com</p><h2>Akses Freelancer</h2></div><StateLabel state={query.data.freelancerCredentials.verificationStatus} /></div>
+        <details className="card-disclosure"><summary>Rincian kemampuan API dan bukti pemeriksaan</summary>
+        {query.data.marketplace.map((item) => <div className="capability-row" key={item.operation}><div><strong>{operationLabels[item.operation] ?? item.operation.replaceAll('_', ' ')}</strong><p>{item.evidence}</p></div><div className="capability-status">{item.sandboxVerification ? <span title={'Diperiksa ' + formatDate(item.sandboxVerification.checkedAt)} className={'sandbox-http-status ' + (item.sandboxVerification.statusCode === 200 ? 'sandbox-http-ok' : '')}>{item.sandboxVerification.statusCode === null ? 'Hasil tidak diketahui · Sandbox' : 'HTTP ' + item.sandboxVerification.statusCode + ' · Sandbox'}</span> : <StateLabel state={item.status} />}</div></div>)}
         <div className="production-capability-status">
-          {query.data.marketplace.filter((item) => ['submit_bid', 'edit_profile', 'send_message'].includes(item.operation)).map((item) => <div key={item.operation}><strong>{item.operation.replaceAll('_', ' ')}</strong><StateLabel state={item.status} /><span>{item.productionVerification ? item.productionVerification.statusCode === null ? 'Hasil tidak diketahui · Production' : 'HTTP ' + item.productionVerification.statusCode + ' · Production' : 'Belum ada hasil live production'}</span></div>)}
+          {query.data.marketplace.filter((item) => ['submit_bid', 'edit_profile', 'send_message'].includes(item.operation)).map((item) => <div key={item.operation}><strong>{operationLabels[item.operation] ?? item.operation.replaceAll('_', ' ')}</strong><StateLabel state={item.status} /><span>{item.productionVerification ? item.productionVerification.statusCode === null ? 'Hasil tidak diketahui · Production' : 'HTTP ' + item.productionVerification.statusCode + ' · Production' : 'Belum ada hasil live production'}</span></div>)}
         </div>
-        <p className="provider-limit">Token Freelancer {query.data.freelancerCredentials.accessTokenConfigured ? 'tersimpan pada server lokal dan tidak dikirim ke browser' : 'belum diatur'}. Pemeriksaan baca-saja mencakup profil, proyek, portofolio, dan pesan. Isi pesan dan portofolio tidak disimpan.</p>
+        </details>
+        <p className="provider-limit">Token Freelancer {query.data.freelancerCredentials.accessTokenConfigured ? 'tersimpan pada server lokal dan tidak dikirim ke browser' : 'belum diatur'}. Pemeriksaan ini hanya membaca profil, proyek, portofolio, dan pesan.</p>
         <button type="button" className="button button-secondary" disabled={!query.data.freelancerCredentials.accessTokenConfigured || verifyFreelancer.isPending} onClick={() => verifyFreelancer.mutate()}>{verifyFreelancer.isPending ? 'Memeriksa koneksi...' : 'Periksa akses baca'}</button>
       </section>
       <section className="form-card">
-        <div className="section-heading"><div><p className="eyebrow">Sumber lain</p><h2>Knowledge dan drafting</h2></div></div>
+        <div className="section-heading"><div><p className="eyebrow">Sumber lain</p><h2>Pengetahuan dan penulisan draf</h2></div></div>
         <div className="capability-row"><div><strong>GitHub</strong><p>{query.data.github.scope}; mode read-only. Repositori publik dapat dibaca tanpa token, privat memerlukan token server.</p></div><StateLabel state={query.data.github.verificationStatus} /></div>
         <div className="capability-row"><div><strong>LinkedIn</strong><p>{query.data.linkedin.reason} Kredensial aplikasi {query.data.linkedin.clientConfigured ? 'sudah diatur untuk server ini' : 'belum diatur'}; {query.data.linkedin.authorized ? 'izin anggota tersimpan' : query.data.linkedin.verificationStatus === 'expired' ? 'token sudah kedaluwarsa' : 'consent anggota belum terverifikasi'}{query.data.linkedin.authorized && query.data.linkedin.accessTokenExpiresAt ? '; token berlaku hingga ' + formatDate(query.data.linkedin.accessTokenExpiresAt) : ''}.</p>{query.data.linkedin.redirectUri && <p>URL callback yang harus terdaftar di LinkedIn Developer Portal: <code>{query.data.linkedin.redirectUri}</code></p>}</div><StateLabel state={query.data.linkedin.verificationStatus} /></div>
         {query.data.linkedin.authorized

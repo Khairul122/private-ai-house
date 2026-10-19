@@ -518,28 +518,31 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .vo3d:fullscreen { height: 100vh; border-radius: 0; }
 .vo3d-canvas { position: absolute; inset: 0; }
 .vo3d-canvas canvas { touch-action: none; }
-.vo3d-fallback { display: grid; height: 100%; place-items: center; padding: 24px; color: var(--vo-muted); text-align: center; }
+.vo3d-fallback { display: grid; height: 100%; place-items: center; padding: 24px; background: #e8eeeb; color: #294237; text-align: center; }
 .vo3d button, .vo3d input { font: inherit; color: inherit; }
 .vo3d button { cursor: pointer; }
 .vo3d :focus-visible { outline: 2px solid var(--vo-focus); outline-offset: 2px; }
 .vo3d-float { position: absolute; z-index: 2; border: 1px solid var(--vo-line); border-radius: 14px; background: var(--vo-card); box-shadow: 0 6px 24px rgba(15, 23, 42, .12); backdrop-filter: blur(6px); }
-.vo3d-card { top: 16px; left: 16px; width: min(300px, calc(100% - 32px)); padding: 13px 16px; }
+.vo3d-left-rail { position: absolute; z-index: 2; top: 16px; bottom: 90px; left: 16px; display: flex; flex-direction: column; gap: 8px; width: 280px; pointer-events: none; }
+.vo3d-left-rail > * { position: static; flex-shrink: 0; pointer-events: auto; }
+.vo3d-card { width: 100%; padding: 14px; }
 .vo3d-card h1 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -.01em; }
 .vo3d-card p { display: flex; align-items: center; gap: 6px; margin: 4px 0 0; color: var(--vo-muted); font-size: 13px; }
-.vo3d-live { width: 10px; height: 10px; flex: none; border-radius: 50%; background: #2f9e44; box-shadow: 0 0 0 3px rgba(47, 158, 68, .2); }
+.vo3d-live { width: 7px; height: 7px; flex: none; border-radius: 50%; background: #286344; }
 .vo3d-live.is-off { background: #868e96; box-shadow: none; }
-.vo3d-roster { top: 214px; left: 16px; display: grid; width: 250px; max-height: calc(100% - 310px); gap: 6px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 2px; border: 0; background: none; box-shadow: none; backdrop-filter: none; }
-.vo3d-agent { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 50px; padding: 6px 12px 6px 6px; border: 1px solid var(--vo-line); border-radius: 999px; background: var(--vo-card); box-shadow: 0 3px 12px rgba(15, 23, 42, .1); text-align: left; transition: transform .15s ease; }
-.vo3d-agent:hover { transform: translateX(3px); }
+.vo3d-roster { display: grid; width: 100%; min-height: 0; flex-shrink: 1; gap: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 4px; }
+.vo3d-agent { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 58px; padding: 8px; border: 0; border-bottom: 1px solid var(--vo-line); border-radius: 0; background: none; box-shadow: none; text-align: left; }
+.vo3d-agent:hover { background: #eef1f4; }
 .vo3d-agent[aria-pressed='true'] { border-color: var(--vo-focus); box-shadow: 0 0 0 2px var(--vo-focus); }
-.vo3d-agent.is-offline { opacity: .55; }
+.vo3d-agent.is-offline { color: var(--vo-muted); }
 .vo3d-avatar { display: grid; width: 38px; height: 38px; flex: none; place-items: center; border-radius: 50%; color: #fff; font-size: 12px; font-weight: 700; text-shadow: 0 1px 1px rgba(0, 0, 0, .35); }
 .vo3d-agent strong, .vo3d-agent small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vo3d-agent strong { font-size: 13px; }
 .vo3d-agent small { display: flex; align-items: center; gap: 5px; color: var(--vo-muted); font-size: 11px; }
 .vo3d-agent > span:last-child { min-width: 0; }
 .vo3d-state-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; }
-.vo3d-roster-toggle { top: 214px; left: 16px; display: none; align-items: center; gap: 7px; min-height: 44px; padding: 0 14px; border-radius: 999px; font-weight: 600; }
+.vo3d-roster-toggle { display: flex; align-items: center; gap: 7px; min-height: 44px; padding: 0 12px; border-radius: 8px; font-size: 13px; font-weight: 600; }
+.vo3d-roster-toggle > span { margin-left: auto; color: var(--vo-muted); font-size: 12px; font-weight: 400; }
 .vo3d-tools { top: 16px; right: 16px; display: flex; gap: 8px; padding: 0; border: 0; background: none; box-shadow: none; backdrop-filter: none; }
 .vo3d-search { display: flex; align-items: center; gap: 8px; width: 270px; min-height: 44px; padding: 0 12px; border: 1px solid var(--vo-line); border-radius: 12px; background: var(--vo-card); box-shadow: 0 6px 24px rgba(15, 23, 42, .12); color: var(--vo-muted); }
 .vo3d-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: none; color: var(--vo-ink); }
@@ -600,7 +603,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* Mission Control as a full-screen office: pages open as cards over the 3D floor. */
-.vo3d-app { position: fixed; inset: 0; z-index: 1; height: auto; border-radius: 0; }
+.vo3d-app { position: fixed; inset: 0; z-index: 1; height: auto; min-height: 0; border-radius: 0; }
 .vo3d-card .vo3d-warn { color: #b02a1a; font-weight: 600; }
 .vo3d-cta { display: inline-flex; margin-top: 8px; padding: 6px 12px; border-radius: 999px; background: var(--vo-accent); color: #fff; font-size: 12px; font-weight: 700; text-decoration: none; }
 .vo3d-cta:hover { opacity: .9; }
@@ -610,8 +613,11 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .vo3d-menu > summary { list-style: none; cursor: pointer; }
 .vo3d-menu > summary::-webkit-details-marker { display: none; }
 .vo3d-menu[open] > summary { border-color: var(--vo-accent); background: var(--vo-accent); color: #fff; }
-.vo3d-menu nav { position: absolute; top: 52px; right: 0; display: grid; width: 230px; max-height: 70vh; overflow: auto; padding: 6px; border: 1px solid var(--vo-line); border-radius: 12px; background: #fff; box-shadow: 0 12px 32px rgba(15, 23, 42, .18); }
-.vo3d-menu nav a { padding: 9px 10px; border-radius: 8px; color: var(--vo-ink); font-size: 14px; font-weight: 600; text-decoration: none; }
+.vo3d-menu nav { position: absolute; top: 52px; right: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 420px; max-height: 65dvh; overflow: auto; padding: 12px; border: 1px solid var(--vo-line); border-radius: 10px; background: #fff; box-shadow: 0 12px 32px rgba(15, 23, 42, .18); }
+.vo3d-menu nav > a { grid-column: 1 / -1; }
+.vo3d-board-group { display: flex; flex-direction: column; min-width: 0; }
+.vo3d-board-group > strong { padding: 8px 10px; color: var(--vo-muted); font-size: 12px; }
+.vo3d-menu nav a { display: flex; align-items: center; min-height: 44px; padding: 8px 10px; border-radius: 6px; color: var(--vo-ink); font-size: 14px; font-weight: 500; text-decoration: none; }
 .vo3d-menu nav a:hover, .vo3d-menu nav a:focus-visible { background: rgba(31, 41, 51, .07); }
 .vo3d-toast { top: 76px; left: 50%; padding: 10px 14px; transform: translateX(-50%); color: #b02a1a; font-weight: 600; }
 .vo3d-sheet-backdrop { position: absolute; inset: 0; z-index: 5; display: flex; justify-content: flex-end; background: rgba(15, 23, 42, .18); }
@@ -912,10 +918,6 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .vo3d-sheet-body details { margin-top: 16px; }
 .vo3d-sheet-body summary { width: fit-content; max-width: 100%; padding: 10px 0; cursor: pointer; font-weight: 600; color: var(--accent-text); }
 .vo3d-sheet-body summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
-.sheet-tools { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; padding: 12px 24px; background: var(--surface); border-bottom: 1px solid var(--line); }
-.sheet-tools label { display: flex; flex: 1 1 200px; align-items: center; gap: 12px; color: var(--muted); font-size: 13px; }
-.sheet-tools select { flex: 1; min-width: 0; min-height: 44px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; color: var(--ink); background: #fff; font-size: 16px; }
-.sheet-tools .button { min-height: 44px; }
 .operation-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); gap: 16px; margin: 20px 0; }
 .operation-facts dt { color: var(--muted); font-size: 13px; }
 .operation-facts dd { margin: 4px 0 0; font-weight: 600; }
@@ -938,10 +940,6 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .vo3d-sheet-body .filter-bar { flex-wrap: wrap; align-items: end; }
 .vo3d-sheet-body .filter-bar .search-field { flex: 1 1 250px; min-width: 0; }
 @media (max-width: 640px) {
-  .sheet-tools { padding: 10px 16px; gap: 8px; }
-  .sheet-tools label { flex-basis: 100%; }
-  .sheet-tools label > span { flex: 0 0 70px; }
-  .sheet-tools > .button { width: 100%; }
   .vo3d-sheet-body .metrics-row { grid-template-columns: minmax(0, 1fr); }
   .vo3d-sheet-body .section-heading { flex-wrap: wrap; }
   .vo3d-sheet-body :is(.knowledge-grid, .form-grid-three, .form-grid, .policy-facts) { grid-template-columns: minmax(0, 1fr); }
@@ -1075,4 +1073,131 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
   .pci-stage-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .projects-co-id-page .form-actions { align-items: stretch; }
   .projects-co-id-page .form-actions > .button { flex: 1 1 100%; }
+}
+
+/* Shared reading hierarchy for the office drawers. */
+.vo3d-sheet { --focus: #294237; --copper: #294237; --accent-text: #294237; --line: #d9dfdb; --surface-muted: #f0f3f0; --page: #f6f7f5; --muted: #536159; border-radius: 12px; }
+.vo3d-sheet .button-primary { background: #294237; }
+.vo3d-sheet-body .button-primary:hover:not(:disabled) { background: #20372d; }
+.vo3d-sheet-body.page-content { padding: 22px 24px 36px; }
+.vo3d-sheet-head { gap: 8px; padding: 12px 16px 12px 24px; }
+.sheet-heading { display: flex; flex: 1; flex-wrap: wrap; align-items: center; gap: 4px 16px; min-width: 0; }
+.sheet-heading h2 { font-size: 20px; }
+.sheet-refresh { flex-shrink: 0; }
+.sheet-navigation { position: relative; font-size: 13px; }
+.sheet-navigation > summary { display: flex; align-items: center; min-height: 44px; padding: 0 8px; cursor: pointer; color: var(--accent-text); font-weight: 600; }
+.sheet-navigation > summary::after { content: '⌄'; margin-left: 8px; }
+.sheet-navigation nav { position: absolute; z-index: 4; top: 100%; left: 0; display: grid; width: 250px; max-height: 65dvh; overflow: auto; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: 0 10px 24px #17271f26; }
+.sheet-navigation a { display: flex; align-items: center; min-height: 44px; padding: 8px 12px; border-radius: 4px; color: var(--ink); text-decoration: none; }
+.sheet-navigation a:hover, .sheet-navigation a[aria-current='page'] { background: var(--surface-muted); }
+.sheet-data-status { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; padding: 8px 24px; border-bottom: 1px solid var(--line); background: var(--surface); color: var(--muted); font-size: 12px; line-height: 1.5; }
+.vo3d-sheet-body .card-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 0; margin: 0 0 24px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.vo3d-sheet-body .card-summary-grid .metric { min-width: 0; padding: 16px; border: 0; border-radius: 0; border-right: 1px solid var(--line); box-shadow: none; background: var(--surface); color: var(--ink); }
+.vo3d-sheet-body .card-summary-grid .metric:last-child { border-right: 0; }
+.vo3d-sheet-body .card-summary-grid .metric :is(span, small) { color: var(--muted); }
+.vo3d-sheet-body .card-summary-grid .metric:hover { transform: none; box-shadow: none; }
+.vo3d-sheet-body .card-summary-grid .metric-link:hover { background: var(--surface-muted); }
+.vo3d-sheet-body .card-summary-grid .metric strong { font-size: 26px; line-height: 1.2; }
+.vo3d-sheet-body .card-summary-grid .metric small { font-size: 13px; line-height: 1.5; }
+.vo3d-sheet-body .card-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 20px; margin: 16px 0; }
+.vo3d-sheet-body .card-toolbar > .form-field { flex: 1 1 220px; }
+.vo3d-sheet-body .card-status-note { margin: 12px 0 20px; color: var(--muted); font-size: 14px; line-height: 1.6; }
+.vo3d-sheet-body .card-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 16px; margin: 16px 0; }
+.vo3d-sheet-body .card-facts > div { min-width: 0; }
+.vo3d-sheet-body .card-facts dt { color: var(--muted); font-size: 13px; }
+.vo3d-sheet-body .card-facts dd { margin: 4px 0 0; font-weight: 600; }
+.vo3d-sheet-body .card-disclosure { margin-top: 12px; border-top: 1px solid var(--line); }
+.vo3d-sheet-body .card-disclosure > summary { display: list-item; width: 100%; min-height: 44px; padding: 12px 0; font-size: 14px; }
+.vo3d-sheet-body :is(.form-card, .activity-preview, .policy-card, .calendar-card, .agent-card, .opportunity-row) { border-radius: 8px; }
+.vo3d-sheet-body :is(.queue-item, .pipeline-row, .kanban-card, .agent-card):hover { transform: none; box-shadow: none; }
+.vo3d-sheet-body .agent-card-header { flex-wrap: wrap; }
+.vo3d-sheet-body .agent-card-header > div { flex: 1 1 160px; }
+.vo3d-sheet-body .agent-reason { flex: 1 0 100%; color: var(--muted); font-size: 14px; line-height: 1.5; }
+.notice-warning { border: 1px solid #d6bd86; background: #fbf4e4; color: #6e5019; }
+
+/* Office controls occupy separate rails; their height follows their content. */
+.vo3d-office-layer { display: contents; }
+.vo3d { --vo-card: #fffffff5; --vo-muted: #536159; --vo-line: #d9dfdb; --vo-focus: #294237; }
+.vo3d-float { border-radius: 8px; box-shadow: 0 3px 14px #1f35221a; }
+.vo3d-mission-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.vo3d-card h1 { font-size: 17px; }
+.vo3d-connection { display: inline-flex; align-items: center; gap: 6px; color: var(--vo-muted); font-size: 12px; }
+.vo3d-connection.is-unavailable { color: #973d37; }
+.vo3d-mission-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 6px 0; color: var(--vo-muted); font-size: 12px; }
+.vo3d-mission-meta a { display: flex; min-height: 32px; align-items: center; color: #294237; }
+.vo3d-mission-details { margin-top: 10px; border-top: 1px solid var(--vo-line); }
+.vo3d-mission-details summary { min-height: 44px; padding-top: 12px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.vo3d-mission-details p { display: block; margin-bottom: 8px; font-size: 12px; line-height: 1.5; }
+.vo3d-mission-details a { color: inherit; text-decoration: underline; }
+.vo3d-last-warning { display: block; margin-top: 8px; color: #973d37; font-size: 12px; line-height: 1.5; }
+.vo3d-left-rail { overflow: hidden; }
+.vo3d-left-rail .vo3d-card { width: 100%; }
+.vo3d-left-rail .vo3d-roster { width: 100%; max-height: none; }
+.vo3d-agent small { font-size: 12px; }
+.vo3d-avatar { border: 2px solid var(--vo-line); background: #f0f3f0; color: #294237; text-shadow: none; }
+.vo3d-owner-avatar { background: var(--vo-ink); color: #fff; }
+.vo3d-agent .vo3d-avatar { width: 32px; height: 32px; border-radius: 6px; }
+.vo3d-agent.is-offline .vo3d-avatar { filter: grayscale(1); }
+.vo3d-tools { max-width: calc(100% - 328px); align-items: start; }
+.vo3d :is(.vo3d-icon, .vo3d-owner-action, .vo3d-kill, .vo3d-search) { border-radius: 8px; box-shadow: none; }
+.vo3d-board-action { display: flex; gap: 7px; width: auto; min-width: 92px; padding: 0 12px; font-weight: 600; }
+.vo3d-search { width: 240px; }
+.vo3d-dock { left: 312px; right: 228px; width: fit-content; max-width: calc(100% - 556px); transform: none; padding: 4px; }
+.vo3d-dock button { min-height: 44px; padding: 0 10px; border-radius: 4px; font-size: 13px; }
+.vo3d-seg { padding: 4px; }
+.vo3d-panel { width: 360px; }
+.vo3d-panel-body { font-size: 14px; line-height: 1.5; }
+.vo3d-panel-body h2 { margin-top: 20px; font-size: 15px; }
+.vo3d-panel-body :is(dt, .vo3d-owner-hint) { font-size: 13px; }
+.vo3d-panel-disclosure { margin: 12px 0; border-block: 1px solid var(--vo-line); }
+.vo3d-panel-disclosure + .vo3d-panel-disclosure { border-top: 0; margin-top: -12px; }
+.vo3d-panel-disclosure > summary { min-height: 44px; padding: 12px 0; cursor: pointer; color: #294237; font-weight: 600; }
+.vo3d-mission-details[open] { max-height: 190px; overflow: auto; }
+.vo3d-owner-summary > div { border: 0; border-bottom: 1px solid var(--vo-line); border-radius: 0; }
+.vo3d-owner-agent-list { gap: 0; }
+.vo3d-owner-agent-list button { border: 0; border-bottom: 1px solid var(--vo-line); border-radius: 0; }
+@media (max-width: 1100px) {
+  .vo3d-tools { flex-wrap: wrap; justify-content: flex-end; }
+  .vo3d-tools .vo3d-search-wrap { order: 5; flex: 1 0 100%; }
+  .vo3d-tools .vo3d-search { width: 100%; }
+  .vo3d-panel { top: 124px; max-height: calc(100% - 210px); }
+  .vo3d-dock { left: 16px; right: 228px; max-width: calc(100% - 260px); }
+}
+@media (max-width: 760px) {
+  .vo3d-tools { top: 12px; left: 12px; right: 12px; max-width: none; flex-wrap: wrap; justify-content: flex-start; gap: 6px; }
+  .vo3d-tools .vo3d-search-wrap { display: block; order: 5; flex: 1 0 100%; }
+  .vo3d-search { width: 100%; }
+  .vo3d-search kbd { display: none; }
+  .vo3d-tools .vo3d-kill { flex: 1; min-width: 0; padding: 0 8px; font-size: 12px; }
+  .vo3d-tools .vo3d-owner-action { min-width: 44px; padding: 0 8px; font-size: 12px; }
+  .vo3d-tools .vo3d-board-action { min-width: 44px; padding: 0 8px; font-size: 12px; }
+  .vo3d-left-rail { top: 114px; left: 12px; bottom: 138px; width: min(280px, calc(100% - 24px)); }
+  .vo3d-left-rail .vo3d-card { padding: 12px; }
+  .vo3d-menu nav { position: fixed; top: 112px; left: 12px; right: 12px; width: auto; max-height: calc(100dvh - 250px); }
+  .vo3d-panel { top: auto; bottom: 0; width: 100%; max-height: 65dvh; }
+  .vo3d-dock { left: 12px; right: 12px; bottom: 70px; max-width: calc(100% - 24px); }
+  .vo3d-seg { left: 12px; right: auto; bottom: 12px; }
+  .vo3d-sheet { border-radius: 0; }
+  .vo3d-sheet-head { padding: 8px 12px; }
+  .sheet-heading { display: block; }
+  .sheet-heading h2 { font-size: 18px; }
+  .sheet-navigation > summary { min-height: 32px; padding: 4px 0; font-size: 12px; }
+  .sheet-navigation nav { position: fixed; left: 12px; right: 12px; top: 82px; width: auto; }
+  .sheet-data-status { padding: 8px 16px; font-size: 12px; }
+  .vo3d-sheet-body.page-content { padding: 18px 16px 32px; }
+  .vo3d-sheet-body .card-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .vo3d-sheet-body .card-summary-grid .metric { padding: 12px; border-bottom: 1px solid var(--line); }
+  .vo3d-sheet-body .card-toolbar { align-items: stretch; }
+}
+@media (max-width: 360px) {
+  .vo3d-sheet-body .card-summary-grid { grid-template-columns: minmax(0, 1fr); }
+  .vo3d-menu nav { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-height: 600px) and (min-width: 761px) {
+  .vo3d-left-rail { bottom: 84px; }
+  .vo3d-card { padding: 10px 12px; }
+  .vo3d-panel { max-height: calc(100% - 150px); }
+}
+@media (max-height: 720px) {
+  .vo3d-left-rail:has(.vo3d-roster:not(.is-collapsed)) .vo3d-card { max-height: 150px; min-height: 0; flex-shrink: 1; overflow: auto; }
 }

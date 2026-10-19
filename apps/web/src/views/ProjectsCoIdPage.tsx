@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
 import { PROJECTS_CO_ID_FIELDS, projectsCoIdFieldsOf, projectsCoIdSettings } from '@fvh/domain';
 import { api, jsonRequest, type Policy } from '../api/api.js';
+import { PageIntro } from '../components/ui.js';
 import type { ProjectsCoIdEntry, ProjectsCoIdStatus } from '../api/projects-co-id-api.js';
 
 const rupiah = (amount: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(amount);
@@ -28,14 +29,15 @@ export default function ProjectsCoIdPage() {
   const client = useQueryClient();
   const [params, setParams] = useSearchParams();
   const focusId = params.get('project');
-  const status = useQuery({ queryKey: ['projects-co-id'], queryFn: () => api<ProjectsCoIdStatus | null>('/projects-co-id'), refetchInterval: 3000 });
-  const entries = useQuery({ queryKey: ['projects-co-id-drafts'], queryFn: () => api<ProjectsCoIdEntry[]>('/projects-co-id/drafts'), refetchInterval: 5000 });
-  const policy = useQuery({ queryKey: ['policy'], queryFn: () => api<Policy>('/policy') });
+  const status = useQuery({ queryKey: ['projects-co-id'], queryFn: () => api<ProjectsCoIdStatus | null>('/projects-co-id'), refetchInterval: 10_000 });
+  const entries = useQuery({ queryKey: ['projects-co-id-drafts'], queryFn: () => api<ProjectsCoIdEntry[]>('/projects-co-id/drafts'), refetchInterval: 30_000 });
+  const policy = useQuery({ queryKey: ['policy'], queryFn: () => api<Policy>('/policy'), refetchInterval: 30_000 });
   const [stage, setStage] = useState<Stage | 'all'>(focusId ? 'all' : 'ready');
   const [field, setField] = useState('all');
   const [author, setAuthor] = useState<'all' | 'hermes' | 'template'>('all');
   const [sort, setSort] = useState<Sort>('score');
   const [search, setSearch] = useState('');
+  const [proposalEdits, setProposalEdits] = useState<Record<string, string | null>>({});
   const [notice, setNotice] = useState('');
   // Follows the worker state until the owner opens, closes or uses the panel, then stays where they left it.
   const [connectionOpen, setConnectionOpen] = useState<boolean | null>(null);
@@ -63,7 +65,7 @@ export default function ProjectsCoIdPage() {
   const run = (input: { action: 'open' | 'check' | 'scan' | 'close' | 'mode'; mode?: ProjectsCoIdStatus['mode'] }) => { setConnectionOpen(true); control.mutate(input); };
 
   return <div className="projects-co-id-page">
-    <div className="page-intro"><h1>projects.co.id</h1><p>Scout membaca proyek sesuai bidang, kata kunci dan profil Anda, lalu Hermes menyiapkan draf Bahasa Indonesia. Anda meninjau dan mengirim penawaran sendiri di situs.</p></div>
+    <PageIntro eyebrow="projects.co.id" title="Peluang dan draf Rupiah" description="Scout memindai proyek; Hermes menyiapkan proposal Bahasa Indonesia. Tinjau draf dan kirim sendiri melalui projects.co.id." />
     {notice && <p className="notice notice-success" role="status">{notice}</p>}
     {control.isError && <p className="notice notice-error" role="alert">{control.error.message}</p>}
 
@@ -75,30 +77,33 @@ export default function ProjectsCoIdPage() {
       {status.isError && <p role="alert">Status worker tidak tersedia. <button className="button button-text" onClick={() => status.refetch()}>Coba lagi</button></p>}
       {worker && <>
         <p role="status" className="pci-reason">{worker.reason}</p>
-        <dl className="pci-facts">
+        <dl className="card-facts">
           <div><dt>Akun teramati</dt><dd>{worker.username ?? 'Tidak diketahui'}</dd></div>
           <div><dt>Pemindaian terakhir</dt><dd>{date(worker.lastScanAt)}{worker.lastResult ? ` · ${worker.lastResult.imported} proyek` : ''}</dd></div>
           <div><dt>Draf otomatis</dt><dd>{worker.draftUsage.today}/{worker.draftUsage.dailyLimit} hari ini · {worker.draftUsage.week}/{worker.draftUsage.weeklyLimit} minggu ini</dd></div>
-          <div><dt>Request tulis diblokir</dt><dd>{worker.blockedWrites}</dd></div>
+          <div><dt>Pemeriksaan akun</dt><dd>{date(worker.checkedAt)}</dd></div>
+          <div><dt>Respons halaman</dt><dd>{worker.pageStatus === null ? 'Tidak diketahui' : `HTTP ${worker.pageStatus}`}</dd></div>
+          {worker.telegram && <div><dt>Kanal proyek baru</dt><dd>{worker.telegram.ok === null ? 'Belum diperiksa' : worker.telegram.ok ? 'Pemeriksaan terakhir berhasil' : 'Pemeriksaan terakhir gagal'} · {date(worker.telegram.lastCheckedAt)}</dd></div>}
         </dl>
+        <p className="form-help">HTTP menunjukkan respons halaman; akun hanya terverifikasi bila username terbaca.</p>
+        <div className="card-toolbar"><button className="button button-primary" disabled={busy || !workerOk} onClick={() => run({ action: 'scan' })}>Pindai sekarang</button><button className="button button-secondary" disabled={busy || ['stopped', 'paused'].includes(worker.state) || worker.mode === 'off'} onClick={() => run({ action: 'check' })}>Periksa akun</button></div>
       </>}
       <div className="pci-stage-strip" role="group" aria-label="Ringkasan proyek per tahap">
         {STAGES.map(([key, label]) => <button type="button" key={key} aria-pressed={stage === key} className={stage === key ? 'active' : ''} onClick={() => setStage(stage === key ? 'all' : key)}><strong>{projects ? counts[key] : '–'}</strong><span>{label}</span></button>)}
       </div>
     </section>
 
-    {worker && <details className="pci-panel" open={connectionOpen ?? !workerOk} onToggle={event => { const open = event.currentTarget.open; if (open !== (connectionOpen ?? !workerOk)) setConnectionOpen(open); }}>
+    {worker && <details className="pci-panel card-disclosure" open={connectionOpen ?? !workerOk} onToggle={event => { const open = event.currentTarget.open; if (open !== (connectionOpen ?? !workerOk)) setConnectionOpen(open); }}>
       <summary>Koneksi & mode worker</summary>
       <label className="form-field"><span>Mode worker</span><select value={worker.mode} disabled={busy} onChange={e => run({ action: 'mode', mode: e.target.value as ProjectsCoIdStatus['mode'] })}>{Object.entries(modeLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
       <div className="form-actions">
         <button className="button button-primary" disabled={busy || worker.mode === 'off' || worker.state === 'paused'} onClick={() => run({ action: 'open' })}>Hubungkan Chrome saya</button>
-        <button className="button button-secondary" disabled={busy || ['stopped', 'paused'].includes(worker.state) || worker.mode === 'off'} onClick={() => run({ action: 'check' })}>Periksa akun</button>
-        <button className="button button-secondary" disabled={busy || !workerOk} onClick={() => run({ action: 'scan' })}>Pindai sekarang</button>
         <button className="button button-text" disabled={control.isPending} onClick={() => run({ action: 'close' })}>Lepas sambungan</button>
       </div>
       <p className="form-help">Login sebagai {settings?.username ?? 'akun di Kebijakan'} dan selesaikan verifikasi Cloudflare di tab Chrome biasa pada profil yang sama, lalu Periksa akun. Tab worker memblokir semua request tulis. Jeda automasi juga menghentikan Scout.</p>
     </details>}
 
+    <details className="card-disclosure"><summary>Pencarian dan batas draf</summary>
     <section className="pci-panel pci-search" aria-labelledby="pci-search-title">
       <div className="pci-overview-head"><h2 id="pci-search-title">Pencarian & batas</h2><Link className="button button-text" to="/policy#projects-co-id-policy">Ubah di Kebijakan</Link></div>
       {policy.isError ? <p role="alert">Kebijakan tidak tersedia.</p> : !settings ? <p role="status">Memuat kebijakan…</p> : <>
@@ -112,11 +117,13 @@ export default function ProjectsCoIdPage() {
           {worker.searchTerms.length ? worker.searchTerms.map(term => <span key={term} className={`skill-tag${worker.lastSearchTerms.includes(term) ? ' pci-term-used' : ''}`}>{term}</span>) : <span className="form-help">Tanpa istilah; Scout membaca daftar proyek terbaru.</span>}
         </div>}
         {worker && worker.searchTerms.length > 3 && <p className="form-help">Ditandai = dipakai pada pemindaian terakhir. Tiga istilah per pemindaian, bergiliran.</p>}
+        {worker?.pageBudget && <p className="form-help">Halaman dibuka dalam 30 menit: {worker.pageBudget.used}/{worker.pageBudget.limit}{worker.pageBudget.nextFreeAt ? ` · Slot tersedia ${date(worker.pageBudget.nextFreeAt)}` : ''}. Request tulis diblokir: {worker?.blockedWrites ?? 'Tidak diketahui'}.</p>}
       </>}
     </section>
+    </details>
 
     <section aria-labelledby="pci-queue-title" className="pci-queue">
-      <div className="pci-overview-head"><h2 id="pci-queue-title">{stage === 'all' ? 'Semua proyek' : STAGES.find(([key]) => key === stage)![1]} ({visible.length})</h2>
+      <div className="pci-overview-head"><h2 id="pci-queue-title">{stage === 'all' ? 'Semua proyek' : STAGES.find(([key]) => key === stage)![1]} ({projects ? visible.length : '–'})</h2>
         <span className="pci-links"><Link to="/pipeline?source=projects_co_id">Pipeline</Link> · <Link to="/tasks?source=projects_co_id">Papan tugas</Link> · <Link to="/activity?source=projects_co_id">Aktivitas</Link></span></div>
       <div className="pci-filters">
         <label className="form-field"><span>Tahap</span><select value={stage} onChange={e => setStage(e.target.value as Stage | 'all')}><option value="all">Semua tahap</option>{STAGES.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
@@ -129,21 +136,22 @@ export default function ProjectsCoIdPage() {
       {entries.isError && <p className="notice notice-error" role="alert">Proyek dan draf tidak tersedia. <button className="button button-text" onClick={() => entries.refetch()}>Muat ulang</button></p>}
       {projects && !visible.length && <p className="form-help">Tidak ada proyek sesuai filter. {stage === 'ready' ? 'Pilih mode draf atau buat draf dari tahap Tanpa draf.' : 'Ubah filter atau pindai lagi.'}</p>}
       {visible.map(({ project, stage: itemStage, fields }) => <ProjectEntry key={project.latestDraft?.id ?? project.id} project={project} stage={itemStage!} fields={fields} focused={project.id === focusId}
+        proposalEdit={proposalEdits[project.id]} onProposalChange={value => setProposalEdits(current => ({ ...current, [project.id]: value }))}
         refresh={refresh} canDraft={!busy && !!worker && worker.mode !== 'off' && workerOk} onClearFocus={() => setParams({}, { replace: true })} />)}
     </section>
   </div>;
 }
 
-function ProjectEntry({ project, stage, fields, focused, refresh, canDraft, onClearFocus }: { project: ProjectsCoIdEntry; stage: Stage; fields: string[]; focused: boolean; refresh: () => Promise<void>; canDraft: boolean; onClearFocus: () => void }) {
+function ProjectEntry({ project, stage, fields, focused, refresh, canDraft, onClearFocus, proposalEdit, onProposalChange }: { project: ProjectsCoIdEntry; stage: Stage; fields: string[]; focused: boolean; refresh: () => Promise<void>; canDraft: boolean; onClearFocus: () => void; proposalEdit: string | null | undefined; onProposalChange: (value: string | null) => void }) {
   const draft = project.latestDraft;
-  const [proposal, setProposal] = useState(draft?.proposal ?? '');
+  const proposal = proposalEdit ?? draft?.proposal ?? '';
   const [notice, setNotice] = useState('');
   const [copiedError, setCopiedError] = useState(false);
   const action = useMutation({
     mutationFn: (name: 'save' | 'draft' | 'mark-sent' | 'skip' | 'won') => name === 'save'
       ? api(`/drafts/${draft!.id}`, jsonRequest('PUT', { proposal, proposedPrice: draft!.proposedPrice }))
       : api(`/projects-co-id/projects/${encodeURIComponent(project.id)}/${name}`, jsonRequest('POST', name === 'draft' ? {} : { confirm: true })),
-    onSuccess: async (_result, name) => { setNotice(name === 'won' ? 'Proyek aktif dibuat di Proyek & Pendapatan.' : 'Perubahan tersimpan.'); await refresh(); },
+    onSuccess: async (_result, name) => { setNotice(name === 'won' ? 'Proyek aktif dibuat di Proyek & Pendapatan.' : 'Perubahan tersimpan.'); await refresh(); if (name === 'save') onProposalChange(null); },
   });
   async function copy() {
     try { await navigator.clipboard.writeText(proposal); setCopiedError(false); setNotice('Proposal disalin.'); }
@@ -162,21 +170,22 @@ function ProjectEntry({ project, stage, fields, focused, refresh, canDraft, onCl
     </div>
     <h3 id={`pci-title-${project.id}`}>{project.title}</h3>
     {ownerNote && <p className="pci-owner-note">{ownerNote} · {date(project.ownerActionAt)}</p>}
-    <dl className="pci-facts pci-entry-facts">
+    <dl className="card-facts pci-entry-facts">
       <div><dt>Anggaran klien</dt><dd>{rupiah(project.budgetMin)} – {rupiah(project.budgetMax)}</dd></div>
       <div><dt>Harga & durasi draf</dt><dd>{draft ? `${rupiah(draft.proposedPrice)} · ${draft.durationDays} hari` : 'Belum ada draf'}</dd></div>
       <div><dt>Listing ditutup</dt><dd>{project.closesAt ? `${date(project.closesAt)}${closing !== null && closing >= 0 ? ` · ${closing} hari lagi` : ' · sudah lewat'}` : 'Tidak diberikan situs'}</dd></div>
-      <div><dt>Terbit</dt><dd>{date(project.createdAt)}</dd></div>
+      <div><dt>Terbit</dt><dd>{project.createdAt ? date(project.createdAt) : 'Tidak tersedia'}</dd></div>
       {authorText && <div><dt>Penulis draf</dt><dd>{authorText}</dd></div>}
     </dl>
-    <details className="pci-brief"><summary>Brief, skill dan alasan skor</summary>
+    <details className="pci-brief card-disclosure"><summary>Brief, skill dan alasan skor</summary>
       <p className="pci-description">{project.description}</p>
       {project.skills.length > 0 && <div className="tag-row">{project.skills.map(skill => <span className="skill-tag" key={skill}>{skill}</span>)}</div>}
       <ul className="pci-factors">{project.factors.map(factor => <li key={factor.key}><span>{factor.label}</span><strong>{factor.value}</strong><em>{factor.points > 0 ? '+' : ''}{factor.points}</em></li>)}</ul>
     </details>
     {draft && editable && <>
-      <label className="form-field"><span>Proposal untuk {project.title}</span><textarea rows={8} maxLength={1200} value={proposal} onChange={e => setProposal(e.target.value)} /></label>
-      <p className="form-help">{proposal.length}/1.200 karakter{proposal !== draft.proposal ? ' · Perubahan belum disimpan.' : ''} Harga dan durasi ditetapkan Kebijakan; sesuaikan di situs bila perlu.</p>
+      <details className="card-disclosure" open={focused || undefined}><summary>Tinjau dan edit proposal{proposal !== draft.proposal ? ' · Belum disimpan' : ''}</summary>
+      <label className="form-field"><span>Proposal untuk {project.title}</span><textarea rows={8} maxLength={1200} readOnly={action.isPending} value={proposal} onChange={e => onProposalChange(e.target.value)} /></label>
+      <p className="form-help">{proposal.length}/1.200 karakter{proposal !== draft.proposal ? ' · Perubahan belum disimpan.' : ''} Harga dan durasi ditetapkan Kebijakan; sesuaikan di situs bila perlu.</p></details>
     </>}
     {draft && !editable && <details className="pci-brief"><summary>Proposal yang disiapkan</summary><p className="pci-description">{draft.proposal}</p></details>}
     {action.isPending && <p role="status">{action.variables === 'draft' ? 'Hermes sedang menulis draf; biasanya 40–95 detik.' : 'Menyimpan…'}</p>}

@@ -7,7 +7,7 @@ import type { BrowserBiddingStatus } from '../api/browser-bidding-api.js';
 import type { OperationsData } from '../api/operations-api.js';
 import { OPERATIONS_ROSTER } from '@fvh/domain';
 import { kanbanQuery } from '../api/queries.js';
-import { ErrorNotice, LoadingPanel, PageIntro, OperationStatus } from '../components/ui.js';
+import { ErrorNotice, LoadingPanel, PageIntro, Metric } from '../components/ui.js';
 import { formatDate } from '../components/format.js';
 
 export default function AgentsPage() {
@@ -19,14 +19,14 @@ export default function AgentsPage() {
     policy: { state: Policy['state']; version: number };
     counts: { openProjects: number; drafts: number; policySkips: number; knowledgeSources: number };
     activity: AuditEvent[];
-  }>('/dashboard') });
-  const autopilot = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 30_000 });
-  const profile = useQuery({ queryKey: ['profile'], queryFn: () => api<Profile>('/profile') });
+  }>('/dashboard'), refetchInterval: 10_000 });
+  const autopilot = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 10_000 });
+  const profile = useQuery({ queryKey: ['profile'], queryFn: () => api<Profile>('/profile'), refetchInterval: 30_000 });
   const browserBidding = useQuery({queryKey:['browser-bidding'],queryFn:()=>api<BrowserBiddingStatus|null>('/browser-bidding'),refetchInterval:3000});
-  const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: () => api<Capabilities>('/capabilities') });
-  const sync = useQuery({ queryKey: ['business-sync'], queryFn: () => api<BusinessSyncStatus | null>('/business-sync'), refetchInterval: 30_000 });
-  const inbox = useQuery({ queryKey: ['inbox'], queryFn: () => api<Inbox>('/inbox'), refetchInterval: 60_000 });
-  const work = useQuery({ queryKey: ['work'], queryFn: () => api<Work>('/work'), refetchInterval: 60_000 });
+  const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: () => api<Capabilities>('/capabilities'), refetchInterval: 10_000 });
+  const sync = useQuery({ queryKey: ['business-sync'], queryFn: () => api<BusinessSyncStatus | null>('/business-sync'), refetchInterval: 10_000 });
+  const inbox = useQuery({ queryKey: ['inbox'], queryFn: () => api<Inbox>('/inbox'), refetchInterval: 10_000 });
+  const work = useQuery({ queryKey: ['work'], queryFn: () => api<Work>('/work'), refetchInterval: 10_000 });
 
   if (dashboard.isPending || profile.isPending || capabilities.isPending) return <LoadingPanel label="Menyiapkan data karyawan virtual..." />;
   if (dashboard.isError || profile.isError || capabilities.isError) return <ErrorNotice message="Gagal memuat status karyawan virtual." />;
@@ -62,7 +62,7 @@ export default function AgentsPage() {
       role: 'Pencari & Penilai Pasar',
       task: 'Menyaring peluang proyek dari provider Freelancer resmi dan menghitung skor kecocokan berdasarkan profil keahlian.',
       boundary: 'Hanya membaca proyek tersinkron resmi; tidak melakukan scraping mandiri atau bypass rate limit.',
-      metric: `${dashboard.data.counts.openProjects} peluang telah dipindai & dinilai`,
+      metric: `${dashboard.data.counts.openProjects} peluang terbuka tersimpan (semua sumber)`,
     },
     {
       id: 'bid-strategist',
@@ -87,7 +87,7 @@ export default function AgentsPage() {
       name: 'Client Relations',
       dept: 'Client Relations',
       role: 'Manajer Komunikasi Klien',
-      task: 'Membaca pesan Freelancer setiap 10 menit, menandai pesan yang menunggu balasan, dan bid yang perlu ditindaklanjuti.',
+      task: 'Membaca pesan Freelancer, menandai pesan yang menunggu balasan, dan bid yang perlu ditindaklanjuti.',
       boundary: 'Baca-saja; tidak pernah mengirim pesan atau menyepakati kontrak, milestone, maupun komitmen finansial.',
       metric: inboxWaiting === undefined ? 'Status kotak masuk tidak tersedia' : `${inboxWaiting} pesan menunggu balasan`,
     },
@@ -135,14 +135,21 @@ export default function AgentsPage() {
   return <>
     <PageIntro
       eyebrow="Organisasi virtual"
-      title={`${agents.length} peran spesialis, satu kendali pemilik.`}
-      description="Peran virtual mencerminkan proses aplikasi. Autopilot, sinkronisasi bisnis, dan Hermes memberi sinyal kerja nyata; peran lainnya bekerja saat fiturnya dipanggil."
+      title="Tim AI"
+      description="Lihat aktivitas nyata tiap agen. Buka detail peran untuk tugas dan batas aksesnya."
     />
-    <OperationStatus data={autopilot.isError ? undefined : autopilot.data} unavailable={autopilot.isError} />
-    <p className="notice">Bekerja berarti ada proses nyata yang sedang berjalan. Idle berarti siap atau bekerja saat dipanggil. QA Engineer belum memiliki proses runtime.</p>
+    <section className="card-summary-grid" aria-label="Status kru">
+      <Metric label="Sedang bertugas" value={derived.filter(a => ['working', 'reviewing', 'collaborating'].includes(a.state)).length} note="Proses nyata atau kartu Hermes aktif" />
+      <Metric label="Idle" value={derived.filter(a => a.state === 'idle').length} note="Siap menerima tugas atau menunggu jadwal" />
+      <Metric label="Offline" value={derived.filter(a => a.state === 'offline').length} note="Lihat alasan pada agen terkait" />
+      <Metric label="Belum diketahui" value={derived.filter(a => a.state === 'unknown').length} note="Sinyal server belum tersedia" />
+    </section>
+    <p className="card-status-note">Status mengikuti proses aplikasi dan kartu kanban Hermes. Idle berarti tidak ada pekerjaan aktif; Offline memiliki alasan pada masing-masing agen.</p>
     <div className="agent-grid">
-      {agents.map((agent) => (
-        <article className="agent-card" key={agent.id}>
+      {agents.map((agent) => {
+        const live = derived.find(item => item.id === agent.id);
+        const state = live?.state ?? 'unknown';
+        return <article className="agent-card" key={agent.id}>
           <div>
             <div className="agent-card-header">
               <div>
@@ -150,19 +157,18 @@ export default function AgentsPage() {
                 <h3>{agent.name}</h3>
                 <small className="agent-role">{agent.role}</small>
               </div>
-              {(() => { const derivedAgent = derived.find((item) => item.id === agent.id); const state = derivedAgent?.state ?? 'unknown'; return <><span className="vo3d-state-dot" style={{ background: STATE_COLORS[state] }} /><span className="state-label">{STATE_LABELS[state]}</span><small className="agent-reason">{derivedAgent?.reason ?? 'Data server tidak tersedia.'}</small></>; })()}
+              <span className={`state-label state-${state}`}><span className="vo3d-state-dot" aria-hidden="true" style={{ background: STATE_COLORS[state] }} />{STATE_LABELS[state]}</span>
             </div>
-            <p className="agent-task">{agent.task}</p>
-            <div className="agent-boundary">
-              <strong>Batas akses:</strong> {agent.boundary}
-            </div>
+            <p className="agent-reason">{live?.reason ?? 'Data server tidak tersedia.'}</p>
+            <p className="agent-task">{live?.task ?? 'Tidak ada tugas aktif yang dilaporkan.'}</p>
+            <details className="card-disclosure"><summary>Peran dan batas akses</summary><p>{agent.task}</p><p><strong>Batas akses:</strong> {agent.boundary}</p></details>
           </div>
           <div className="agent-foot">
             <span>{agent.metric}</span>
-            <Link className="button button-secondary" to={OPERATIONS_ROSTER.some(a=>a.id===agent.id)?'/operations':agent.id === 'knowledge-curator' ? '/knowledge' : agent.id === 'profile-editor' ? '/profile' : agent.id === 'client-relations' ? '/inbox' : agent.id === 'compliance-auditor' ? '/policy' : agent.id === 'operations-analyst' ? '/work' : agent.id === 'market-scout' ? '/opportunities' : agent.id === 'bid-strategist' || agent.id === 'lead-agent' ? '/pipeline' : agent.id === 'qa-engineer' ? '/capabilities' : '/overview'}>Buka ruang kerja</Link>
+            <Link className="button button-secondary" to={agent.id === 'projects-co-id-scout' ? '/projects-co-id' : agent.id === 'browser-bid-operator' ? '/capabilities' : agent.id === 'chief-of-staff' || agent.id === 'qa-engineer' ? '/tasks' : OPERATIONS_ROSTER.some(a=>a.id===agent.id)?'/operations':agent.id === 'knowledge-curator' ? '/knowledge' : agent.id === 'profile-editor' ? '/profile' : agent.id === 'client-relations' ? '/inbox' : agent.id === 'compliance-auditor' ? '/policy' : agent.id === 'operations-analyst' ? '/work' : agent.id === 'market-scout' ? '/opportunities' : '/pipeline'}>Buka ruang kerja</Link>
           </div>
-        </article>
-      ))}
+        </article>;
+      })}
     </div>
   </>;
 }

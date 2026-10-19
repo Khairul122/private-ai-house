@@ -1,9 +1,10 @@
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import type { ClientAutomation } from '@fvh/domain';
 import type { ClientProject } from '../api/api.js';
 import { normalizeWhatsAppPhone, saveClientCommunication } from '../api/client-communication.js';
 
 export default function ClientWhatsAppCard({ projects, clients, refresh }: { projects: ClientProject[]; clients: ClientAutomation[]; refresh: () => Promise<void> }) {
+  const formDetails = useRef<HTMLDetailsElement>(null);
   const [selected, setSelected] = useState('');
   const [created, setCreated] = useState<ClientProject | null>(null);
   const [phone, setPhone] = useState('');
@@ -38,10 +39,12 @@ export default function ClientWhatsAppCard({ projects, clients, refresh }: { pro
       setBusy(false);
     }
   }
-  return <section className="form-card" aria-label="Form nomor WhatsApp klien">
-    <h2>Nomor WhatsApp klien</h2>
-    <p>Daftarkan klien dan proyek di sini, atau pilih proyek yang sudah ada. Nomor Indonesia 08… diubah menjadi 628…. Nomor luar negeri menggunakan kode negara.</p>
+  return <section className="form-card card-section" aria-label="Kontak dan izin WhatsApp klien">
+    <h2>Kontak & izin klien</h2>
+    <p>{clients.length} kontak tersimpan. Pesan mengikuti izin tiap proyek dan jenis kabar yang Anda pilih.</p>
     {notice && <p className={`notice ${notice.error ? 'notice-error' : 'notice-success'}`} role={notice.error ? 'alert' : 'status'}>{notice.text}</p>}
+    <details className="card-disclosure" ref={formDetails} open={!clients.length}><summary>Tambah atau ubah kontak & izin</summary>
+    <p className="form-help">Pilih proyek atau daftarkan yang baru. Nomor Indonesia 08… diubah menjadi 628…. Nomor internasional menggunakan kode negara.</p>
     <form onSubmit={event => void save(event)}><fieldset disabled={busy}>
       <label className="form-field"><span>Klien / proyek</span><select value={selected} onChange={e => select(e.target.value)}><option value="">Daftarkan klien & proyek baru</option>{available.map(p => <option key={p.id} value={p.id}>{p.client} — {p.title}</option>)}</select></label>
       {!selected && <>
@@ -54,17 +57,18 @@ export default function ClientWhatsAppCard({ projects, clients, refresh }: { pro
       </>}
       <label className="form-field"><span>Nomor WhatsApp klien</span><input name="phone" type="tel" inputMode="tel" autoComplete="off" required maxLength={30} value={phone} onChange={e => setPhone(e.target.value)}/></label>
       <label className="operations-check"><input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)}/>Aktifkan pesan otomatis untuk proyek ini</label>
+      <fieldset><legend>Jenis pesan yang diizinkan</legend>
       <label className="operations-check"><input type="checkbox" checked={progress} onChange={e => setProgress(e.target.checked)}/>Kirim catatan progres baru</label>
       <label className="operations-check"><input type="checkbox" checked={payments} onChange={e => setPayments(e.target.checked)}/>Konfirmasi pembayaran yang dicatat diterima</label>
-      <label className="operations-check"><input type="checkbox" checked={reminders} onChange={e => setReminders(e.target.checked)}/>Ingatkan tagihan yang jatuh tempo</label>
+      <label className="operations-check"><input type="checkbox" checked={reminders} onChange={e => setReminders(e.target.checked)}/>Ingatkan tagihan yang jatuh tempo</label></fieldset>
       <p>Hanya kejadian setelah izin disimpan yang dikirim sebagai progres atau konfirmasi baru. Pengingat tagihan maksimal sekali per hari per proyek.</p>
       <button className="button button-primary" type="submit">{busy ? 'Menyimpan nomor WA…' : 'Simpan klien & nomor WA'}</button>
-    </fieldset></form>
+    </fieldset></form></details>
     {!!clients.length && <><h3>Nomor tersimpan</h3>{clients.map(config => <article className="operations-row" key={config.projectId}>
       <strong>{available.find(p => p.id === config.projectId)?.client ?? 'Klien tidak tersedia'}</strong>
       <p>{available.find(p => p.id === config.projectId)?.title ?? 'Proyek tidak tersedia'} · +{config.phone}</p>
-      <small>{config.enabled ? 'Pesan otomatis diaktifkan' : 'Pesan otomatis dinonaktifkan'}</small>
-      <button className="button button-secondary" type="button" disabled={busy} onClick={() => { select(config.projectId); setNotice({ text: 'Nomor dan izin komunikasi siap diubah pada formulir di atas.', error: false }); }}>Ubah nomor / izin</button>
+      <small>{config.enabled ? 'Otomatis aktif' : 'Otomatis nonaktif'} · Progres: {config.progress ? 'ya' : 'tidak'} · Pembayaran: {config.payments ? 'ya' : 'tidak'} · Pengingat: {config.reminders ? 'ya' : 'tidak'}</small>
+      <button className="button button-secondary" type="button" disabled={busy} onClick={() => { select(config.projectId); if (formDetails.current) formDetails.current.open = true; setNotice({ text: 'Kontak dipilih. Ubah nomor atau izin pada formulir di atas.', error: false }); }}>Ubah nomor / izin</button>
     </article>)}</>}
   </section>;
 }

@@ -35,19 +35,39 @@ export function connectLive(client: QueryClient, onState: (state: LiveState) => 
   let attempts = 0;
   let missed = false;
   let stopped = false;
+  const dirty = new Set<string>();
+  const refreshing = new Set<string>();
+  const refresh = (key: string) => {
+    dirty.add(key);
+    if (refreshing.has(key)) return;
+    refreshing.add(key);
+    void (async () => {
+      try {
+        while (!stopped && dirty.delete(key)) {
+          const inFlight = client.isFetching({ queryKey: [key], type: 'active' }) > 0;
+          await client.invalidateQueries({ queryKey: [key] }, { cancelRefetch: false });
+          // An event arriving after a read started still needs a read after it finishes.
+          if (inFlight && !stopped) dirty.add(key);
+        }
+      } finally {
+        refreshing.delete(key);
+        if (!stopped && dirty.has(key)) refresh(key);
+      }
+    })();
+  };
   const open = () => {
     source = new EventSource(url);
     source.onopen = () => {
       attempts = 0;
       onState('live');
       // Changes made while the stream was down were never announced.
-      if (missed) void client.invalidateQueries();
+      if (missed) for (const key of new Set(client.getQueryCache().getAll().map(query => query.queryKey[0]))) if (typeof key === 'string') refresh(key);
       missed = false;
     };
     source.addEventListener('change', event => {
       let topics: unknown;
       try { topics = (JSON.parse((event as MessageEvent<string>).data) as { topics?: unknown }).topics; } catch { return; }
-      for (const key of queryKeysFor(topics)) void client.invalidateQueries({ queryKey: [key] });
+      for (const key of queryKeysFor(topics)) refresh(key);
     });
     source.onerror = () => {
       // Own backoff instead of EventSource's fixed retry, which also gives up for good on a 503.
@@ -60,7 +80,7 @@ export function connectLive(client: QueryClient, onState: (state: LiveState) => 
   };
   onState('connecting');
   open();
-  return () => { stopped = true; clearTimeout(retry); source?.close(); };
+  return () => { stopped = true; dirty.clear(); clearTimeout(retry); source?.close(); };
 }
 
 export function useLiveUpdates(client: QueryClient): LiveState {

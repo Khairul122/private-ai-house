@@ -14,6 +14,8 @@ import { formatMoney, formatDate, activityTitle } from '../components/format.js'
 import { kanbanQuery } from '../api/queries.js';
 import { useLiveUpdates } from '../api/live.js';
 import { StateLabel, useClock } from '../components/ui.js';
+import { CardDataStatus } from '../components/CardDataStatus.js';
+import { isCardQuery } from '../api/card-data.js';
 
 const VisualOffice = lazy(() => import('./VisualOffice.js'));
 
@@ -209,14 +211,14 @@ export default function OfficeShell() {
     const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const onTab = (event: KeyboardEvent) => {
       if (event.key !== 'Tab') return;
-      const items = [...(sheetElement.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]') ?? [])].filter((item) => item.getClientRects().length > 0);
+      const items = [...(sheetElement.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]') ?? [])].filter((item) => item.checkVisibility());
       const first = items[0]; const last = items.at(-1);
       if (!first || !last) { event.preventDefault(); sheetHeading.current?.focus(); return; }
       if (event.shiftKey && (document.activeElement === first || !items.includes(document.activeElement as HTMLElement))) { event.preventDefault(); last.focus(); }
       else if (!event.shiftKey && (document.activeElement === last || !items.includes(document.activeElement as HTMLElement))) { event.preventDefault(); first.focus(); }
     };
     document.addEventListener('keydown', onTab);
-    return () => { document.removeEventListener('keydown', onTab); if (returnFocus?.isConnected) returnFocus.focus(); };
+    return () => { document.removeEventListener('keydown', onTab); if (returnFocus?.isConnected && returnFocus.checkVisibility()) returnFocus.focus(); else ownerButton.current?.focus(); };
   }, [sheetOpen]);
   useEffect(() => { sheetElement.current?.querySelector('.vo3d-sheet-body')?.scrollTo({ top: 0 }); }, [location.pathname]);
 
@@ -252,12 +254,14 @@ export default function OfficeShell() {
     const onKey = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        if (window.location.pathname !== '/') sheetElement.current?.querySelector<HTMLElement>('input[type="search"], .sheet-tools select')?.focus();
+        if (window.location.pathname !== '/') sheetElement.current?.querySelector<HTMLElement>('input[type="search"], .sheet-navigation summary')?.focus();
         else searchInput.current?.focus();
       }
       if (event.key === 'Escape') {
         ownerInput.stop();
-        if (window.location.pathname !== '/') navigate('/');
+        const disclosure = stage.current?.querySelector<HTMLDetailsElement>('.sheet-navigation[open], .vo3d-menu[open]');
+        if (disclosure) { disclosure.open = false; disclosure.querySelector<HTMLElement>('summary')?.focus(); }
+        else if (window.location.pathname !== '/') navigate('/');
         else { setPanel(null); ownerButton.current?.focus(); }
       }
     };
@@ -277,6 +281,7 @@ export default function OfficeShell() {
     setFloor(n); fly({ kind: 'overview' });
   };
   useEffect(() => {
+    stage.current?.querySelectorAll<HTMLDetailsElement>('.sheet-navigation[open], .vo3d-menu[open]').forEach(item => { item.open = false; });
     const board = BOARDS.find((slot) => slot.route === location.pathname);
     if(board) setFloor(board.floor ?? 1);
     if (board) fly({ kind: 'board', id: board.id });
@@ -311,7 +316,7 @@ export default function OfficeShell() {
   const time = new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit' }).format(now);
   const width = FLOOR.maxX - FLOOR.minX;
   const depth = FLOOR.maxZ - FLOOR.minZ;
-  const externalLabel = !dashboardData ? 'Status aksi eksternal tidak diketahui' : autopilotData?.marketplaceNotice?.quotaExhausted ? 'Bid terakhir ditolak: kuota akun Freelancer habis' : dashboardData.externalWrites ? 'Bid live ke Freelancer aktif' : 'Aksi eksternal nonaktif';
+  const externalLabel = !dashboardData ? 'Status bid tidak tersedia' : dashboardData.externalWrites ? 'Izin bid live aktif' : 'Bid otomatis nonaktif';
   const lastCycle = !autopilotData ? 'Tidak tersedia' : autopilotData.lastRunAt ? formatDate(autopilotData.lastRunAt) : 'Belum tercatat';
   const employeeMetrics = (id: string) => {
     if (id === 'projects-co-id-scout') {
@@ -363,39 +368,43 @@ export default function OfficeShell() {
   };
 
   return <div className="vo3d vo3d-app" ref={stage} style={{ background: phase.sky }}>
+    <div className="vo3d-office-layer" inert={sheetOpen}>
     <div className="vo3d-canvas" role="img" aria-label={`Kantor 3D Mission Control. ${summary}. Gunakan menu Papan dan daftar agen untuk navigasi dengan keyboard.`}>
       {webgl ? <Suspense fallback={<div className="vo3d-fallback">Memuat kantor visual...</div>}>
         <VisualOffice key={floor} floor={floor} ownerStart={arrival?.floor===floor?arrival.at:[OWNER_SPOT.x,OWNER_SPOT.z]} onLift={()=>goToFloor(floor===1?2:1,true)} agents={agents} ready={!autopilot.isPending} selectedId={selectedId} ownerSelected={panel === 'owner'} ownerInput={ownerInput} ownerTarget={ownerTarget} ownerVisitVersion={ownerVisitVersion} onOwnerMoving={setOwnerMoving} followId={followId} onSelect={selectAgent} onOwnerSelect={openOwner} onCameraInteract={() => { setFollowId(null); setTour(false); }} command={command} view={view} tour={tour} phase={phase} reducedMotion={reducedMotion} boards={boards} onOpenBoard={openBoard} />
       </Suspense> : <div className="vo3d-fallback">WebGL tidak tersedia di browser ini. Gunakan menu Papan untuk membuka setiap kartu.</div>}
     </div>
 
-    <section className="vo3d-float vo3d-card" aria-live="polite">
-      <h1><span className={`vo3d-live${autopilotData ? '' : ' is-off'}`} aria-hidden="true" />Mission Control</h1>
-      <p><OfficeIcon name="sun" />{phase.label} · {time}</p>
-      <p>{summary}</p>
+    <div className="vo3d-left-rail">
+    <section className="vo3d-float vo3d-card" aria-label="Status kantor">
+      <div className="vo3d-mission-head"><h1>Mission Control</h1><span className={`vo3d-connection${health.isError ? ' is-unavailable' : ''}`}><span className={`vo3d-live${!fresh(health)?.ok ? ' is-off' : ''}`} aria-hidden="true" />{health.isError ? 'API terputus' : fresh(health)?.ok ? 'API terhubung' : 'Memuat'}</span></div>
+      <div className="vo3d-mission-meta"><span>{phase.label} · {time}</span><Link to="/overview">Ringkasan →</Link></div>
       <div className="vo3d-floor-picker" role="group" aria-label="Pilih lantai">{([1,2] as const).map(n=><button type="button" key={n} aria-pressed={floor===n} onClick={()=>goToFloor(n)}>Lantai {n}</button>)}</div>
-      <p className={dashboardData?.externalWrites ? 'vo3d-warn' : ''}>{externalLabel}</p>
-      <p className={live === 'reconnecting' ? 'vo3d-warn' : ''}>{live === 'live' ? 'Realtime aktif' : live === 'connecting' ? 'Menyambungkan realtime…' : 'Realtime terputus — memakai pembaruan berkala'}</p>
-      {health.isError && <p className="vo3d-warn">API lokal tidak terhubung.</p>}
-      <Link to="/overview" className="vo3d-cta">Buka ringkasan</Link>
+      <p>{summary}</p>
+      {autopilotData?.marketplaceNotice && <Link className="vo3d-last-warning" to="/capabilities">Percobaan bid terakhir gagal · {timeOf(autopilotData.marketplaceNotice.at)}</Link>}
+      <details className="vo3d-mission-details"><summary>{externalLabel}</summary>
+        <p>{live === 'live' ? 'Koneksi pembaruan aplikasi terhubung.' : live === 'connecting' ? 'Menghubungkan pembaruan aplikasi…' : 'Realtime terputus; data diperbarui berkala.'}</p>
+        {autopilotData?.marketplaceNotice && <p className="vo3d-warn">Percobaan bid {formatDate(autopilotData.marketplaceNotice.at)}: {autopilotData.marketplaceNotice.quotaExhausted ? 'ditolak karena kuota akun habis.' : 'pengiriman gagal.'} <Link to="/capabilities">Lihat rincian</Link></p>}
+      </details>
     </section>
 
-    <button type="button" className="vo3d-float vo3d-roster-toggle" aria-expanded={rosterOpen} onClick={() => setRosterOpen((open) => !open)}><OfficeIcon name="users" />Tim ({agents.length})</button>
-    <nav className={`vo3d-float vo3d-roster${rosterOpen && !sheetOpen ? '' : ' is-collapsed'}`} aria-label="Daftar agen">
+    <button type="button" className="vo3d-float vo3d-roster-toggle" aria-controls="office-roster" aria-expanded={rosterOpen} onClick={() => setRosterOpen((open) => !open)}><OfficeIcon name="users" />Tim lantai {floor}<span>{agents.length} agen · {rosterOpen ? 'Tutup' : 'Lihat'}</span></button>
+    <nav id="office-roster" className={`vo3d-float vo3d-roster${rosterOpen && !sheetOpen ? '' : ' is-collapsed'}`} aria-label="Daftar agen">
       {visibleAgents.map((agent) => <button key={agent.id} type="button" className={`vo3d-agent${agent.state === 'offline' ? ' is-offline' : ''}`} aria-pressed={selectedId === agent.id} onClick={() => selectAgent(agent.id)}>
-        <span className="vo3d-avatar" style={{ background: agent.color }}>{initials(agent.name)}</span>
+        <span className="vo3d-avatar" style={{ borderColor: agent.color }}>{initials(agent.name)}</span>
         <span><strong>{agent.name}</strong><small><span className="vo3d-state-dot" style={{ background: STATE_COLORS[agent.state] }} />{STATE_LABELS[agent.state]} · {agent.room ? ROOM_LABELS[agent.room] : 'Tidak di lantai'}</small></span>
       </button>)}
       {!visibleAgents.length && <p className="vo3d-agent">Tidak ada agen yang cocok.</p>}
     </nav>
+    </div>
 
     <div className="vo3d-float vo3d-tools">
       <button ref={ownerButton} type="button" className="vo3d-owner-action" aria-pressed={panel === 'owner'} onClick={openOwner}><OfficeIcon name="target" />Pemilik</button>
       <details className="vo3d-menu">
-        <summary className="vo3d-icon" aria-label="Menu papan"><OfficeIcon name="grid" /></summary>
+        <summary className="vo3d-icon vo3d-board-action" aria-label="Menu papan"><OfficeIcon name="grid" />Papan</summary>
         <nav aria-label="Papan Mission Control">
           <Link to="/overview">Ringkasan</Link>
-          {BOARDS.map((board) => <Link key={board.id} to={board.route}>{board.label}</Link>)}
+          {([1, 2] as const).map(n => <div className="vo3d-board-group" key={n}><strong>Lantai {n}</strong>{BOARDS.filter(board => (board.floor ?? 1) === n).map((board) => <Link key={board.id} to={board.route}>{board.label}</Link>)}</div>)}
         </nav>
       </details>
       <div className="vo3d-search-wrap"><label className="vo3d-search"><OfficeIcon name="search" /><span className="sr-only">Cari agen atau papan</span>
@@ -427,11 +436,6 @@ export default function OfficeShell() {
         {panel === 'owner' && <>
           <div className="vo3d-profile"><span className="vo3d-avatar vo3d-owner-avatar">P</span>
             <div><h3>Pemilik</h3><p>Kendali dan pemantauan tim</p><span className="vo3d-badge">Data kantor lokal</span></div></div>
-          {webgl ? <OwnerControls input={ownerInput} moving={ownerMoving} /> : <p className="vo3d-owner-hint">Kontrol gerak tidak tersedia karena WebGL tidak aktif.</p>}
-          <div className="vo3d-owner-actions">
-            <button type="button" disabled={!webgl} aria-pressed={followId === 'owner'} onClick={() => toggleFollow('owner')}>{followId === 'owner' ? 'Hentikan ikuti kamera' : 'Ikuti Owner'}</button>
-            <button type="button" onClick={() => fly({ kind: 'overview' })}>Kamera overview</button>
-          </div>
           <h2>Ringkasan tim</h2>
           <div className="vo3d-owner-summary">
             <div><span>Aktif</span><strong>{counts.working}</strong></div>
@@ -439,7 +443,13 @@ export default function OfficeShell() {
             <div><span>Offline</span><strong>{counts.offline}</strong></div>
             <div><span>Tidak diketahui</span><strong>{counts.unknown}</strong></div>
           </div>
-          <h2>Kinerja operasi</h2>
+          <details className="vo3d-panel-disclosure"><summary>Gerakkan pemilik & kamera</summary>
+          {webgl ? <OwnerControls input={ownerInput} moving={ownerMoving} /> : <p className="vo3d-owner-hint">Kontrol gerak tidak tersedia karena WebGL tidak aktif.</p>}
+          <div className="vo3d-owner-actions">
+            <button type="button" disabled={!webgl} aria-pressed={followId === 'owner'} onClick={() => toggleFollow('owner')}>{followId === 'owner' ? 'Hentikan ikuti kamera' : 'Ikuti Owner'}</button>
+            <button type="button" onClick={() => fly({ kind: 'overview' })}>Pusatkan kamera</button>
+          </div></details>
+          <details className="vo3d-panel-disclosure"><summary>Kinerja operasi</summary>
           <p className="vo3d-owner-hint">Ringkasan berasal dari status server dan audit tersimpan.</p>
           <dl>
             <dt>Autopilot</dt><dd>{autopilotData ? <StateLabel state={autopilotData.state} /> : 'Tidak tersedia'}</dd>
@@ -450,28 +460,31 @@ export default function OfficeShell() {
             <dt>Sinkronisasi pesan terakhir</dt><dd>{syncData?.messages.lastRunAt ? formatDate(syncData.messages.lastRunAt) : 'Tidak tersedia'}</dd>
             <dt>Kebijakan</dt><dd>{dashboardData ? <StateLabel state={dashboardData.policy.state} /> : 'Tidak tersedia'}</dd>
           </dl>
-          <h2 className="vo3d-owner-list-title">Temui karyawan</h2>
+          </details>
+          <details className="vo3d-panel-disclosure"><summary>Temui karyawan</summary>
           <p className="vo3d-owner-hint">Pilih nama untuk melihat rincian dan menghampiri agen yang ada di lantai. Agen offline hanya membuka rincian.</p>
           <ul className="vo3d-owner-agent-list">
             {agents.map((agent) => <li key={agent.id}><button type="button" onClick={() => selectAgent(agent.id)}>
-              <span className="vo3d-avatar" style={{ background: agent.color }}>{initials(agent.name)}</span>
+              <span className="vo3d-avatar" style={{ borderColor: agent.color }}>{initials(agent.name)}</span>
               <span><strong>{agent.name}</strong><small><span className="vo3d-state-dot" style={{ background: STATE_COLORS[agent.state] }} />{STATE_LABELS[agent.state]} · {agent.room ? ROOM_LABELS[agent.room] : 'Tidak di lantai'}</small></span>
             </button></li>)}
           </ul>
+          </details>
         </>}
         {panel === 'agent' && (selected ? <>
-          <div className="vo3d-profile"><span className="vo3d-avatar" style={{ background: selected.color }}>{initials(selected.name)}</span>
+          <div className="vo3d-profile"><span className="vo3d-avatar" style={{ borderColor: selected.color }}>{initials(selected.name)}</span>
             <div><h3>{selected.name}</h3><p>{selected.role}</p><span className="vo3d-badge"><span className="vo3d-state-dot" style={{ background: STATE_COLORS[selected.state] }} />{STATE_LABELS[selected.state]}</span></div></div>
-          <div className="vo3d-owner-actions">
+          <details className="vo3d-panel-disclosure"><summary>Kontrol kamera & perjalanan</summary><div className="vo3d-owner-actions">
             <button type="button" disabled={!spots.has(selected.id)} aria-pressed={followId === selected.id} onClick={() => toggleFollow(selected.id)}>{followId === selected.id ? 'Hentikan ikuti kamera' : 'Ikuti kamera agen'}</button>
             <button type="button" onClick={openOwner}>Kembali ke Owner</button>
             <button type="button" onClick={() => ownerInput.stop()}>Hentikan perjalanan Owner</button>
-          </div>
-          <h2>Sinyal kinerja yang tersedia</h2>
+          </div></details>
+          <details className="vo3d-panel-disclosure"><summary>Sinyal kinerja</summary>
           <p className="vo3d-owner-hint">Angka mengikuti data tersimpan; beberapa peran memakai loop bersama atau belum memiliki runtime.</p>
           <dl className="vo3d-performance-list">
             {employeeMetrics(selected.id).map((metric) => <Fragment key={metric.label}><dt>{metric.label}</dt><dd>{metric.value}</dd></Fragment>)}
           </dl>
+          </details>
           <dl>
             <dt>Ruangan</dt><dd>{selected.room ? ROOM_LABELS[selected.room] : 'Tidak di lantai kantor'}</dd>
             <dt>Alasan status</dt><dd>{selected.reason}</dd>
@@ -525,14 +538,16 @@ export default function OfficeShell() {
       <button type="button" aria-pressed={tour} disabled={reducedMotion} title={reducedMotion ? 'Dinonaktifkan karena preferensi kurangi gerakan' : 'Putar kamera otomatis'} onClick={() => { setFollowId(null); setView('3d'); setTour((on) => !on); }}><OfficeIcon name="play" />Tur</button>
       <button type="button" aria-label="Pusatkan kamera" title="Pusatkan" onClick={() => fly({ kind: 'overview' })}><OfficeIcon name="target" /></button>
     </div>
+    </div>
 
     {sheetOpen && <div className="vo3d-sheet-backdrop" onClick={() => navigate('/')}>
       <section ref={sheetElement} className="vo3d-sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" onClick={(event) => event.stopPropagation()}>
         <header className="vo3d-sheet-head">
-          <h2 id="sheet-title" ref={sheetHeading} tabIndex={-1}>{SHEET_TITLES[location.pathname] ?? 'Halaman'}</h2>
+          <div className="sheet-heading"><h2 id="sheet-title" ref={sheetHeading} tabIndex={-1}>{SHEET_TITLES[location.pathname] ?? 'Halaman'}</h2><details className="sheet-navigation"><summary>Pindah kartu</summary><nav aria-label="Kartu lain">{Object.entries(SHEET_TITLES).map(([route, title]) => <Link to={route} aria-current={location.pathname === route ? 'page' : undefined} key={route}>{title}</Link>)}</nav></details></div>
+          <button type="button" className="button button-secondary sheet-refresh" disabled={refreshingSheet} onClick={async () => { setRefreshingSheet(true); try { await queryClient.invalidateQueries({ predicate: query => isCardQuery(query, location.pathname) }); } finally { setRefreshingSheet(false); } }}>{refreshingSheet ? 'Memperbarui…' : 'Perbarui'}</button>
           <button type="button" className="vo3d-icon" aria-label="Tutup kartu dan kembali ke kantor" onClick={() => navigate('/')}><OfficeIcon name="close" /></button>
         </header>
-        <nav className="sheet-tools" aria-label="Navigasi dan pembaruan kartu"><label><span>Buka kartu</span><select value={location.pathname} onChange={(event) => navigate(event.target.value)}>{Object.entries(SHEET_TITLES).map(([route, title]) => <option value={route} key={route}>{title}</option>)}</select></label><button type="button" className="button button-secondary" disabled={refreshingSheet} onClick={async () => { setRefreshingSheet(true); try { await queryClient.invalidateQueries({ type: 'active' }); } finally { setRefreshingSheet(false); } }}>{refreshingSheet ? 'Memperbarui…' : 'Perbarui data'}</button></nav>
+        <CardDataStatus path={location.pathname} live={live} />
         <div className="vo3d-sheet-body page-content"><Outlet /></div>
       </section>
     </div>}
