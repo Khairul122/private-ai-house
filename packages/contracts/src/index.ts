@@ -30,6 +30,12 @@ export const projectsCoIdSettingsSchema = z.object({
 
 export const projectsCoIdModeSchema = z.object({ mode: z.enum(['off', 'scan-only', 'drafts']) }).strict();
 export const projectsCoIdOwnerActionSchema = z.object({ confirm: z.literal(true) }).strict();
+export const hermesKanbanTaskSchema = z.object({
+  title: z.string().trim().min(3).max(200),
+  goal: z.string().trim().max(4000).default(''),
+  assignee: z.string().regex(/^fvh-[a-z0-9-]{1,60}$/),
+  includeData: z.boolean().default(true),
+}).strict();
 
 export const updatePolicySchema = z.object({
   projectsCoId: projectsCoIdSettingsSchema.optional(),
@@ -53,7 +59,7 @@ export const updatePolicySchema = z.object({
 }).refine((policy) => policy.maxPrice >= policy.minPrice, { path: ['maxPrice'], message: 'Harga maksimum harus sama atau lebih besar.' })
   .refine((policy) => policy.activeHours.end !== policy.activeHours.start, { path: ['activeHours'], message: 'Untuk operasi 24 jam gunakan 00–24; jam mulai dan selesai tidak boleh sama.' });
 
-export const activatePolicySchema = z.union([z.object({ confirmSimulation: z.literal(true) }), z.object({ confirmLive: z.literal(true), mode: z.literal('live') })]);
+export const activatePolicySchema = z.object({ confirmLive: z.literal(true), mode: z.literal('live') });
 
 export const knowledgeImportSchema = z.object({
   provider: z.enum(['github', 'linkedin', 'manual']),

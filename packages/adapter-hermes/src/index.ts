@@ -23,7 +23,8 @@ export class HermesDraftingError extends Error {
   }
 }
 
-function allowedEnvironment(): NodeJS.ProcessEnv {
+/** Environment passed to Hermes child processes: enough to find its install and profile, never app secrets. */
+export function allowedEnvironment(): NodeJS.ProcessEnv {
   const safeNames = new Set(['PATH', 'SystemRoot', 'SYSTEMROOT', 'TEMP', 'TMP', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'HERMES_HOME']);
   const env: NodeJS.ProcessEnv = {};
   for (const name of safeNames) {

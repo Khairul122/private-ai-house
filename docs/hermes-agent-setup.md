@@ -132,6 +132,8 @@ hermes kanban --board fvh-house list
 hermes kanban --board fvh-house show <id>
 ```
 
+Dari aplikasi: **Papan Tugas → Kanban Hermes** membuat kartu yang sama lewat `POST /api/hermes-kanban/tasks`. Bila "Lampirkan snapshot data aplikasi" dicentang, body kartu memuat ringkasan kebijakan, hasil bid, peluang teratas, pesan klien yang perlu dibalas, follow-up, proyek aktif, pembayaran dan status projects.co.id (maks 12.000 karakter). Itu satu-satunya cara karyawan tanpa tool melihat data nyata; data ini dikirim ke provider model Hermes (keputusan pemilik 20 Oktober 2026). Kartu `running` membuat karyawan tampil Bekerja di kantor.
+
 Dispatcher gateway Hermes mengambil kartu `ready` otomatis; `hermes kanban --board fvh-house dispatch` menjalankan satu putaran sekarang. Setiap kartu memakai kuota model provider. `hermes pause` menghentikan dispatch kanban.
 
 ## Referensi resmi

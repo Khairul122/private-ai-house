@@ -8,6 +8,8 @@ import type { BoardContent, CameraCommand } from './VisualOffice.js';
 import { bindOwnerKeyboard, createOwnerInput, type OwnerDirection, type OwnerInput } from './owner-input.js';
 import OperationsPage from './OperationsPage.js';
 import BrowserBiddingCard from './BrowserBiddingCard.js';
+import HermesKanbanCard from './HermesKanbanCard.js';
+import type { HermesKanbanStatus } from '../../server/src/hermes-kanban-types.js';
 import ProjectsCoIdPage from './ProjectsCoIdPage.js';
 import type { ProjectsCoIdStatus } from './projects-co-id-api.js';
 import type { BrowserBiddingStatus } from './browser-bidding-api.js';
@@ -169,7 +171,7 @@ function Metric({ label, value, note, tone = 'plain', to }: { label: string; val
 const PIPELINE_STAGES: Array<[string, string]> = [['new', 'Baru'], ['scored', 'Dinilai'], ['draft_ready', 'Draf siap'], ['policy_check', 'Pemeriksaan'], ['submitted', 'Dikirim / ditandai Anda'], ['in_conversation', 'Percakapan'], ['skipped', 'Dilewati']];
 
 function ActivityRows({ events }: { events: AuditEvent[] }) {
-  if (!events.length) return <div className="empty-state"><h3>Belum ada aktivitas</h3><p>Perubahan kebijakan, draf, simulasi, dan impor akan muncul di sini.</p></div>;
+  if (!events.length) return <div className="empty-state"><h3>Belum ada aktivitas</h3><p>Perubahan kebijakan, draf, bid, dan impor akan muncul di sini.</p></div>;
   return <ol className="activity-list">
     {events.map((event) => (
       <li key={event.id} className="activity-row">
@@ -414,8 +416,11 @@ function PipelinePage() {
   </>;
 }
 
+const kanbanQuery = { queryKey: ['hermes-kanban'], queryFn: () => api<HermesKanbanStatus | null>('/hermes-kanban'), refetchInterval: 30_000 };
+
 function AgentsPage() {
   const projectsCoId = useQuery({ queryKey: ['projects-co-id'], queryFn: () => api<ProjectsCoIdStatus | null>('/projects-co-id'), refetchInterval: 3000 });
+  const kanban = useQuery(kanbanQuery);
   const operations=useQuery({queryKey:['operations'],queryFn:()=>api<OperationsData>('/operations'),refetchInterval:5000});
   const knowledgeSync = useQuery({ queryKey: ['knowledge-sync'], queryFn: () => api<{ job: { state: string; provider: string; current: string | null } | null }>('/knowledge/sync-status'), refetchInterval: 3_000 });
   const dashboard = useQuery({ queryKey: ['dashboard'], queryFn: () => api<{
@@ -436,7 +441,7 @@ function AgentsPage() {
 
   const inboxWaiting = inbox.isError ? undefined : inbox.data?.needsReply.length;
   const derived = deriveOfficeAgents(autopilot.isError ? undefined : autopilot.data, dashboard.data.activity, {
-    projectsCoId: projectsCoId.isError ? undefined : projectsCoId.data,
+    projectsCoId: projectsCoId.isError ? undefined : projectsCoId.data, kanban: kanban.isError ? undefined : kanban.data,
     sync: sync.isError ? undefined : sync.data, inboxWaiting, dueSoon: work.isError ? undefined : work.data?.dueSoon, hermes: capabilities.data.hermes, knowledge: knowledgeSync.isError ? undefined : knowledgeSync.data?.job,operations:operations.isError?undefined:operations.data,browserBidding:browserBidding.isError?undefined:browserBidding.data,
   });
   const agents = [
@@ -526,9 +531,9 @@ function AgentsPage() {
       name: 'QA Engineer',
       dept: 'Quality Assurance',
       role: 'Verifikator Kontrak & Smoke',
-      task: 'Menjalankan skenario smoke test, validasi skema DTO, serta memverifikasi alur simulasi fail-closed.',
-      boundary: 'Beroperasi di lingkungan lokal & sandbox; tanpa kredensial live produksi.',
-      metric: 'Tidak ada komponen runtime di aplikasi',
+      task: 'Mengerjakan kartu kode dari kanban Hermes di worktree git terpisah: menulis tes, menjalankan lint, typecheck dan tes.',
+      boundary: 'Profil Hermes fvh-qa-engineer; tool file dan terminal hanya di worktree kartu, tanpa push atau perubahan main.',
+      metric: 'Status dari kartu kanban Hermes',
     },
     {id:'browser-bid-operator',name:'Operator Browser Bid',dept:'Lantai 1',role:'Pengiriman bid melalui Chrome',task:'Mengirim proposal autopilot melalui tab kerja pada Chrome berprofil pemilik.',boundary:'Kebijakan, kuota, akun dan payload diperiksa sebelum klik; hasil tidak pasti ditahan.',metric:browserBidding.isError?'Status tidak tersedia':browserBidding.data?.reason ?? 'Worker belum tersedia.'},
     { id: 'projects-co-id-scout', name: 'Scout projects.co.id', dept: 'Lantai 1', role: 'Cari proyek & siapkan draf projects.co.id', task: 'Membaca proyek dan menulis draf lokal sesuai kebijakan IDR.', boundary: 'Worker hanya membaca; pemilik mengirim sendiri di situs.', metric: projectsCoId.isError ? 'Status tidak tersedia' : projectsCoId.data?.reason ?? 'Worker belum tersedia.' },
@@ -599,7 +604,7 @@ function TaskBoardPage() {
       id: 'drafting',
       title: 'Draf & Review',
       filter: (p: Opportunity) => p.pipelineStatus === 'draft_ready' || p.pipelineStatus === 'policy_check',
-      hint: 'Draf lokal yang siap diperiksa atau disimulasikan',
+      hint: 'Draf lokal yang siap diperiksa atau dikirim',
     },
     {
       id: 'active',
@@ -619,8 +624,9 @@ function TaskBoardPage() {
     <PageIntro
       eyebrow="Manajemen kerja"
       title="Papan tugas seluruh siklus proyek."
-      description="Pantau alur kerja dari deteksi peluang, penyusunan draf, simulasi kebijakan, hingga status akhir."
+      description="Pantau alur kerja dari deteksi peluang, penyusunan draf, pemeriksaan kebijakan, hingga status akhir."
     />
+    <HermesKanbanCard />
     <section className="filter-bar" aria-label="Filter papan tugas">
       <label className="search-field">
         <span>Cari proyek, klien, atau skill di papan tugas</span>
@@ -1099,8 +1105,8 @@ function PolicyPage() {
     onError: (error) => setNotice({ text: error instanceof Error ? error.message : 'Policy tidak dapat disimpan.', error: true }),
   });
   const activate = useMutation({
-    mutationFn: (mode: 'live' | 'simulation') => api<{ policy: Policy }>('/policy/activate', jsonRequest('POST', mode === 'live' ? { mode: 'live', confirmLive: true } : { confirmSimulation: true })),
-    onSuccess: async (result) => { setDraft(null); setListText({}); setNotice({ text: result.policy.simulationOnly ? 'Kebijakan aktif dalam mode simulasi lokal.' : 'Bid live aktif dalam batas kebijakan tersimpan.', error: false }); await refresh(); },
+    mutationFn: () => api<{ policy: Policy }>('/policy/activate', jsonRequest('POST', { mode: 'live', confirmLive: true })),
+    onSuccess: async () => { setDraft(null); setListText({}); setNotice({ text: 'Bid live aktif dalam batas kebijakan tersimpan.', error: false }); await refresh(); },
     onError: (error) => setNotice({ text: error instanceof Error ? error.message : 'Policy tidak dapat diaktifkan.', error: true }),
   });
   const control = useMutation({
@@ -1160,7 +1166,7 @@ function PolicyPage() {
             <p className="form-help">Setiap pemindaian membuka paling banyak tiga pencarian; istilah lain dipakai bergiliran pada pemindaian berikutnya.</p>
           </fieldset>
           <label className="check-row"><input type="checkbox" checked={extendValidity} onChange={(event) => setExtendValidity(event.target.checked)} /><span>Perbarui masa berlaku saat disimpan</span></label>{extendValidity && <label className="form-field"><span>Berlaku sejak sekarang (hari)</span><NumField min="1" max="365" value={validityDays} onChange={setValidityDays} /></label>}
-          <div className="form-actions"><button className="button button-primary" type="submit" disabled={(!draft && !extendValidity) || save.isPending}>{save.isPending ? 'Menyimpan...' : 'Simpan kebijakan ke Supabase'}</button><button className="button button-secondary" type="button" disabled={activate.isPending || policy.state !== 'draft' || !!draft} onClick={() => activate.mutate('simulation')}>Aktifkan simulasi lokal</button>{(policy.state === 'draft' || policy.simulationOnly) && <button className="button button-primary" type="button" disabled={activate.isPending || policy.state === 'paused' || !!draft} onClick={() => activate.mutate('live')}>Aktifkan bid live sesuai batas tersimpan</button>}{(draft || extendValidity) && <button className="button button-text" type="button" onClick={() => { setDraft(null); setListText({}); setExtendValidity(false); }}>Batalkan perubahan</button>}</div>
+          <div className="form-actions"><button className="button button-primary" type="submit" disabled={(!draft && !extendValidity) || save.isPending}>{save.isPending ? 'Menyimpan...' : 'Simpan kebijakan ke Supabase'}</button>{(policy.state === 'draft' || policy.simulationOnly) && <button className="button button-primary" type="button" disabled={activate.isPending || policy.state === 'paused' || !!draft} onClick={() => activate.mutate()}>Aktifkan bid live sesuai batas tersimpan</button>}{(draft || extendValidity) && <button className="button button-text" type="button" onClick={() => { setDraft(null); setListText({}); setExtendValidity(false); }}>Batalkan perubahan</button>}</div>
         </form>
       </section>
       <section className="form-card">
@@ -1542,6 +1548,7 @@ function OwnerControls({ input, moving }: { input: OwnerInput; moving: boolean }
 
 function OfficeShell() {
   const projectsCoId = useQuery({ queryKey: ['projects-co-id'], queryFn: () => api<ProjectsCoIdStatus | null>('/projects-co-id'), refetchInterval: 3000 });
+  const kanban = useQuery(kanbanQuery);
   const operations=useQuery({queryKey:['operations'],queryFn:()=>api<OperationsData>('/operations'),refetchInterval:3000});
   const [floor,setFloor]=useState<1|2>(1);
   const [arrival,setArrival]=useState<{floor:1|2;at:P2}|null>(null);
@@ -1605,7 +1612,7 @@ function OfficeShell() {
   const hermes = fresh(capabilities)?.hermes;
   const knowledgeJob = fresh(knowledgeSync)?.job;
   const operationsData=fresh(operations);
-  const allAgents = useMemo(() => deriveOfficeAgents(autopilotData, activityData, { projectsCoId: projectsCoId.isError ? undefined : projectsCoId.data, sync: syncData, inboxWaiting, dueSoon, hermes, knowledge: knowledgeJob,operations:operationsData,browserBidding:browserBidding.isError?undefined:browserBidding.data }), [projectsCoId.isError, projectsCoId.data, browserBidding.isError,browserBidding.data,autopilotData, activityData, syncData, inboxWaiting, dueSoon, hermes, knowledgeJob,operationsData]);
+  const allAgents = useMemo(() => deriveOfficeAgents(autopilotData, activityData, { projectsCoId: projectsCoId.isError ? undefined : projectsCoId.data, kanban: fresh(kanban), sync: syncData, inboxWaiting, dueSoon, hermes, knowledge: knowledgeJob,operations:operationsData,browserBidding:browserBidding.isError?undefined:browserBidding.data }), [projectsCoId.isError, projectsCoId.data, kanban.isError, kanban.data, browserBidding.isError,browserBidding.data,autopilotData, activityData, syncData, inboxWaiting, dueSoon, hermes, knowledgeJob,operationsData]);
   const agents=useMemo(()=>allAgents.filter(a=>(a.floor ?? 1)===floor),[allAgents,floor]);
   const spots = useMemo(() => spotsFor(agents), [agents]);
   const ownerTarget = selectedId ? spots.get(selectedId) ?? null : null;

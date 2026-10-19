@@ -23,6 +23,7 @@ import { GoogleCalendarService } from './google-calendar.js';
 import { PublicPortfolioResolver } from './portfolio.js';
 import { BrowserBiddingService, SharedChromeSession } from './browser-bidding.js';
 import { ProjectsCoIdService } from './projects-co-id.js';
+import { HermesKanban, hermesKanbanRunner } from './hermes-kanban.js';
 
 function findProjectRoot(start: string): string {
   let directory = resolve(start);
@@ -122,6 +123,8 @@ const hasWebBuild = existsSync(webBuild);
 const app = await createApp({
   publicPortfolio:(evidence)=>portfolio.select(evidence),
   operations,whatsapp,googleCalendar,browserBidding,projectsCoId,
+  // Cards carry stored app data to the Hermes team, so they follow the same consent as drafting.
+  ...(hermesEnabled ? { hermesKanban: new HermesKanban(hermesKanbanRunner(draftingConfig.executable)) } : {}),
   repository,
   getGitHubToken: () => readGitHubEnvironment(projectRoot).token ?? undefined,
   getCredentialStatus: () => {

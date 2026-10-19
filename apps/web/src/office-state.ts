@@ -3,6 +3,7 @@ import { OPERATIONS_ROSTER } from '@fvh/domain';
 import type { OperationsData } from './operations-api.js';
 import type { BrowserBiddingStatus } from './browser-bidding-api.js';
 import type { ProjectsCoIdStatus } from './projects-co-id-api.js';
+import type { HermesKanbanStatus } from '../../server/src/hermes-kanban-types.js';
 
 export type AgentState = 'working' | 'reviewing' | 'collaborating' | 'idle' | 'offline' | 'unknown';
 // Lobby is the neutral spot for agents whose state cannot be determined.
@@ -94,6 +95,8 @@ function activityFor(id: string, activity: AuditEvent[]): AuditEvent[] {
 /** Extra real signals beyond the autopilot. `undefined` means the source could not be loaded. */
 export type OfficeContext = {
   projectsCoId?: ProjectsCoIdStatus | null | undefined;
+  /** Hermes kanban board `fvh-house`; each employee is the profile `fvh-<id>`. */
+  kanban?: Pick<HermesKanbanStatus, 'available' | 'team' | 'tasks'> | null | undefined;
   browserBidding?: BrowserBiddingStatus | null | undefined;
   operations?: Pick<OperationsData,'runtime'|'whatsapp'|'google'> | undefined;
   sync?: BusinessSyncStatus | null | undefined;
@@ -126,7 +129,9 @@ export function deriveOfficeAgents(autopilot: Autopilot | undefined, activity: A
   return ROSTER.map((entry) => {
     let derived: Derived;
     const signal=context.operations?.runtime.jobs[entry.id];
-    if (entry.id === 'projects-co-id-scout') {
+    const card = context.kanban?.tasks.find(t => t.status === 'running' && t.assignee === `fvh-${entry.id}`);
+    if (card) derived = { state: entry.id === 'chief-of-staff' ? 'collaborating' : 'working', reason: 'Mengerjakan kartu kanban Hermes.', task: card.title };
+    else if (entry.id === 'projects-co-id-scout') {
       const worker = context.projectsCoId;
       if (!worker) derived = { state: 'unknown', reason: 'Status projects.co.id tidak tersedia.' };
       else if (worker.mode === 'off' || ['paused', 'login_required', 'account_mismatch', 'challenge', 'stopped', 'error'].includes(worker.state)) derived = { state: 'offline', reason: worker.reason };
@@ -158,6 +163,8 @@ export function deriveOfficeAgents(autopilot: Autopilot | undefined, activity: A
     else if (entry.id === 'knowledge-curator' && context.knowledge?.state === 'running') derived = { state: 'working', reason: `Sinkronisasi API ${context.knowledge.provider} sedang berjalan.`, task: context.knowledge.current ?? 'Membaca sumber Knowledge Hub.' };
     else if (entry.id === 'operations-analyst' && autopilot && dueSoon) derived = { state: 'reviewing', reason: `Memantau ${dueSoon} tenggat proyek dalam 48 jam.`, task: `Memantau ${dueSoon} tenggat proyek dalam 48 jam.` };
     else if (['chief-of-staff', 'profile-editor', 'operations-analyst', 'knowledge-curator'].includes(entry.id)) derived = autopilot ? { state: 'idle', reason: ON_DEMAND_REASON } : { state: 'unknown', reason: 'Data server tidak tersedia.' };
+    else if (context.kanban?.team.includes(`fvh-${entry.id}`)) derived = { state: 'idle', reason: 'Siap mengerjakan kartu kanban Hermes.' };
+    else if (context.kanban === undefined) derived = { state: 'unknown', reason: 'Status kanban Hermes belum tersedia.' };
     else derived = { state: 'offline', reason: 'Tidak ada komponen runtime; tes dijalankan di luar aplikasi.' };
     const { state, reason } = derived;
     const task = derived.task !== undefined ? derived.task : (state === 'working' || state === 'collaborating') ? autopilot?.lastMessage ?? null : null;

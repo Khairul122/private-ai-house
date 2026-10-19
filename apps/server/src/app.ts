@@ -5,16 +5,16 @@ import { z } from 'zod';
 import { FreelancerReadError, FreelancerSandboxWriteError, FreelancerWriteError, getFreelancerCapabilities } from '@fvh/adapter-freelancer';
 import type { FreelancerSandboxWriteInput, FreelancerSandboxWriteOperation, FreelancerSandboxWriteResult, FreelancerWriteInput, FreelancerWriteOperation, FreelancerWriteResult } from '@fvh/adapter-freelancer';
 import { GitHubReadAdapter, GitHubReadError } from '@fvh/adapter-github';
-import { assessProject, createId, decideBid, hashPayload, UnavailableDraftingAdapter } from '@fvh/application';
+import { assessProject, createId, hashPayload, UnavailableDraftingAdapter } from '@fvh/application';
 import type { AiDraftingPort } from '@fvh/application';
 import { activatePolicySchema, createClientProjectSchema, createPaymentSchema, knowledgeImportSchema, knowledgeSearchSchema, updateClientProjectSchema, updatePolicySchema, updateProfileSchema } from '@fvh/contracts';
-import { CODING_KEYWORD_GROUPS, CODING_KEYWORDS, transitionPipeline } from '@fvh/domain';
+import { CODING_KEYWORD_GROUPS, CODING_KEYWORDS } from '@fvh/domain';
 import type { AutonomyPolicy, BidDraft, ProjectOpportunity } from '@fvh/domain';
 import { prepareKnowledgeFile } from '@fvh/knowledge';
 import { WorkspaceRepository } from '@fvh/persistence';
 import type { CredentialStatus, FreelancerVerification } from './credential-store.js';
 import type { LinkedInOAuthService } from './linkedin-oauth.js';
-import { localDateKey, mondayKey } from './autopilot.js';
+import { localDateKey } from './autopilot.js';
 import type { FreelancerAutopilot } from './autopilot.js';
 import type { BusinessSync } from './business-sync.js';
 import { OperationsService } from './operations.js';
@@ -24,6 +24,7 @@ import type { GoogleCalendarService } from './google-calendar.js';
 import type { BrowserBiddingService } from './browser-bidding.js';
 import { registerBrowserBiddingRoutes } from './browser-bidding-routes.js';
 import { registerProjectsCoIdRoutes } from './projects-co-id-routes.js';
+import { registerHermesKanbanRoutes, type HermesKanban } from './hermes-kanban.js';
 import type { ProjectsCoIdService } from './projects-co-id.js';
 import { PROJECTS_CO_ID_AUTO_REASON, validProjectsCoIdProposal } from './projects-co-id-types.js';
 
@@ -50,6 +51,7 @@ type FreelancerProductionWriteCheck = FreelancerSandboxWriteCheck;
 
 export type AppOptions = {
   projectsCoId?: ProjectsCoIdService;
+  hermesKanban?: HermesKanban;
   browserBidding?: BrowserBiddingService;
   operations?: OperationsService;
   whatsapp?: WhatsAppService;
@@ -173,6 +175,7 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
   registerOperationsRoutes(app, {repository,operations,whatsapp:options.whatsapp,google:options.googleCalendar});
   registerBrowserBiddingRoutes(app,options.browserBidding,repository);
   registerProjectsCoIdRoutes(app, options.projectsCoId);
+  registerHermesKanbanRoutes(app, options.hermesKanban, now);
   // Thread project ids are bare Freelancer ids; local project ids are 'freelancer:<id>'.
   const threadProjectIds = async () => new Set((await repository.listClientThreads()).map((thread) => thread.projectId).filter((id): id is string => id !== null).map((id) => `freelancer:${id}`));
   const dayDiff = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
@@ -630,20 +633,19 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
   });
   app.post('/api/policy/activate', async (request, reply) => {
     const parsed = parseBody(activatePolicySchema, request.body);
-    if ('issues' in parsed) return reply.code(400).send({ error: 'Pilih dan konfirmasikan mode simulasi atau bid live.', issues: parsed.issues });
+    if ('issues' in parsed) return reply.code(400).send({ error: 'Konfirmasikan aktivasi bid live.', issues: parsed.issues });
     const policy = await repository.getPolicy();
     if (policy.state === 'paused') return reply.code(409).send({ error: 'Kebijakan dijeda. Gunakan tindakan lanjutkan oleh pemilik.' });
     if (!Number.isFinite(Date.parse(policy.expiresAt)) || Date.parse(policy.expiresAt) <= now().getTime()) return reply.code(409).send({ error: 'Perbarui masa berlaku sebelum aktivasi.' });
-    const live = 'confirmLive' in parsed.value;
-    if (live && (!options.autopilot || !(options.getCredentialStatus?.() ?? options.credentialStatus)?.freelancerAccessTokenConfigured)) return reply.code(409).send({ error: 'Autopilot dan kredensial Freelancer harus tersedia sebelum aktivasi live.' });
+    if ((!options.autopilot || !(options.getCredentialStatus?.() ?? options.credentialStatus)?.freelancerAccessTokenConfigured)) return reply.code(409).send({ error: 'Autopilot dan kredensial Freelancer harus tersedia sebelum aktivasi live.' });
     const profile = await repository.getProfile();
     if (!profile.primaryField.trim() || profile.specializations.length === 0) return reply.code(409).send({ error: 'Isi bidang utama dan minimal satu spesialisasi sebelum mengaktifkan kebijakan.' });
-    if (!policy.allowedActions.includes('bid.submit')) return reply.code(409).send({ error: 'Pilih tindakan bid simulasi yang tercakup kebijakan.' });
-    const activated: AutonomyPolicy = { ...policy, version: policy.version + 1, state: 'active', primaryField: profile.primaryField, specializations: profile.specializations, simulationOnly: !live };
+    if (!policy.allowedActions.includes('bid.submit')) return reply.code(409).send({ error: 'Kebijakan harus mengizinkan tindakan bid.' });
+    const activated: AutonomyPolicy = { ...policy, version: policy.version + 1, state: 'active', primaryField: profile.primaryField, specializations: profile.specializations, simulationOnly: false };
     await repository.savePolicy(activated);
-    await repository.appendAudit({ type: 'policy.activated', resourceId: 'policy', status: 'recorded', reason: live ? 'Pemilik mengaktifkan bid live dalam batas kebijakan tersimpan.' : 'Pemilik mengaktifkan satu kebijakan simulasi lokal.', policyVersion: activated.version, payloadHash: hashPayload(activated) });
-    if (live) void options.autopilot?.start();
-    return { policy: activated, externalWrites: live };
+    await repository.appendAudit({ type: 'policy.activated', resourceId: 'policy', status: 'recorded', reason: 'Pemilik mengaktifkan bid live dalam batas kebijakan tersimpan.', policyVersion: activated.version, payloadHash: hashPayload(activated) });
+    void options.autopilot?.start();
+    return { policy: activated, externalWrites: true };
   });
   app.post('/api/policy/pause', async () => {
     const policy = await repository.getPolicy();
@@ -743,37 +745,6 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     await repository.appendAudit({ type: 'bid.draft_updated', resourceId: updated.projectId, status: 'recorded', reason: 'Pemilik memperbarui draf lokal.', policyVersion: (await repository.getPolicy()).version, payloadHash: hashPayload({ proposal: updated.proposal, proposedPrice: updated.proposedPrice, currency: updated.currency }) });
     return updated;
   });
-  app.post('/api/projects/:id/simulate-submit', async (request, reply) => {
-    const params = paramsSchema.safeParse(request.params);
-    if (!params.success) return reply.code(400).send({ error: 'ID peluang tidak valid.' });
-    const project = await repository.getProject(params.data.id);
-    const draft = await repository.getLatestDraft(params.data.id);
-    if (!project || !draft) return reply.code(404).send({ error: 'Buat draf sebelum menjalankan simulasi.' });
-    if (project.source === 'projects_co_id') return reply.code(409).send({ error: 'Gunakan kartu projects.co.id untuk draf dan penandaan manual pemilik.' });
-    const policy = await repository.getPolicy();
-    const audits = (await repository.listAudit(1000)).filter((event) => event.type === 'bid.simulated' && event.status === 'recorded');
-    const today = localDateKey(now(), policy.timezone);
-    const week = mondayKey(today);
-    const dailyUsed = audits.filter((event) => localDateKey(new Date(event.createdAt), policy.timezone) === today).length;
-    const weeklyUsed = audits.filter((event) => mondayKey(localDateKey(new Date(event.createdAt), policy.timezone)) === week).length;
-    const payload = { projectId: project.id, proposal: draft.proposal, proposedPrice: draft.proposedPrice, currency: draft.currency, policyVersion: policy.version };
-    const decision = decideBid({ policy, project, confidence: draft.confidence, proposedPrice: draft.proposedPrice, dailyUsed, weeklyUsed, now: now() });
-    const transition = decision.allowed ? transitionPipeline('draft_ready', 'policy_check') : undefined;
-    if (transition && !transition.ok) return reply.code(409).send({ error: 'Status pipeline tidak dapat diperiksa.' });
-    const event = await repository.appendAudit({
-      type: decision.allowed ? 'bid.simulated' : 'bid.simulation_skipped', resourceId: project.id,
-      status: decision.allowed ? 'recorded' : 'blocked', reason: decision.reason,
-      policyVersion: policy.version, payloadHash: hashPayload(payload),
-    });
-    return {
-      decision,
-      event,
-      externalWrites: false,
-      marketplaceStatus: 'unchanged',
-      pipelineStatus: decision.allowed ? 'draft_ready' : (await repository.listProjects()).find((item) => item.id === project.id)?.pipelineStatus ?? 'draft_ready',
-    };
-  });
-
   app.get('/api/pipeline', async () => {
     const drafts = await repository.latestDrafts();
     return (await repository.listProjects()).map((project) => ({ ...project, latestDraft: drafts.get(project.id) ?? null })).sort((a, b) => b.score - a.score);

@@ -14,6 +14,7 @@
     "test:smoke": "pnpm --filter @fvh/server test:smoke",
     "test": "pnpm test:unit && pnpm test:adapter && pnpm test:smoke",
     "private:start": "node scripts/private.mjs start",
+    "private:dev": "node scripts/private.mjs start dev",
     "private:stop": "node scripts/private.mjs stop"
   },
   "devDependencies": {

@@ -48,7 +48,8 @@ Terakhir diperbarui: 19 Oktober 2026.
 
 | Perintah | Fungsi |
 |---|---|
-| `pnpm private:start` | Menjalankan API + web di latar belakang (supervisor detached), menunggu port siap, menampilkan versi Hermes CLI. Log: `.local/private-dev.log`. |
+| `pnpm private:start` | **Mode produksi**: build web, lalu server (`tsx src/index.ts`, tanpa watch, `NODE_ENV=production`) menyajikan API + web di `http://127.0.0.1:3001`. Supervisor detached; log `.local/private-dev.log`. |
+| `pnpm private:dev` | Mode pengembangan di latar belakang: `pnpm dev` (tsx watch + Vite `5174`). |
 | `pnpm private:stop` | Menghentikan semuanya (berdasarkan PID supervisor, lalu fallback proses di port 3001/5174 — termasuk `pnpm dev` biasa). |
 | `pnpm dev` | API (`tsx watch`) + web (Vite) di foreground. |
 | `pnpm test` | unit + adapter + smoke. |
@@ -56,7 +57,7 @@ Terakhir diperbarui: 19 Oktober 2026.
 | `pnpm --filter @fvh/web build` | Build web (chunk `VisualOffice` ~920 kB di-lazy-load; peringatan ukuran chunk itu wajar). |
 
 - **Perintah memakai spasi**: `pnpm private:start` (bukan `pnpm-private:start`).
-- Port: **API `127.0.0.1:3001`**, **web `127.0.0.1:5174`** (Vite mem-proxy `/api` ke 3001).
+- Port: produksi **`127.0.0.1:3001`** (API + web build); pengembangan web **`127.0.0.1:5174`** (Vite mem-proxy `/api` ke 3001).
 - `.env` hanya dibaca saat server start → setelah mengubah `.env`, jalankan `pnpm private:stop; pnpm private:start` (PowerShell 5.1 tidak mengenal `&&`).
 - Node ≥ 24, pnpm 12. Platform utama pemilik: **Windows 11** (PowerShell + Git Bash).
 
@@ -77,7 +78,8 @@ packages/
   adapter-freelancer/  API Freelancer.com: baca (proyek, profil, pesan, bid) & tulis (bid, profil, pesan)
   adapter-github/      Baca repo GitHub (Contents) + daftar repo milik sendiri
   adapter-hermes/      Menjalankan Hermes CLI untuk menulis draf proposal
-scripts/private.mjs    private:start / private:stop
+scripts/private.mjs    private:start (produksi) / private:dev / private:stop
+scripts/hermes-team.ts profile Hermes per karyawan + board kanban fvh-house
 docs/                  hermes-agent-setup.md, capability-matrix.md, threat-model.md
 .local/                (gitignored) arsip SQLite lama, credential store DPAPI, log, pid
 ```
@@ -149,6 +151,7 @@ Pengecualian pemilik 19 Oktober 2026: proyek `projects_co_id` boleh `submitted` 
 | `GET /api/health` | Mode, status AI (`ai: hermes/disabled`), autopilot |
 | `GET /api/autopilot` | `state, lastRunAt, nextRunAt, lastMessage, cycleInProgress, draftsInProgress, …` |
 | `GET /api/browser-bidding` · `PUT /api/browser-bidding/mode` · `POST /api/browser-bidding/open` · `/check` · `/close` | Worker Playwright tersambung ke Chrome berprofil pemilik melalui izin debugging; mode API, fallback 401/403/429, atau browser. Tidak ada submit bebas. Baca `docs/browser-bidding.md`. |
+| `GET /api/hermes-kanban` · `GET /api/hermes-kanban/tasks/:id` · `POST /api/hermes-kanban/tasks` | Board Hermes `fvh-house` lewat CLI `hermes kanban`. Kartu baru hanya untuk profil `fvh-*`; body memuat snapshot data aplikasi (dibaca dari route GET aplikasi sendiri) bila `includeData`. Aktif hanya bila Hermes + consent aktif. |
 | `GET /api/projects-co-id` · `/drafts` · `PUT /mode` · `POST /open`, `/check`, `/close`, `/scan` · `POST /projects/:id/draft`, `/mark-sent`, `/skip`, `/won` | Prefix semua route `/api/projects-co-id`. Worker read-only; aksi penandaan memerlukan `confirm: true`. Tidak menerima URL/selector/skrip atau submit bebas. |
 | `GET /api/business-sync` | Status BusinessSync (null jika tidak tersedia) |
 | `GET /api/dashboard` | Hitungan, kebijakan, `bidUsage {today, week}` (zona waktu kebijakan), `externalWrites` |
@@ -160,7 +163,7 @@ Pengecualian pemilik 19 Oktober 2026: proyek `projects_co_id` boleh `submitted` 
 | `POST /api/linkedin/connect` · `GET /api/linkedin/callback` · `POST /api/linkedin/disconnect` | LinkedIn OIDC-lite |
 | `GET/PUT /api/profile` | Profil (PUT pada kebijakan aktif **mengembalikan kebijakan ke draf**) |
 | `GET/PUT /api/policy` · `POST /api/policy/activate` · `/pause` · `/resume` | Kebijakan & kill switch |
-| `GET /api/projects` · `GET /api/projects/:id` · `POST /api/projects/:id/draft` · `PUT /api/drafts/:id` · `POST /api/projects/:id/simulate-submit` · `GET /api/pipeline` | Peluang & draf |
+| `GET /api/projects` · `GET /api/projects/:id` · `POST /api/projects/:id/draft` · `PUT /api/drafts/:id` · `GET /api/pipeline` | Peluang & draf |
 | `GET /api/activity?limit=` | Log audit |
 | `GET /api/knowledge` · `POST /api/knowledge/import` · `POST /api/knowledge/github/sync` · `POST /api/knowledge/github/sync-all` · `POST /api/knowledge/search` · `DELETE /api/knowledge/sources/:id` | Knowledge Hub; sinkron ulang repo **mengganti** sumber lama (tanpa duplikat) |
 | `GET /api/settings` | Pengaturan |
@@ -178,6 +181,7 @@ Error validasi mengembalikan `{ error, issues[] }`; klien web (`api.ts`) menempe
 | `office-state.ts` | **Aturan status agen** (`deriveOfficeAgents`), label & warna status, `ROSTER` |
 | `office-layout.ts` | Denah: pod, zona, kursi/slot, `planPath` (rute koridor), `BOARDS`, `dayPhase` |
 | `api.ts` | Klien fetch + tipe respons |
+| `HermesKanbanCard.tsx` | Panel kanban Hermes di Papan Tugas: buat kartu untuk orchestrator/karyawan, kolom Antre/Dikerjakan/Butuh Anda/Selesai, hasil per kartu. |
 | `ProjectsCoIdPage.tsx`, `projects-co-id-api.ts` | Kartu khusus: status, pencarian aktif, ringkasan per tahap, filter tahap/bidang/penulis/urutan, detail proyek, draf, penandaan terkirim/menang/lewati. Peluang, Pipeline, Papan Tugas dan Aktivitas punya filter `?source=projects_co_id`; Kalender menampilkan penutupan listing (`closesAt`). |
 | `styles.css` | Gaya lama halaman + blok `.vo3d*` (overlay 3D, kartu). Gaya sidebar/topbar lama masih ada tapi tak terpakai |
 
@@ -210,7 +214,8 @@ Satu sumber kebenaran: `deriveOfficeAgents(autopilot, activity, { sync, hermes, 
 | Client Relations | BusinessSync pesan | `step==='messages'` → Bekerja; gagal → Offline; belum pernah → Tidak diketahui; selain itu Idle (+ tugas "N pesan menunggu balasan") |
 | Operations Analyst | `/api/work` | `dueSoon > 0` → Meninjau; selain itu on-demand |
 | Chief of Staff, Profile Editor, Knowledge Curator (+ Ops Analyst) | — | Idle ("hanya bekerja saat dipanggil"); tanpa data server → Tidak diketahui |
-| QA Engineer | — | Offline (tidak ada komponen runtime) |
+| QA Engineer | kanban Hermes | profil `fvh-qa-engineer` ada → Idle; tanpa tim → Offline |
+| Semua karyawan `fvh-<id>` | `/api/hermes-kanban` | kartu `running` untuk profilnya → Bekerja (Chief of Staff → Berkolaborasi) dengan judul kartu sebagai tugas; aturan ini didahulukan |
 
 Penempatan ruangan: Bekerja/Meninjau → **Workspace** (pod sendiri; Lead di meja Lead antara Lobby & Pantry); Berkolaborasi → **Ruang Rapat**; Idle → **Lounge/Pantry**; Tidak diketahui → **Lobby** (penanda "?"); Offline → **tidak di lantai** (redup di daftar). Agen berjalan lewat koridor saat status berubah (`planPath`).
 
@@ -239,7 +244,7 @@ pnpm test                 # semua lolos (±125 tes per 16 Okt 2026)
 pnpm --filter @fvh/web build
 ```
 
-Lalu cek perilaku di aplikasi berjalan (`pnpm private:start`, buka `http://127.0.0.1:5174`) atau lewat `curl http://127.0.0.1:3001/api/...`. Request tulis dari curl memerlukan header `Origin: http://127.0.0.1:5174`.
+Lalu cek perilaku di aplikasi berjalan (`pnpm private:start`, buka `http://127.0.0.1:3001`) atau lewat `curl http://127.0.0.1:3001/api/...`. Request tulis dari curl memerlukan header `Origin: http://127.0.0.1:5174`.
 
 Tes penting: `office-state.test.ts` (aturan status), `office-layout.test.ts` (kursi unik, rute, papan), `business-sync.test.ts`, `autopilot.test.ts` (profil tidak ditimpa, Hermes + fallback), `app.test.ts` (Host ditolak, insights, inbox, work, GitHub sync-all), adapter tests (ID bid/thread **numerik** seperti API asli).
 
@@ -277,7 +282,8 @@ Tes penting: `office-state.test.ts` (aturan status), `office-layout.test.ts` (ku
 - Worker bid browser: baca `docs/browser-bidding.md`. Pemilik meminta memakai Chrome berprofil yang sudah login; jangan launch profil kosong atau menyalin profil. Sambungkan ke sesi Chrome yang berjalan setelah pemilik memberi izin debugging; worker memakai tab sendiri dan disconnect tidak menutup Chrome pemilik. Guard kebijakan sebelum klik dan sebelum melepas POST; sukses harus memiliki HTTP 200 serta ID bid yang cocok. Jangan mengekspor sesi, memilih upgrade, menandatangani perjanjian, atau retry hasil tidak pasti. Kuota akun habis bukan pemicu fallback.
 - Deteksi menang/kalah belum pernah teramati pada data nyata (belum ada bid diputuskan).
 - Kanal/sesi Hermes (mis. Telegram) tidak dilaporkan → ditampilkan "Tidak tersedia".
-- Tim Hermes: profile `fvh-<id>` per karyawan + board kanban `fvh-house`, orchestrator `fvh-chief-of-staff`, project Hermes `fvh` terikat ke board (worktree per kartu); hanya `fvh-qa-engineer` dan `fvh-knowledge-curator` punya tool file/terminal; dibuat oleh `scripts/hermes-team.ts` (lihat `docs/hermes-agent-setup.md` §7). Board ini belum terhubung ke aplikasi; status agen di kantor tidak membacanya.
+- Tidak ada mode simulasi: aktivasi kebijakan hanya `{ mode: 'live', confirmLive: true }` (gagal tertutup tanpa autopilot/kredensial); route `simulate-submit` dihapus 20 Okt 2026. `simulationOnly` tetap di tipe untuk kebijakan lama.
+- Tim Hermes: profile `fvh-<id>` per karyawan + board kanban `fvh-house`, orchestrator `fvh-chief-of-staff`, project Hermes `fvh` terikat ke board (worktree per kartu); hanya `fvh-qa-engineer` dan `fvh-knowledge-curator` punya tool file/terminal; dibuat oleh `scripts/hermes-team.ts` (lihat `docs/hermes-agent-setup.md` §7). Board tampil di Papan Tugas dan menjadi sinyal status agen (§9).
 - API lokal tanpa autentikasi (dilindungi loopback + Host + Origin) — cukup untuk lokal satu pengguna.
 - Ide: sinyal kerja nyata untuk Knowledge Curator (saat sinkronisasi GitHub), kamera mengikuti agen yang berjalan, menghapus CSS sidebar lama, membaca milestone Freelancer untuk pendapatan otomatis.
 

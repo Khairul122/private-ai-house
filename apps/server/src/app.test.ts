@@ -31,7 +31,7 @@ async function configureAndActivatePolicy() {
     minPrice: 100, maxPrice: 800, dailyBidLimit: 4, weeklyBidLimit: 12, timezone: 'Asia/Jakarta',
     activeHours: { start: 8, end: 19 }, noNegotiationTerms: ['crypto gambling'],
   } });
-  return app.inject({ method: 'POST', url: '/api/policy/activate', payload: { confirmSimulation: true } });
+  return app.inject({ method: 'POST', url: '/api/policy/activate', payload: { mode: 'live', confirmLive: true } });
 }
 
 describe('local API', () => {
@@ -390,7 +390,7 @@ describe('local API', () => {
       allowedActions: ['bid.submit'], keywords: [], minimumConfidence: 0.5, minPrice: 100, maxPrice: 800,
       dailyBidLimit: 4, weeklyBidLimit: 12, timezone: 'Asia/Jakarta', activeHours: { start: 8, end: 19 }, noNegotiationTerms: [],
     } });
-    const result = await app.inject({ method: 'POST', url: '/api/policy/activate', payload: { confirmSimulation: false } });
+    const result = await app.inject({ method: 'POST', url: '/api/policy/activate', payload: { mode: 'live', confirmLive: false } });
 
     expect(result.statusCode).toBe(400);
     expect((await repository.getPolicy()).state).toBe('draft');
@@ -410,27 +410,23 @@ describe('local API', () => {
     expect(edited.json().proposedPrice).toBe(400);
   });
 
-  it('records a policy-bounded simulation without changing marketplace or submitted state', async () => {
+  it('has no simulation mode: activation is live only and fails closed without autopilot or Freelancer credentials', async () => {
     const activated = await configureAndActivatePolicy();
-    expect(activated.statusCode).toBe(200);
-    await app.inject({ method: 'POST', url: `/api/projects/${encodeURIComponent(testOpportunity.id)}/draft` });
-    const simulated = await app.inject({ method: 'POST', url: `/api/projects/${encodeURIComponent(testOpportunity.id)}/simulate-submit` });
-    const response = simulated.json();
+    const legacy = await app.inject({ method: 'POST', url: '/api/policy/activate', payload: { confirmSimulation: true } });
+    const simulate = await app.inject({ method: 'POST', url: `/api/projects/${encodeURIComponent(testOpportunity.id)}/simulate-submit` });
 
-    expect(simulated.statusCode).toBe(200);
-    expect(response).toMatchObject({ externalWrites: false, marketplaceStatus: 'unchanged', pipelineStatus: 'draft_ready', decision: { allowed: true, simulationOnly: true } });
-    expect(response.event.payloadHash).toMatch(/^[a-f0-9]{64}$/);
-    expect((await repository.listProjects()).find((item) => item.id === testOpportunity.id)?.pipelineStatus).toBe('draft_ready');
+    expect(activated.statusCode).toBe(409);
+    expect(legacy.statusCode).toBe(400);
+    expect(simulate.statusCode).toBe(404);
+    expect((await repository.getPolicy()).state).toBe('draft');
   });
 
-  it('pauses the kill switch immediately and records the blocked reason', async () => {
-    await configureAndActivatePolicy();
-    await app.inject({ method: 'POST', url: `/api/projects/${encodeURIComponent(testOpportunity.id)}/draft` });
-    await app.inject({ method: 'POST', url: '/api/policy/pause' });
-    const result = await app.inject({ method: 'POST', url: `/api/projects/${encodeURIComponent(testOpportunity.id)}/simulate-submit` });
+  it('pauses the kill switch immediately and records it in the audit', async () => {
+    await repository.savePolicy({ ...(await repository.getPolicy()), state: 'active', simulationOnly: false });
+    const paused = await app.inject({ method: 'POST', url: '/api/policy/pause' });
 
-    expect(result.json().decision).toMatchObject({ allowed: false, reasonCode: 'policy_paused' });
-    expect((await repository.listAudit(10)).some((event) => event.type === 'bid.simulation_skipped')).toBe(true);
+    expect(paused.json().state).toBe('paused');
+    expect((await repository.listAudit(10)).some((event) => event.type === 'policy.paused')).toBe(true);
   });
 
   it('imports searchable local evidence, rejects credentials, and deletes the index', async () => {

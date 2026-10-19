@@ -22,6 +22,16 @@ describe('office state', () => {
     expect(agent(deriveOfficeAgents(autopilot(), []), 'projects-co-id-scout').state).toBe('unknown');
     expect(scout().recentActivity.map(e => e.type)).toEqual(['projects_co_id.scan_completed']);
   });
+  it('shows Hermes kanban work only from running cards on the team board', () => {
+    const task = { id: 't_1', title: 'Analisis bid minggu ini', assignee: 'fvh-market-scout', status: 'running', createdBy: 'mission-control', createdAt: null, startedAt: null, completedAt: null, error: null };
+    const kanban = { available: true, team: ['fvh-chief-of-staff', 'fvh-market-scout', 'fvh-qa-engineer'], tasks: [task, { ...task, id: 't_2', assignee: 'fvh-chief-of-staff' }, { ...task, id: 't_3', assignee: 'fvh-qa-engineer', status: 'done' }] };
+    const agents = deriveOfficeAgents(autopilot({ state: 'paused' }), [], { kanban });
+    expect(agent(agents, 'market-scout')).toMatchObject({ state: 'working', room: 'workspace', task: 'Analisis bid minggu ini' });
+    expect(agent(agents, 'chief-of-staff')).toMatchObject({ state: 'collaborating', room: 'meeting' });
+    expect(agent(agents, 'qa-engineer')).toMatchObject({ state: 'idle', reason: 'Siap mengerjakan kartu kanban Hermes.' });
+    expect(agent(deriveOfficeAgents(autopilot(), []), 'qa-engineer').state).toBe('unknown');
+    expect(agent(deriveOfficeAgents(autopilot(), [], { kanban: null }), 'qa-engineer').state).toBe('offline');
+  });
   it('uses real knowledge sync activity and explains schedule waits', () => {
     expect(agent(deriveOfficeAgents(autopilot(), [], { knowledge: { state: 'running', provider: 'github', current: 'owner/repo' } }), 'knowledge-curator')).toMatchObject({ state: 'working', room: 'workspace', task: 'owner/repo' });
     expect(agent(deriveOfficeAgents(autopilot(), [], { knowledge: { state: 'completed', provider: 'github', current: null } }), 'knowledge-curator')).toMatchObject({ state: 'idle' });
@@ -84,8 +94,8 @@ describe('office state', () => {
   });
   it('summarizes derived states', () => {
     const agents = deriveOfficeAgents(autopilot({ cycleInProgress: true }), []);
-    expect(summarize(agents)).toEqual({ working: 3, idle: 4, offline: 1, unknown: 13 });
-    expect(summarize(deriveOfficeAgents(undefined, []))).toEqual({ working: 0, idle: 0, offline: 1, unknown: 20 });
+    expect(summarize(agents)).toEqual({ working: 3, idle: 4, offline: 0, unknown: 14 });
+    expect(summarize(deriveOfficeAgents(undefined, []))).toEqual({ working: 0, idle: 0, offline: 0, unknown: 21 });
   });
   it('shows dedicated floor staff only from actual operation signals',()=>{
     const operations={runtime:{running:true,jobs:{'delivery-manager':{busy:true,lastRunAt:null,error:null,reason:'Mengirim laporan ke Lead'},'lead-operations':{busy:true,lastRunAt:null,error:null,reason:'Meninjau'}}},whatsapp:{state:'disconnected',reason:'Belum terhubung',provider:'Baileys'},google:{connected:false,configured:false,reason:'Belum terhubung',redirectUri:''}};

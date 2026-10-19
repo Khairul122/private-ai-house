@@ -11,11 +11,11 @@ describe('office layout', () => {
   it('gives every placed agent its own spot and skips offline agents', () => {
     for (const data of [autopilot(true), autopilot(false), undefined]) {
       for(const floor of [1,2]) {
-      const agents = deriveOfficeAgents(data, []).filter(a=>(a.floor ?? 1)===floor);
+      const agents = deriveOfficeAgents(data, [], { kanban: null }).filter(a=>(a.floor ?? 1)===floor);
       const spots = spotsFor(agents);
       expect(spots.size).toBe(agents.filter((agent) => agent.room).length);
       expect(new Set([...spots.values()].map((spot) => `${spot.x},${spot.z}`)).size).toBe(spots.size);
-      expect(spots.has('qa-engineer')).toBe(false);
+      for (const agent of agents.filter((item) => !item.room)) expect(spots.has(agent.id)).toBe(false);
       }
     }
   });
