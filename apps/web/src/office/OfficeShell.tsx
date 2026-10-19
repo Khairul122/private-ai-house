@@ -12,6 +12,7 @@ import type { OperationsData } from '../api/operations-api.js';
 import { OPERATIONS_ROSTER } from '@fvh/domain';
 import { formatMoney, formatDate, activityTitle } from '../components/format.js';
 import { kanbanQuery } from '../api/queries.js';
+import { useLiveUpdates } from '../api/live.js';
 import { StateLabel, useClock } from '../components/ui.js';
 
 const VisualOffice = lazy(() => import('./VisualOffice.js'));
@@ -113,15 +114,18 @@ function OwnerControls({ input, moving }: { input: OwnerInput; moving: boolean }
 }
 
 export default function OfficeShell() {
-  const projectsCoId = useQuery({ queryKey: ['projects-co-id'], queryFn: () => api<ProjectsCoIdStatus | null>('/projects-co-id'), refetchInterval: 3000 });
+  const queryClient = useQueryClient();
+  const live = useLiveUpdates(queryClient);
+  // While the change stream is up these polls are only a safety net; when it drops they return to full speed.
+  const poll = (ms: number) => live === 'live' ? Math.max(ms, 30_000) : ms;
+  const projectsCoId = useQuery({ queryKey: ['projects-co-id'], queryFn: () => api<ProjectsCoIdStatus | null>('/projects-co-id'), refetchInterval: poll(3000) });
   const kanban = useQuery(kanbanQuery);
-  const operations=useQuery({queryKey:['operations'],queryFn:()=>api<OperationsData>('/operations'),refetchInterval:3000});
+  const operations=useQuery({queryKey:['operations'],queryFn:()=>api<OperationsData>('/operations'),refetchInterval:poll(3000)});
   const [floor,setFloor]=useState<1|2>(1);
   const [arrival,setArrival]=useState<{floor:1|2;at:P2}|null>(null);
-  const knowledgeSync = useQuery({ queryKey: ['knowledge-sync'], queryFn: () => api<{ job: { state: string; provider: string; current: string | null } | null }>('/knowledge/sync-status'), refetchInterval: 3_000 });
+  const knowledgeSync = useQuery({ queryKey: ['knowledge-sync'], queryFn: () => api<{ job: { state: string; provider: string; current: string | null } | null }>('/knowledge/sync-status'), refetchInterval: poll(3_000) });
   const location = useLocation();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const stage = useRef<HTMLDivElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const ownerButton = useRef<HTMLButtonElement>(null);
@@ -150,19 +154,19 @@ export default function OfficeShell() {
   const now = useClock(30_000);
   const phase = dayPhase(now.getHours());
 
-  const autopilot = useQuery({ queryKey: ['autopilot', 'office'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 1000 }); // cycles last ~4s; slower polling misses them
-  const sync = useQuery({ queryKey: ['business-sync', 'office'], queryFn: () => api<BusinessSyncStatus | null>('/business-sync'), refetchInterval: 1000 });
+  const autopilot = useQuery({ queryKey: ['autopilot', 'office'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: poll(1000) }); // cycles last ~4s; without the stream, slower polling misses them
+  const sync = useQuery({ queryKey: ['business-sync', 'office'], queryFn: () => api<BusinessSyncStatus | null>('/business-sync'), refetchInterval: poll(1000) });
   const inbox = useQuery({ queryKey: ['inbox'], queryFn: () => api<Inbox>('/inbox'), refetchInterval: 60_000 });
   const work = useQuery({ queryKey: ['work'], queryFn: () => api<Work>('/work'), refetchInterval: 60_000 });
-  const activity = useQuery({ queryKey: ['activity', 'office'], queryFn: () => api<AuditEvent[]>('/activity?limit=50'), refetchInterval: 10000 });
+  const activity = useQuery({ queryKey: ['activity', 'office'], queryFn: () => api<AuditEvent[]>('/activity?limit=50'), refetchInterval: poll(10000) });
   const health = useQuery({ queryKey: ['health'], queryFn: () => api<{ ok: boolean; mode: string; liveWrites: boolean }>('/health'), refetchInterval: 30_000 });
   const dashboard = useQuery({ queryKey: ['dashboard'], queryFn: () => api<NonNullable<ShellData['dashboard']>>('/dashboard'), refetchInterval: 30_000 });
   const pipeline = useQuery({ queryKey: ['pipeline'], queryFn: () => api<Array<Opportunity & { latestDraft: BidDraft | null }>>('/pipeline'), refetchInterval: 60_000 });
   const policy = useQuery({ queryKey: ['policy'], queryFn: () => api<Policy>('/policy'), refetchInterval: 30_000 });
   const profile = useQuery({ queryKey: ['profile'], queryFn: () => api<Profile>('/profile'), refetchInterval: 30_000 });
   const knowledge = useQuery({ queryKey: ['knowledge'], queryFn: () => api<{ coverage: { sources: number; chunks: number } }>('/knowledge'), refetchInterval: 30_000 });
-  const browserBidding = useQuery({queryKey:['browser-bidding'],queryFn:()=>api<BrowserBiddingStatus|null>('/browser-bidding'),refetchInterval:3000});
-  const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: () => api<Capabilities>('/capabilities'), refetchInterval: 3000 });
+  const browserBidding = useQuery({queryKey:['browser-bidding'],queryFn:()=>api<BrowserBiddingStatus|null>('/browser-bidding'),refetchInterval:poll(3000)});
+  const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: () => api<Capabilities>('/capabilities'), refetchInterval: poll(3000) });
   const pause = useMutation({
     mutationFn: (action: 'pause' | 'resume') => api<Policy>(`/policy/${action}`, jsonRequest('POST')),
     onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ['dashboard'] }); void queryClient.invalidateQueries({ queryKey: ['policy'] }); },
@@ -371,6 +375,7 @@ export default function OfficeShell() {
       <p>{summary}</p>
       <div className="vo3d-floor-picker" role="group" aria-label="Pilih lantai">{([1,2] as const).map(n=><button type="button" key={n} aria-pressed={floor===n} onClick={()=>goToFloor(n)}>Lantai {n}</button>)}</div>
       <p className={dashboardData?.externalWrites ? 'vo3d-warn' : ''}>{externalLabel}</p>
+      <p className={live === 'reconnecting' ? 'vo3d-warn' : ''}>{live === 'live' ? 'Realtime aktif' : live === 'connecting' ? 'Menyambungkan realtime…' : 'Realtime terputus — memakai pembaruan berkala'}</p>
       {health.isError && <p className="vo3d-warn">API lokal tidak terhubung.</p>}
       <Link to="/overview" className="vo3d-cta">Buka ringkasan</Link>
     </section>

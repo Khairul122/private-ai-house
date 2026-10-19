@@ -36,6 +36,8 @@ import { registerProjectsRoutes } from './routes/projects.js';
 import { registerProjectsCoIdRoutes } from './routes/projects-co-id.js';
 import { registerSettingsRoutes } from './routes/settings.js';
 import { registerWorkRoutes } from './routes/work.js';
+import { registerEventsRoutes } from './routes/events.js';
+import { LiveEvents, routeTopics } from './lib/live-events.js';
 
 export type AppOptions = {
   projectsCoId?: ProjectsCoIdService;
@@ -66,6 +68,8 @@ export type AppOptions = {
   draftingReason?: string;
   publicPortfolio?: (evidence:Parameters<AiDraftingPort['draftBid']>[0]['evidence'])=>Promise<Array<{label:string;url:string}>>;
   spaFallback?: boolean;
+  /** Change feed for GET /api/events; index.ts shares it with the workers and the database wrapper. */
+  live?: LiveEvents;
 };
 
 function isSameOrigin(origin: string, protocol: string, host: string | undefined): boolean {
@@ -85,8 +89,9 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
   const app = Fastify({ logger: false, bodyLimit: 2_500_000, trustProxy: false });
   const operations = options.operations ?? new OperationsService({ repository });
   const freelancerProductionWriteChecks = await readProductionWriteChecks(repository);
+  const live = options.live ?? new LiveEvents();
   const ctx: AppContext = {
-    options, repository, now,
+    options, repository, now, live,
     drafting: options.drafting ?? new UnavailableDraftingAdapter(),
     draftingMode: options.drafting ? options.draftingMode ?? 'fixture' : 'disabled',
     state: { draftsInProgress: 0, freelancerVerification: null },
@@ -119,10 +124,15 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     reply.header('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws://127.0.0.1:5173 ws://localhost:5173 ws://127.0.0.1:5174 ws://localhost:5174; object-src 'none'; base-uri 'self'; frame-ancestors 'none'");
     return payload;
   });
+  app.addHook('onResponse', async (request, reply) => {
+    if (reply.statusCode < 400) live.emit(...routeTopics(request.method, request.url));
+  });
+  live.watch(['capabilities', 'pipeline'], () => ctx.state.draftsInProgress);
 
   // Order matters only for hooks: the domain onRequest hooks run after the Host/Origin hook above,
   // and the knowledge onClose hook runs before the repository is closed below.
   registerHealthRoutes(app, ctx);
+  registerEventsRoutes(app, live);
   registerAutopilotRoutes(app, ctx);
   registerOperationsRoutes(app, {repository,operations,whatsapp:options.whatsapp,google:options.googleCalendar});
   registerBrowserBiddingRoutes(app,options.browserBidding,repository);
@@ -151,6 +161,7 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     return reply.code(404).send({ error: 'Endpoint tidak ditemukan.' });
   });
   app.addHook('onClose', async () => {
+    live.close();
     options.autopilot?.stop();
     options.linkedinOAuth?.close();
     if (!options.repository) await repository.close();

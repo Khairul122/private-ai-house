@@ -3,7 +3,7 @@ import { WorkspaceRepository } from '@fvh/persistence';
 import { projectsCoIdSettingsSchema } from '@fvh/contracts';
 import { PROJECTS_CO_ID_DEFAULTS, projectsCoIdDraftPolicy, projectsCoIdFieldsOf, projectsCoIdSearchTerms, projectsCoIdSettings, scoreProject, type AutonomyPolicy } from '@fvh/domain';
 import { chooseProjectsCoIdBid, mentionedRupiahAmounts, parseProjectsCoIdProject, projectsCoIdPath, validProjectsCoIdProposal, readRupiahBudget } from '../models/projects-co-id-types.js';
-import { ProjectsCoIdService } from './projects-co-id.js';
+import { PageBudget, ProjectsCoIdService } from './projects-co-id.js';
 import { createApp } from '../app.js';
 
 const now = new Date('2026-10-19T09:00:00Z');
@@ -24,6 +24,17 @@ describe('projects.co.id read-only integration', () => {
     for (const text of ['Harga Rp1,5 juta untuk aplikasi dengan estimasi pengerjaan 14 hari.', 'Harga USD 500 untuk aplikasi dengan estimasi pengerjaan 14 hari.', 'Harga Rp500.000 untuk aplikasi dengan estimasi pengerjaan 5 hari.', 'a'.repeat(1201)]) expect(validProjectsCoIdProposal(text, 500_000, 14)).toBe(false);
     expect(() => projectsCoIdPath({ id: project().id, sourceSlug: '../../evil' })).toThrow();
   });
+  it('page budget never allows more than three loads in any rolling 30-minute window', () => {
+    let clock = 0; const budget = new PageBudget(3, 30 * 60_000, () => clock); const loads: number[] = [];
+    for (let i = 0; i < 500; i++) { clock += (i * 7919) % 400_000; const n = 1 + (i % 3); if (budget.take(n)) loads.push(...Array<number>(n).fill(clock)); }
+    expect(loads.length).toBeGreaterThan(30);
+    for (const at of loads) expect(loads.filter(t => t > at - 30 * 60_000 && t <= at).length).toBeLessThanOrEqual(3);
+    clock += 30 * 60_000;
+    expect(budget.take(4)).toBe(false); expect(budget.take(0)).toBe(false); expect(budget.used).toBe(0);
+    expect(budget.take(3)).toBe(true); expect(budget.take(1)).toBe(false);
+    expect(budget.nextFreeAt()).toBe(new Date(clock + 30 * 60_000).toISOString());
+  });
+
   let repo: WorkspaceRepository | undefined;
   let service: ProjectsCoIdService | undefined;
   afterEach(async () => { await service?.close(); await repo?.close(); });

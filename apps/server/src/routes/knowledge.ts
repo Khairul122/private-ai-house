@@ -8,6 +8,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, ctx: AppContext) {
   app.post('/api/knowledge/import', c.importFiles);
   app.addHook('onClose', c.waitForSync);
   app.get('/api/knowledge/sync-status', c.syncStatus);
+  ctx.live.watch(['knowledge'], c.currentJob);
   app.post('/api/knowledge/sync', c.startSync);
   app.post('/api/knowledge/github/sync', c.syncGitHub);
   app.post('/api/knowledge/github/sync-all', c.syncAllGitHub);

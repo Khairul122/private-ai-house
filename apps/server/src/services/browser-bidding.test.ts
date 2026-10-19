@@ -74,6 +74,23 @@ describe('browser bidding service', () => {
     for (const error of [new FreelancerWriteError(400, 'BID_LIMIT_EXCEEDED'), new FreelancerWriteError(undefined, 'Timeout')]) await expect(service.submit(input, async () => undefined, async () => { throw error; })).rejects.toBe(error);
     expect(fixture.submit).toHaveBeenCalledTimes(1);
   });
+  it('re-checks the dashboard every 10 minutes and reuses the identity read within that period', async () => {
+    vi.useFakeTimers();
+    try {
+      const readIdentity = vi.fn(async () => ({ id: '42', username: 'owner-fixture' }));
+      const connection = { page: { setDefaultTimeout: vi.fn() } as unknown as Page, onDisconnect: vi.fn(), disconnect: vi.fn(async () => undefined) };
+      const timed = new BrowserBiddingService(directory, readIdentity, async () => connection);
+      await timed.open(); await timed.setMode('browser');
+      expect(await timed.submit(input, async () => undefined, vi.fn())).toMatchObject({ resultId: '9123' });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fixture.inspect).toHaveBeenCalledTimes(2); expect(readIdentity).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(9 * 60_000);
+      expect(fixture.inspect).toHaveBeenCalledTimes(2); expect(timed.readiness().ready).toBe(true);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(fixture.inspect).toHaveBeenCalledTimes(3); expect(readIdentity).toHaveBeenCalledTimes(2);
+      await timed.close();
+    } finally { vi.useRealTimers(); }
+  });
   it('retains an uncertain result and does not retry the browser driver', async () => {
     await service.open(); await service.setMode('browser');
     const { BrowserBidError } = await import('../models/browser-bid-types.js'); fixture.submit.mockRejectedValue(new BrowserBidError('uncertain', 'Hasil belum pasti.', true));

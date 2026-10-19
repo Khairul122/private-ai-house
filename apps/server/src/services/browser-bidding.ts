@@ -70,9 +70,17 @@ export class BrowserBiddingService {
   private writes = Promise.resolve();
   private timer: ReturnType<typeof setInterval> | undefined;
   private current: BrowserBidStatus = { mode: 'api', state: 'stopped', busy: false, reason: 'Belum tersambung ke Chrome berprofil Anda.', username: null, remaining: null, checkedAt: null, pageStatus: null, lastRunAt: null, lastResult: null };
-  constructor(private directory: string, private readIdentity: () => Promise<BrowserIdentity>, private connect = connectExistingChrome) {}
+  private identity: { value: BrowserIdentity; at: number } | null = null;
+  /** Dashboard re-check period; the identity read is cached for the same period. Each send still inspects the dashboard first. */
+  constructor(private directory: string, private readIdentity: () => Promise<BrowserIdentity>, private connect = connectExistingChrome, private checkIntervalMs = 10 * 60_000) {}
+  private async cachedIdentity(): Promise<BrowserIdentity> {
+    if (this.identity && Date.now() - this.identity.at < this.checkIntervalMs) return this.identity.value;
+    const value = await this.readIdentity();
+    this.identity = { value, at: Date.now() };
+    return value;
+  }
   status(): BrowserBidStatus {
-    const old = this.current.checkedAt && Date.now() - Date.parse(this.current.checkedAt) > 90_000;
+    const old = this.current.checkedAt && Date.now() - Date.parse(this.current.checkedAt) > this.checkIntervalMs + 60_000;
     return old && !this.current.busy && this.current.state === 'ready' ? { ...this.current, state: 'error', reason: 'Status browser sudah lama. Periksa kembali sebelum pengiriman.' } : { ...this.current };
   }
   private persist() {
@@ -134,7 +142,7 @@ export class BrowserBiddingService {
       this.autoStart = true; await this.persist();
       this.current.busy = false;
       await this.check();
-      if (generation === this.generation && this.connection) { this.timer = setInterval(() => { if (!this.current.busy && !['login_required', 'challenge', 'stopped'].includes(this.current.state)) void this.check(); }, 60_000); this.timer.unref?.(); }
+      if (generation === this.generation && this.connection) { this.timer = setInterval(() => { if (!this.current.busy && !['login_required', 'challenge', 'stopped'].includes(this.current.state)) void this.check(); }, this.checkIntervalMs); this.timer.unref?.(); }
     } catch {
       if (generation === this.generation) this.current = { ...this.current, state: 'error', reason: 'Chrome belum tersambung. Pada Chrome berprofil Anda, buka chrome://inspect/#remote-debugging dan aktifkan izin debugging, lalu hubungkan dan setujui dialog Chrome. Tidak ada Chrome baru yang dibuka.' };
     } finally { if (generation === this.generation) this.current.busy = false; }
@@ -150,7 +158,7 @@ export class BrowserBiddingService {
       this.current = { ...this.current, ...observed };
       if (observed.challenge) { this.current.state = 'challenge'; this.current.reason = 'Selesaikan CAPTCHA/verifikasi manusia pada tab worker di Chrome Anda.'; return; }
       if (!observed.username) { this.current.state = 'login_required'; this.current.reason = 'Sesi Freelancer belum login pada profil Chrome yang tersambung. Gunakan profil yang sudah login, lalu periksa kembali.'; return; }
-      const expected = await this.readIdentity();
+      const expected = await this.cachedIdentity();
       if (generation !== this.generation || !this.connection) return;
       if (observed.username.toLowerCase() !== expected.username.toLowerCase()) { this.current.state = 'account_mismatch'; this.current.reason = 'Akun pada browser berbeda dari akun API. Gunakan akun yang sama.'; return; }
       if (observed.remaining === null) { this.current.state = 'error'; this.current.reason = 'Jumlah bid tersisa belum dapat dibaca dari dashboard. Pengiriman browser ditahan.'; return; }
@@ -174,7 +182,7 @@ export class BrowserBiddingService {
     const driver = this.driver; const generation = this.generation;
     this.current = { ...this.current, busy: true, state: 'submitting', lastRunAt: new Date().toISOString(), reason: `Menyiapkan bid browser untuk proyek ${input.projectId}.` };
     try {
-      const identity = await this.readIdentity();
+      const identity = await this.cachedIdentity();
       if (generation !== this.generation || !this.connection) throw new BrowserBidError('stopped', 'Sambungan Chrome dihentikan sebelum submit.');
       const result = await driver.submit(input, identity, async () => {
         if (generation !== this.generation || !this.connection || mode !== this.current.mode) throw new BrowserBidError('stopped', 'Browser atau jalur pengiriman berubah sebelum submit.');

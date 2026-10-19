@@ -32,7 +32,10 @@ export type FreelancerProfile = {
 
 export type FreelancerProjectsResult = { projects: ProjectOpportunity[]; skipped: number };
 export type FreelancerBidStatus = { bidId: string; projectId: string; awardStatus: string | null; retracted: boolean };
-export type FreelancerLatestMessage = { threadId: number; projectId: string | null; messageId: number; senderId: string; message: string; createdAt: string };
+/** `threadUpdated` is the thread's raw `time_updated`, used only to detect changed threads between syncs. */
+export type FreelancerLatestMessage = { threadId: number; projectId: string | null; messageId: number; senderId: string; message: string; createdAt: string; threadUpdated?: number | undefined };
+/** Last rate-limit headers seen on any Freelancer read; numbers only. */
+export type FreelancerRateLimit = { limit: number | null; remaining: number | null; status: number; seenAt: string };
 
 type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 type JsonRecord = Record<string, unknown>;
@@ -84,6 +87,26 @@ export class FreelancerReadError extends Error {
     super(message);
     this.name = 'FreelancerReadError';
   }
+}
+
+/** Thrown when a multi-request read stops midway (e.g. HTTP 429); `partial` keeps what was already read. */
+export class FreelancerPartialReadError extends FreelancerReadError {
+  constructor(cause: FreelancerReadError, public readonly partial: FreelancerLatestMessage[]) {
+    super(cause.code, cause.message, cause.statusCode);
+    this.name = 'FreelancerPartialReadError';
+  }
+}
+
+// ponytail: process-wide last value; per-endpoint tracking if Freelancer ever publishes per-endpoint limits.
+let lastRateLimit: FreelancerRateLimit | null = null;
+export function lastFreelancerRateLimit(): FreelancerRateLimit | null {
+  return lastRateLimit && { ...lastRateLimit };
+}
+
+/** First integer of a header such as "50, 50;window=60, 1000;window=3600". */
+function headerNumber(value: string | null): number | null {
+  const match = value?.match(/\d+/);
+  return match ? Number(match[0]) : null;
 }
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -200,6 +223,30 @@ function projectsFromResult(result: JsonRecord): unknown[] | undefined {
   if (Array.isArray(result.projects)) return result.projects;
   if (isRecord(result.projects)) return Object.values(result.projects);
   return undefined;
+}
+
+type ThreadInfo = { threadId: number; projectId: string | null; updated: number | undefined };
+
+function threadInfo(thread: JsonRecord): ThreadInfo | undefined {
+  const inner = isRecord(thread.thread) ? thread.thread : {};
+  const threadId = number(thread.id ?? inner.id);
+  if (threadId === undefined || !Number.isSafeInteger(threadId) || threadId < 1) return undefined;
+  const context = isRecord(thread.context) ? thread.context : isRecord(inner.context) ? inner.context : {};
+  return { threadId, projectId: context.type === 'project' ? identifier(context.id) ?? null : null, updated: number(thread.time_updated ?? inner.time_updated) };
+}
+
+function parseLatestMessage(latest: JsonRecord, info: ThreadInfo): FreelancerLatestMessage | undefined {
+  const messageId = number(latest.id);
+  // The API documents from_user as a numeric user ID; older payloads nested it as { id }.
+  const senderId = identifier(isRecord(latest.from_user) ? latest.from_user.id : latest.from_user ?? latest.from_user_id);
+  const content = text(latest.message);
+  const createdEpoch = number(latest.time_created);
+  const createdMs = createdEpoch !== undefined ? (createdEpoch > 1_000_000_000_000 ? createdEpoch : createdEpoch * 1_000) : Date.parse(text(latest.created_at) ?? '');
+  if (messageId === undefined || !Number.isSafeInteger(messageId) || messageId < 1 || !senderId || !content || !Number.isFinite(createdMs) || Math.abs(createdMs) > 8.64e15) return undefined;
+  return {
+    threadId: info.threadId, projectId: info.projectId, messageId, senderId, message: content.slice(0, 4_000), createdAt: new Date(createdMs).toISOString(),
+    ...(info.updated !== undefined ? { threadUpdated: info.updated } : {}),
+  };
 }
 
 export const freelancerCapabilities: FreelancerCapability[] = [
@@ -370,41 +417,65 @@ export class FreelancerReadAdapter {
     }
   }
 
+  /** Latest message of every listed thread, one request per thread; a stop midway (e.g. 429) keeps earlier threads. */
   async readLatestThreadMessages(userId: string, threadLimit = 20): Promise<FreelancerLatestMessage[]> {
-    if (!/^\d{1,30}$/.test(userId) || !Number.isSafeInteger(threadLimit) || threadLimit < 1 || threadLimit > 50) {
+    const threads = await this.readThreadList(userId, threadLimit, {});
+    return this.readThreadsOneByOne(threads.map((thread) => thread.info), []);
+  }
+
+  /**
+   * One thread-list request with `last_message`. A thread whose response lacks it is read separately only when
+   * its `time_updated` differs from `known` (or, on a full sweep without `fromUpdatedTime`, when that field is missing).
+   */
+  async readUpdatedThreads(userId: string, options: { limit?: number; fromUpdatedTime?: number; known?: ReadonlyMap<number, number> } = {}): Promise<FreelancerLatestMessage[]> {
+    const { limit = 30, fromUpdatedTime, known = new Map<number, number>() } = options;
+    if (fromUpdatedTime !== undefined && (!Number.isSafeInteger(fromUpdatedTime) || fromUpdatedTime < 0)) {
+      throw new FreelancerReadError('invalid_query', 'Waktu pembaruan thread tidak valid.');
+    }
+    const threads = await this.readThreadList(userId, limit, {
+      last_message: 'true', unread_count: 'true',
+      ...(fromUpdatedTime !== undefined ? { from_updated_time: String(fromUpdatedTime) } : {}),
+    });
+    const messages: FreelancerLatestMessage[] = [];
+    const missing: ThreadInfo[] = [];
+    for (const { info, raw } of threads) {
+      const latest = isRecord(raw.last_message) ? parseLatestMessage(raw.last_message, info) : undefined;
+      if (latest) messages.push(latest);
+      else if (info.updated === undefined ? fromUpdatedTime === undefined : known.get(info.threadId) !== info.updated) missing.push(info);
+    }
+    return this.readThreadsOneByOne(missing, messages);
+  }
+
+  private async readThreadList(userId: string, limit: number, extra: Record<string, string>): Promise<Array<{ info: ThreadInfo; raw: JsonRecord }>> {
+    if (!/^\d{1,30}$/.test(userId) || !Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
       throw new FreelancerReadError('invalid_query', 'ID akun atau batas thread tidak valid.');
     }
-    const threadsUrl = new URL(`${API_ROOT}/messages/0.1/threads/`);
-    threadsUrl.search = new URLSearchParams({ 'members[]': userId, limit: String(threadLimit), offset: '0' }).toString();
-    const threadsResult = resultRecord(await (await this.request(threadsUrl)).json());
-    const rawThreads = threadsResult.threads;
+    const url = new URL(`${API_ROOT}/messages/0.1/threads/`);
+    url.search = new URLSearchParams({ 'members[]': userId, limit: String(limit), offset: '0', ...extra }).toString();
+    const result = resultRecord(await (await this.request(url)).json());
+    const rawThreads = result.threads;
     if (!Array.isArray(rawThreads) && !isRecord(rawThreads)) {
       throw new FreelancerReadError('threads_invalid_response', 'Respons daftar thread Freelancer tidak memiliki daftar yang valid.');
     }
+    return objectValues(rawThreads).slice(0, limit).flatMap((raw) => {
+      const info = threadInfo(raw);
+      return info ? [{ info, raw }] : [];
+    });
+  }
 
-    const messages: FreelancerLatestMessage[] = [];
-    for (const thread of objectValues(rawThreads).slice(0, threadLimit)) {
-      const threadId = number(thread.id);
-      if (threadId === undefined || !Number.isSafeInteger(threadId) || threadId < 1) continue;
-      const context = isRecord(thread.context) ? thread.context : {};
-      const projectId = context.type === 'project' ? identifier(context.id) ?? null : null;
-      const messagesUrl = new URL(`${API_ROOT}/messages/0.1/messages/`);
-      messagesUrl.search = new URLSearchParams({ 'threads[]': String(threadId), limit: '1', offset: '0' }).toString();
-      const result = resultRecord(await (await this.request(messagesUrl)).json());
-      const rawMessages = result.messages;
-      if (!Array.isArray(rawMessages) && !isRecord(rawMessages)) continue;
-      const latest = objectValues(rawMessages)[0];
-      if (!latest) continue;
-      const messageId = number(latest.id);
-      const sender = isRecord(latest.from_user) ? latest.from_user : {};
-      const senderId = identifier(sender.id ?? latest.from_user_id);
-      const content = text(latest.message);
-      const createdEpoch = number(latest.time_created);
-      const createdAt = createdEpoch !== undefined
-        ? new Date(createdEpoch > 1_000_000_000_000 ? createdEpoch : createdEpoch * 1_000).toISOString()
-        : text(latest.created_at) ?? '';
-      if (messageId === undefined || !Number.isSafeInteger(messageId) || messageId < 1 || !senderId || !content || !createdAt || !Number.isFinite(Date.parse(createdAt))) continue;
-      messages.push({ threadId, projectId, messageId, senderId, message: content.slice(0, 4_000), createdAt });
+  private async readThreadsOneByOne(threads: ThreadInfo[], messages: FreelancerLatestMessage[]): Promise<FreelancerLatestMessage[]> {
+    for (const info of threads) {
+      try {
+        const url = new URL(`${API_ROOT}/messages/0.1/messages/`);
+        url.search = new URLSearchParams({ 'threads[]': String(info.threadId), limit: '1', offset: '0' }).toString();
+        const rawMessages = resultRecord(await (await this.request(url)).json()).messages;
+        const latest = Array.isArray(rawMessages) || isRecord(rawMessages) ? objectValues(rawMessages)[0] : undefined;
+        const parsed = latest && parseLatestMessage(latest, info);
+        if (parsed) messages.push(parsed);
+      } catch (error) {
+        const cause = error instanceof FreelancerReadError ? error : new FreelancerReadError('invalid_response', 'Respons pesan Freelancer tidak dapat dibaca.');
+        throw new FreelancerPartialReadError(cause, messages);
+      }
     }
     return messages;
   }
@@ -414,16 +485,24 @@ export class FreelancerReadAdapter {
     if (normalizedQuery.length < 2 || normalizedQuery.length > 120 || !Number.isInteger(limit) || limit < 1 || limit > 50) {
       throw new FreelancerReadError('invalid_query', 'Kata pencarian harus 2–120 karakter dan jumlah proyek 1–50.');
     }
+    return this.readActiveProjects(new URLSearchParams({ query: normalizedQuery }), limit);
+  }
+
+  /** Active projects in any of `jobIds` updated after `fromTime` (epoch seconds), sorted by update time. */
+  async searchProjectsByJobs(jobIds: number[], fromTime: number, limit = 50): Promise<FreelancerProjectsResult> {
+    if (!jobIds.length || jobIds.length > 50 || jobIds.some((id) => !Number.isSafeInteger(id) || id < 1) || !Number.isSafeInteger(fromTime) || fromTime < 0 || !Number.isInteger(limit) || limit < 1 || limit > 50) {
+      throw new FreelancerReadError('invalid_query', 'ID job (1–50), waktu mulai, atau jumlah proyek (1–50) tidak valid.');
+    }
+    const filters = new URLSearchParams({ sort_field: 'time_updated', from_time: String(fromTime) });
+    for (const id of jobIds) filters.append('jobs[]', String(id));
+    return this.readActiveProjects(filters, limit);
+  }
+
+  private async readActiveProjects(filters: URLSearchParams, limit: number): Promise<FreelancerProjectsResult> {
+    const params = new URLSearchParams(filters);
+    for (const [key, value] of Object.entries({ limit: String(limit), offset: '0', full_description: 'true', job_details: 'true', user_details: 'true', user_country_details: 'true' })) params.set(key, value);
     const url = new URL(`${API_ROOT}/projects/0.1/projects/active/`);
-    url.search = new URLSearchParams({
-      query: normalizedQuery,
-      limit: String(limit),
-      offset: '0',
-      full_description: 'true',
-      job_details: 'true',
-      user_details: 'true',
-      user_country_details: 'true',
-    }).toString();
+    url.search = params.toString();
     const response = await this.request(url);
     const result = resultRecord(await response.json());
     const records = projectsFromResult(result);
@@ -444,6 +523,9 @@ export class FreelancerReadAdapter {
     } catch {
       throw new FreelancerReadError('network_error', 'Freelancer tidak dapat dijangkau dari server lokal. Periksa koneksi jaringan lalu coba lagi.');
     }
+    const limit = headerNumber(response.headers.get('RateLimit-Limit'));
+    const remaining = headerNumber(response.headers.get('RateLimit-Remaining'));
+    if (limit !== null || remaining !== null) lastRateLimit = { limit, remaining, status: response.status, seenAt: this.now().toISOString() };
     if (response.status === 401) throw new FreelancerReadError('invalid_token', 'Freelancer menolak token tersimpan. Perbarui token akses.', 401);
     if (response.status === 403) throw new FreelancerReadError('scope_denied', 'Token Freelancer tidak memiliki izin baca untuk endpoint ini.', 403);
     if (response.status === 429) throw new FreelancerReadError('rate_limited', 'Freelancer membatasi permintaan. Coba lagi setelah jeda.', 429);

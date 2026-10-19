@@ -52,6 +52,9 @@ export class HermesKanban {
     return this.last ? Promise.resolve(this.last) : this.cached.value;
   }
 
+  /** Last snapshot without starting a Hermes read. */
+  peek(): HermesKanbanStatus | null { return this.last; }
+
   private async read(): Promise<HermesKanbanStatus> {
     const checkedAt = this.now().toISOString();
     try {

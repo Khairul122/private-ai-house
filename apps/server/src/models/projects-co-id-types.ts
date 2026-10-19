@@ -25,6 +25,10 @@ export type ProjectsCoIdStatus = {
   readyDrafts: number;
   blockedWrites: number;
   draftUsage: { today: number; week: number; dailyLimit: number; weeklyLimit: number };
+  /** Official public channel preview (t.me/s); `ok` is null before the first request. */
+  telegram?: { lastCheckedAt: string | null; ok: boolean | null; error: string | null; nextCheckAt: string | null; queued: number };
+  /** Listing + detail page loads in the worker tab within the rolling 30-minute window. */
+  pageBudget?: { used: number; limit: number; nextFreeAt: string | null };
 };
 export type ProjectsCoIdObservation = Pick<ProjectsCoIdStatus, 'username' | 'remaining' | 'checkedAt' | 'pageStatus'> & { challenge: boolean };
 export type ProjectsCoIdListing = { href: string; title: string; description: string; clientName: string; skills: string[]; text: string };
@@ -68,11 +72,17 @@ function wibDate(text: string): Date | null {
   return local === iso.slice(0, 19) ? date : null;
 }
 
-export function parseProjectsCoIdProject(item: ProjectsCoIdListing, now: Date, origin = PROJECTS_CO_ID_ORIGIN): ProjectOpportunity | null {
-  let url: URL; try { url = new URL(item.href, origin); } catch { return null; }
+/** The only accepted project link: exact origin, no credentials or query, six-hex id and a safe slug. */
+export function parseProjectsCoIdHref(href: string, origin = PROJECTS_CO_ID_ORIGIN): { id: string; slug: string } | null {
+  let url: URL; try { url = new URL(href, origin); } catch { return null; }
   const path = url.pathname.match(/^\/public\/browse_projects\/view\/([a-f0-9]{6})\/([a-zA-Z0-9_-]{1,300})\/?$/);
-  const id = path?.[1];
-  if (url.origin !== origin || url.username || url.password || url.search || !id || !item.title.trim() || !item.description.trim()) return null;
+  if (url.origin !== origin || url.username || url.password || url.search || !path) return null;
+  return { id: `projects_co_id:${path[1]}`, slug: path[2]! };
+}
+
+export function parseProjectsCoIdProject(item: ProjectsCoIdListing, now: Date, origin = PROJECTS_CO_ID_ORIGIN): ProjectOpportunity | null {
+  const link = parseProjectsCoIdHref(item.href, origin);
+  if (!link || !item.title.trim() || !item.description.trim()) return null;
   const field = (name: string) => item.text.match(new RegExp(`^\\s*${name}:\\s*([^\\n]+)`, 'm'))?.[1]?.trim() ?? '';
   const budget = readRupiahBudget(field('Published Budget'));
   const status = field('Project Status');
@@ -81,13 +91,13 @@ export function parseProjectsCoIdProject(item: ProjectsCoIdListing, now: Date, o
   const deadline = wibDate(field('Select Deadline'));
   const deadlineDays = deadline ? Math.floor((deadline.getTime() - now.getTime()) / 86_400_000) : null;
   return {
-    id: `projects_co_id:${id}`, title: item.title.trim().slice(0, 500), description: item.description.trim().slice(0, 20_000),
+    id: link.id, title: item.title.trim().slice(0, 500), description: item.description.trim().slice(0, 20_000),
     clientName: item.clientName.trim() || 'Tidak tersedia', budgetMin: budget[0], budgetMax: budget[1], currency: 'IDR', projectType: 'fixed',
     skills: item.skills.slice(0, 100).map(s => s.trim().slice(0, 100)).filter(Boolean), deadlineDays,
     // These are brief heuristics, never an assertion about the owner's reputation.
     briefQuality: Math.min(1, 0.25 + Math.min(item.description.length / 1200, 0.55) + Math.min(item.skills.length / 10, 0.2)),
     riskScore: Math.min(1, (item.description.length < 160 ? 0.3 : 0) + (deadlineDays === 0 ? 0.1 : 0) + (/crypto|gambling|adult|akun|account|adsense|godev/i.test(item.title + ' ' + item.description) ? 0.35 : 0)),
-    sourceSlug: path![2], closesAt: deadline?.toISOString() ?? null,
+    sourceSlug: link.slug, closesAt: deadline?.toISOString() ?? null,
     status: deadlineDays !== null && deadlineDays < 0 ? 'expired' : status === 'Published' ? 'open' : 'closed', source: 'projects_co_id', createdAt: published.toISOString(),
   };
 }

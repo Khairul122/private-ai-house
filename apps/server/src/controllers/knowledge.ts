@@ -75,6 +75,7 @@ export function knowledgeController({ options, repository, now }: AppContext) {
     },
 
     syncStatus: async () => ({ job: knowledgeJob }),
+    currentJob: () => knowledgeJob,
 
     startSync: async (request: FastifyRequest, reply: FastifyReply) => {
       const parsed = z.object({ provider: z.enum(['github', 'linkedin']), repository: z.string().regex(/^[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+$/).optional() }).safeParse(request.body);

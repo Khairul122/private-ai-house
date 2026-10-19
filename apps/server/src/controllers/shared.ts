@@ -4,6 +4,7 @@ import type { AiDraftingPort } from '@fvh/application';
 import type { WorkspaceRepository } from '@fvh/persistence';
 import type { AppOptions } from '../app.js';
 import type { CredentialStatus, FreelancerVerification } from '../lib/credential-store.js';
+import type { LiveEvents } from '../lib/live-events.js';
 
 export const paramsSchema = z.object({ id: z.string().min(1).max(150) });
 export const allowedDevOrigins = new Set(['http://127.0.0.1:5173', 'http://localhost:5173', 'http://127.0.0.1:5174', 'http://localhost:5174']);
@@ -16,6 +17,7 @@ export type AppContext = {
   options: AppOptions;
   repository: WorkspaceRepository;
   now: () => Date;
+  live: LiveEvents;
   drafting: AiDraftingPort;
   draftingMode: 'disabled' | 'fixture' | 'hermes';
   state: { draftsInProgress: number; freelancerVerification: FreelancerVerification | null };

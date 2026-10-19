@@ -5,7 +5,8 @@ import { PROJECTS_CO_ID_DEFAULTS, type ProjectOpportunity } from '@fvh/domain';
 import type { DraftingInput } from '@fvh/application';
 const driver = vi.hoisted(() => ({ inspect: vi.fn(), listOpenProjects: vi.fn(), readProject: vi.fn(), protect: vi.fn(), onBlockedWrite: undefined as (() => void) | undefined }));
 vi.mock('../lib/projects-co-id-page.js', () => ({ ProjectsCoIdPage: class { constructor(_page: unknown, _origin: unknown, onBlockedWrite?: () => void) { driver.onBlockedWrite = onBlockedWrite; } inspect = driver.inspect; listOpenProjects = driver.listOpenProjects; readProject = driver.readProject; protect = driver.protect; blockedWrites = 0; } }));
-import { ProjectsCoIdService } from './projects-co-id.js';
+import { PageBudget, ProjectsCoIdService } from './projects-co-id.js';
+import { ProjectsCoIdTelegram } from '../lib/projects-co-id-telegram.js';
 import { validProjectsCoIdProposal } from '../models/projects-co-id-types.js';
 
 const project = (id = '55601d'): ProjectOpportunity => ({
@@ -18,6 +19,12 @@ describe('projects.co.id draft worker', () => {
   let repo: WorkspaceRepository;
   let service: ProjectsCoIdService;
   const draft = vi.fn(async (input: DraftingInput) => output(input));
+  let clock = Date.now();
+  let channel = '';
+  const fetcher = vi.fn(async () => new Response(channel, { status: 200, headers: { 'content-type': 'text/html' } }));
+  const connect = async () => ({ page: { setDefaultTimeout: vi.fn() } as unknown as Page, disconnect: async () => undefined, onDisconnect: () => undefined });
+  // Tests below that are not about the page budget scan repeatedly; they get a large budget.
+  const make = (pages = new PageBudget(1000)) => new ProjectsCoIdService(repo, connect, undefined, draft, new ProjectsCoIdTelegram(fetcher as unknown as typeof fetch, () => clock), pages);
   beforeEach(async () => {
     vi.clearAllMocks();
     repo = await WorkspaceRepository.open();
@@ -27,7 +34,7 @@ describe('projects.co.id draft worker', () => {
     driver.inspect.mockResolvedValue({ username: 'KhairulHuda06', remaining: null, pageStatus: 200, checkedAt: new Date().toISOString(), challenge: false });
     driver.listOpenProjects.mockResolvedValue([project()]); driver.readProject.mockImplementation(async p => p); driver.protect.mockResolvedValue(undefined);
     draft.mockImplementation(async input => output(input));
-    service = new ProjectsCoIdService(repo, async () => ({ page: { setDefaultTimeout: vi.fn() } as unknown as Page, disconnect: async () => undefined, onDisconnect: () => undefined }), undefined, draft);
+    service = make();
   });
   afterEach(async () => { await service.close(); await repo.close(); });
 
@@ -118,5 +125,46 @@ describe('projects.co.id draft worker', () => {
     expect(await repo.listClientProjects()).toEqual([expect.objectContaining({ source: 'projects_co_id', externalProjectId: project().id, value: 500_000, currency: 'IDR', status: 'active' })]);
     expect((await service.drafts())[0]?.pipelineStatus).toBe('won');
     await expect(service.ownerAction(project().id, 'mark-sent')).rejects.toThrow();
+  });
+  it('shares one 3-per-30-minute page budget between listing scans and detail reads; deferred drafts wait in the queue', async () => {
+    const pages = new PageBudget(3, 30 * 60_000, () => clock);
+    await service.close(); service = make(pages);
+    await repo.savePolicy({ ...await repo.getPolicy(), projectsCoId: { ...PROJECTS_CO_ID_DEFAULTS, mode: 'drafts', fields: ['ai'], useProfileSkills: false } });
+    const loads: number[] = [];
+    driver.listOpenProjects.mockImplementation(async (_user: string, _authorize: unknown, searches: string[]) => { loads.push(...searches.map(() => clock)); return [project()]; });
+    driver.readProject.mockImplementation(async (p: ProjectOpportunity) => { loads.push(clock); return project(p.id.slice(-6)); });
+    await service.open(); await service.scan();
+    expect(loads).toHaveLength(3); expect(driver.readProject).not.toHaveBeenCalled(); expect(draft).not.toHaveBeenCalled();
+    expect(await service.status()).toMatchObject({ pageBudget: { used: 3, limit: 3, nextFreeAt: new Date(clock + 30 * 60_000).toISOString() }, telegram: { queued: 1 } });
+    await expect(service.scan()).rejects.toThrow(/Batas 3 halaman/);
+    await expect(service.createDraft(project().id)).rejects.toThrow(/Batas 3 halaman/);
+    await service.readQueued(); expect(driver.readProject).not.toHaveBeenCalled();
+    clock += 30 * 60_000 + 1;
+    await service.readQueued();
+    expect(driver.readProject).toHaveBeenCalledOnce(); expect(draft).toHaveBeenCalledOnce();
+    expect((await repo.getLatestDraft(project().id))?.author).toBe('hermes');
+    expect((await service.status()).telegram?.queued).toBe(0);
+    for (const at of loads) expect(loads.filter(t => t > at - 30 * 60_000 && t <= at).length).toBeLessThanOrEqual(3);
+  });
+  it('reads new Telegram IDs through detail pages newest first and stops detail loads on kill switch or mode off', async () => {
+    await service.close(); service = make(new PageBudget(3, 30 * 60_000, () => clock));
+    const post = (id: string, n: number, title = `Aplikasi TypeScript ${id}`) => `<div class="tgme_widget_message_wrap js-widget_message_wrap"><div class="tgme_widget_message js-widget_message" data-post="lowongankerjafreelance/${n}"><div class="tgme_widget_message_text js-message_text" dir="auto"><a href="https://projects.co.id/public/browse_projects/view/${id}/aplikasi-online" target="_blank"><b>${title}</b></a><br/><br/><b>Budget:</b> Rp 500,000 - 1,000,000</div><time datetime="2026-10-20T01:0${n}:00+00:00" class="time">08:0${n}</time></div></div>`;
+    channel = post('a00001', 1) + post('a00002', 2) + post('b00003', 3, 'Desain logo kopi') + post('a00004', 4) + '<a href="https://evil.test/public/browse_projects/view/c00005/aplikasi-online">Aplikasi TypeScript</a>';
+    const settings = { ...PROJECTS_CO_ID_DEFAULTS, mode: 'drafts' as const };
+    await repo.syncProjects([project('a00001')]);
+    driver.readProject.mockImplementation(async (p: ProjectOpportunity) => project(p.id.slice(-6)));
+    await service.open(); await service.pollTelegram(); await service.pollTelegram();
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect((await service.status()).telegram).toMatchObject({ ok: true, error: null, queued: 2 });
+    const active = await repo.getPolicy();
+    await repo.savePolicy({ ...active, state: 'paused' }); await expect(service.readQueued()).rejects.toThrow(/dijeda/);
+    await repo.savePolicy({ ...active, projectsCoId: { ...settings, mode: 'off' } }); await expect(service.readQueued()).rejects.toThrow(/dinonaktifkan/);
+    expect(driver.readProject).not.toHaveBeenCalled(); expect((await service.status()).pageBudget?.used).toBe(0);
+    await repo.savePolicy({ ...active, projectsCoId: settings });
+    await service.readQueued();
+    expect(driver.readProject.mock.calls.map(call => (call[0] as ProjectOpportunity).id)).toEqual(['projects_co_id:a00004', 'projects_co_id:a00002']);
+    expect(driver.listOpenProjects).not.toHaveBeenCalled(); expect(draft).toHaveBeenCalledTimes(2);
+    expect(await service.status()).toMatchObject({ telegram: { queued: 0 }, pageBudget: { used: 2 } });
+    expect((await repo.listProjects()).map(p => p.id).sort()).toEqual(['projects_co_id:a00001', 'projects_co_id:a00002', 'projects_co_id:a00004']);
   });
 });

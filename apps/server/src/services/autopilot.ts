@@ -9,6 +9,8 @@ type AutopilotDependencies = {
   repository: WorkspaceRepository;
   readProfile: () => Promise<FreelancerProfile>;
   readProjects: (query: string, limit: number) => Promise<{ projects: ProjectOpportunity[]; skipped: number }>;
+  /** Active projects in the given Freelancer job IDs updated after `fromTime` (epoch seconds). */
+  readProjectsByJobs?: (jobIds: number[], fromTime: number, limit: number) => Promise<{ projects: ProjectOpportunity[]; skipped: number }>;
   syncProfileJobs?: (jobIds: number[]) => Promise<FreelancerWriteResult>;
   submitBid: (input: { operation: 'submit_bid'; projectId: number; amount: number; period: number; milestonePercentage: number; description: string }) => Promise<FreelancerWriteResult>;
   guardedSubmitBid?: (input: BrowserBidInput, authorize: () => Promise<void>) => Promise<FreelancerWriteResult>;
@@ -32,12 +34,21 @@ export type AutopilotStatus = {
   draftsInProgress: number;
   intervalMinutes: number;
   searchTerms: string[];
+  /** Profile jobs searched by ID this cycle (one request covers all of them). */
+  searchJobs: string[];
   summary: { considered: number; eligible: number; reasons: Record<string, number> } | null;
   waitingReason: string | null;
   marketplaceNotice: { at: string; quotaExhausted: boolean; reason: string; retryAt: string | null } | null;
 };
 
 const dayMs = 24 * 60 * 60 * 1_000;
+/** Keyword searches per cycle; terms rotate so every term is still searched over consecutive cycles. */
+const KEYWORD_SEARCHES_PER_CYCLE = 2;
+const MAX_BACKOFF = 8;
+
+function rateLimited(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'statusCode' in error && error.statusCode === 429;
+}
 
 function matchedProfileJobs(profile: FreelancerProfile): Array<{ id: number; name: string }> {
   const description = profile.description?.toLocaleLowerCase() ?? '';
@@ -141,10 +152,14 @@ export class FreelancerAutopilot {
   private stopping = false;
   private busy = false;
   private drafting = 0;
+  /** Interval multiplier after HTTP 429 on a search; reset by a successful cycle. */
+  private backoff = 1;
+  private profileJobs: Array<{ id: number; name: string }> = [];
+  private lastJobSearchAt: number | null = null;
   private status: AutopilotStatus = {
     state: 'starting', lastRunAt: null, nextRunAt: null, lastMessage: 'Membaca profil Freelancer untuk menyiapkan operasi otomatis.',
     lastImported: 0, lastSubmitted: 0, specializations: [], cycleInProgress: false, draftsInProgress: 0,
-    intervalMinutes: 15, searchTerms: [], summary: null, waitingReason: null, marketplaceNotice: null,
+    intervalMinutes: 15, searchTerms: [], searchJobs: [], summary: null, waitingReason: null, marketplaceNotice: null,
   };
 
   private scheduleRetry(): void {
@@ -162,6 +177,9 @@ export class FreelancerAutopilot {
     this.intervalMs = dependencies.intervalMs ?? 15 * 60 * 1_000;
   }
 
+  /** In-memory state only, cheap enough for the live change feed to sample; getStatus() also reads the database. */
+  liveState() { return { status: this.status, busy: this.busy, drafting: this.drafting }; }
+
   async getStatus(): Promise<AutopilotStatus> {
     const policy = await this.dependencies.repository.getPolicy();
     const lastBid = (await this.dependencies.repository.listAuditForType('marketplace.production.submit_bid', 2)).find((event) => event.status === 'failed' || event.status === 'recorded');
@@ -174,7 +192,7 @@ export class FreelancerAutopilot {
       try { if (!policySchedule(policy, this.now()).active) waitingReason = 'Menunggu jadwal operasi yang Anda pilih.'; }
       catch { waitingReason = 'Zona waktu kebijakan tidak valid.'; }
     }
-    return { ...this.status, state, waitingReason, marketplaceNotice, intervalMinutes: this.dependencies.intervalMs === undefined ? policy.scanIntervalMinutes ?? 15 : this.intervalMs / 60_000, cycleInProgress: this.busy, draftsInProgress: this.drafting, specializations: [...this.status.specializations] };
+    return { ...this.status, state, waitingReason, marketplaceNotice, intervalMinutes: (this.dependencies.intervalMs === undefined ? policy.scanIntervalMinutes ?? 15 : this.intervalMs / 60_000) * this.backoff, cycleInProgress: this.busy, draftsInProgress: this.drafting, specializations: [...this.status.specializations] };
   }
 
   async start(): Promise<void> {
@@ -184,6 +202,7 @@ export class FreelancerAutopilot {
     try {
       const remote = await this.dependencies.readProfile();
       if (this.stopping) return;
+      this.profileJobs = remote.jobs;
       if (remote.jobIds.length > 0 && this.dependencies.syncProfileJobs && !(await this.dependencies.repository.hasAudit('marketplace.production.edit_profile', 'freelancer-profile-sync'))) {
         try {
           const current = await this.dependencies.readProfile();
@@ -317,17 +336,25 @@ export class FreelancerAutopilot {
     const count = (reason: string) => { reasons[reason] = (reasons[reason] ?? 0) + 1; };
     try {
       const unique = new Map<string, ProjectOpportunity>();
-      const searchTerms = selectSearchTerms(policy.specializations, policy.keywords, this.searchCycle++);
-      this.status = { ...this.status, searchTerms };
-      for (const keyword of searchTerms) {
-        const result = await this.dependencies.readProjects(keyword, 20);
-        for (const project of result.projects) {
+      const add = (found: ProjectOpportunity[], keyword?: string) => {
+        for (const project of found) {
           const searchable = `${project.title}\n${project.description}`.toLocaleLowerCase();
-          const searchEvidence = !project.skills.length && searchable.includes(keyword.toLocaleLowerCase()) ? [keyword] : [];
+          const searchEvidence = keyword && !project.skills.length && searchable.includes(keyword.toLocaleLowerCase()) ? [keyword] : [];
           const existing = unique.get(project.id);
           unique.set(project.id, { ...project, skills: [...new Set([...(existing?.skills ?? []), ...project.skills, ...searchEvidence])] });
         }
+      };
+      const searchTerms = selectSearchTerms(policy.specializations, policy.keywords, this.searchCycle++, KEYWORD_SEARCHES_PER_CYCLE);
+      const wanted = new Set([...policy.specializations, ...policy.keywords].map((term) => term.trim().toLocaleLowerCase()));
+      const jobs = this.dependencies.readProjectsByJobs ? this.profileJobs.filter((job) => wanted.has(job.name.toLocaleLowerCase())).slice(0, 50) : [];
+      this.status = { ...this.status, searchTerms, searchJobs: jobs.map((job) => job.name) };
+      if (jobs.length && this.dependencies.readProjectsByJobs) {
+        // Overlap the previous job search by 2 minutes; the first one looks back one hour.
+        const fromTime = Math.floor((this.lastJobSearchAt ?? runAt.getTime() - 60 * 60_000) / 1_000) - 120;
+        add((await this.dependencies.readProjectsByJobs(jobs.map((job) => job.id), fromTime, 50)).projects);
+        this.lastJobSearchAt = runAt.getTime();
       }
+      for (const keyword of searchTerms) add((await this.dependencies.readProjects(keyword, 20)).projects, keyword);
       const sync = await repository.syncFreelancerProjects([...unique.values()]);
       imported = sync.upserted;
       const usage = await repository.bidUsage(runAt, policy.timezone);
@@ -422,11 +449,16 @@ export class FreelancerAutopilot {
         ...this.status, state: 'running', lastRunAt: runAt.toISOString(), summary: { considered, eligible, reasons },
         lastMessage: `${imported} proyek diperiksa; ${submitted} bid terkirim sesuai kebijakan.`, lastImported: imported, lastSubmitted: submitted,
       };
-    } catch {
-      this.status = { ...this.status, state: 'error', lastRunAt: runAt.toISOString(), nextRunAt: new Date(runAt.getTime() + this.intervalMs).toISOString(), lastMessage: 'Siklus otomatis gagal. Tidak ada proyek yang akan dikirim ulang bila hasil sebelumnya tidak pasti.', lastImported: imported, lastSubmitted: submitted };
+      this.backoff = 1;
+    } catch (error) {
+      if (rateLimited(error)) this.backoff = Math.min(MAX_BACKOFF, this.backoff * 2);
+      const lastMessage = rateLimited(error)
+        ? `Freelancer membatasi permintaan (HTTP 429); interval pemindaian diperpanjang ${this.backoff}× sampai pemindaian berhasil.`
+        : 'Siklus otomatis gagal. Tidak ada proyek yang akan dikirim ulang bila hasil sebelumnya tidak pasti.';
+      this.status = { ...this.status, state: 'error', lastRunAt: runAt.toISOString(), nextRunAt: new Date(runAt.getTime() + this.intervalMs).toISOString(), lastMessage, lastImported: imported, lastSubmitted: submitted };
     } finally {
       this.busy = false;
-      const interval = this.dependencies.intervalMs ?? (policy.scanIntervalMinutes ?? 15) * 60_000;
+      const interval = (this.dependencies.intervalMs ?? (policy.scanIntervalMinutes ?? 15) * 60_000) * this.backoff;
       this.status = { ...this.status, intervalMinutes: interval / 60_000, nextRunAt: new Date(this.now().getTime() + interval).toISOString() };
     }
   }

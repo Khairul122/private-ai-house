@@ -167,8 +167,58 @@ describe('FreelancerAutopilot', () => {
     await autopilot.runCycle();
     expect(submitBid).not.toHaveBeenCalled();
     expect((await repository.getPolicy()).allowUnknownDeadline).toBe(false);
-    expect(readProjects.mock.calls).toHaveLength(16);
-    expect((await autopilot.getStatus()).searchTerms).toContain('Docker');
+    expect(readProjects.mock.calls).toHaveLength(4);
+    expect((await autopilot.getStatus()).searchTerms).toEqual(['Laravel', 'Flutter']);
+  });
+
+  it('searches profile jobs in one request and rotates at most two keywords so every term is covered', async () => {
+    repository = await WorkspaceRepository.open();
+    const terms = ['Python', 'React', 'Laravel', 'Flutter', 'Java', 'PHP', 'Rust', 'SQL', 'Docker', 'Linux'];
+    await repository.savePolicy({ ...(await repository.getPolicy()), state: 'active', simulationOnly: false, allowedActions: ['bid.submit'], specializations: ['Python'], keywords: terms.slice(1), allowUnknownDeadline: true });
+    await repository.appendAudit({ type: 'autopilot.policy_bootstrapped', resourceId: 'policy', status: 'recorded', reason: 'test', policyVersion: 1, payloadHash: null });
+    let clock = now;
+    const readProjects = vi.fn(async () => ({ projects: [], skipped: 0 }));
+    const readProjectsByJobs = vi.fn(async () => ({ projects: [], skipped: 0 }));
+    autopilot = new FreelancerAutopilot({
+      repository, now: () => clock, readProfile: async () => ({ ...profile, jobs: [{ id: 13, name: 'PHP' }, { id: 15, name: 'Python' }, { id: 99, name: 'Graphic Design' }] }),
+      readProjects, readProjectsByJobs, submitBid: vi.fn(),
+    });
+
+    await autopilot.start();
+    for (let cycle = 1; cycle < 5; cycle += 1) {
+      clock = new Date(now.getTime() + cycle * 5 * 60_000);
+      await autopilot.runCycle();
+    }
+
+    expect(readProjects).toHaveBeenCalledTimes(10);
+    expect(new Set(readProjects.mock.calls.map((call) => (call as unknown as [string])[0]))).toEqual(new Set(terms));
+    expect(readProjectsByJobs).toHaveBeenCalledTimes(5);
+    const [jobIds, firstFrom, limit] = readProjectsByJobs.mock.calls[0] as unknown as [number[], number, number];
+    expect([jobIds, limit]).toEqual([[13, 15], 50]);
+    expect(firstFrom).toBe(Math.floor(now.getTime() / 1_000) - 3_600 - 120);
+    expect((readProjectsByJobs.mock.calls[1] as unknown as [number[], number])[1]).toBe(Math.floor(now.getTime() / 1_000) - 120);
+    expect((await autopilot.getStatus()).searchJobs).toEqual(['PHP', 'Python']);
+  });
+
+  it('doubles the scan interval after HTTP 429 and resets it after a successful scan', async () => {
+    repository = await WorkspaceRepository.open();
+    await repository.savePolicy({ ...(await repository.getPolicy()), state: 'active', simulationOnly: false, allowedActions: ['bid.submit'], specializations: ['Python'], scanIntervalMinutes: 5 });
+    let limited = true;
+    const readProjects = vi.fn(async () => {
+      if (limited) throw Object.assign(new Error('Freelancer membatasi permintaan.'), { statusCode: 429 });
+      return { projects: [], skipped: 0 };
+    });
+    autopilot = new FreelancerAutopilot({ repository, now: () => now, readProfile: async () => profile, readProjects, submitBid: vi.fn() });
+
+    await autopilot.runCycle();
+    expect(await autopilot.getStatus()).toMatchObject({ state: 'error', intervalMinutes: 10, nextRunAt: new Date(now.getTime() + 10 * 60_000).toISOString() });
+    await autopilot.runCycle();
+    await autopilot.runCycle();
+    await autopilot.runCycle();
+    expect((await autopilot.getStatus()).intervalMinutes).toBe(40);
+    limited = false;
+    await autopilot.runCycle();
+    expect(await autopilot.getStatus()).toMatchObject({ state: 'running', intervalMinutes: 5 });
   });
 
   it('does not submit when the owner changes policy while Hermes is writing', async () => {

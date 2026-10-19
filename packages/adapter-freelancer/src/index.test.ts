@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { FreelancerProductionWriteAdapter, FreelancerReadAdapter, FreelancerSandboxWriteAdapter } from './index.js';
+import { FreelancerPartialReadError, FreelancerProductionWriteAdapter, FreelancerReadAdapter, FreelancerSandboxWriteAdapter, lastFreelancerRateLimit } from './index.js';
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -63,6 +63,75 @@ describe('FreelancerReadAdapter', () => {
       { threadId: 501, projectId: '77', messageId: 5010, senderId: '42', message: 'Halo 501', createdAt: new Date(1_760_000_000_000).toISOString() },
       { threadId: 502, projectId: null, messageId: 5020, senderId: '42', message: 'Halo 502', createdAt: new Date(1_760_000_000_000).toISOString() },
     ]);
+  });
+
+  it('reads changed threads in one request and fetches messages only for changed threads without last_message', async () => {
+    const urls: URL[] = [];
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      urls.push(url);
+      if (url.pathname.endsWith('/threads/')) return jsonResponse({ result: { threads: [
+        { id: 601, thread: { id: 601, context: { type: 'project', id: 40123456 } }, time_updated: 1_760_000_300, message_count: 4,
+          last_message: { id: 9_001, thread_id: 601, from_user: 31_001, message: 'Kapan bisa mulai?', time_created: 1_760_000_300 } },
+        { id: 602, thread: { id: 602, context: { type: 'project', id: 40123457 } }, time_updated: 1_760_000_200 },
+        { id: 603, thread: { id: 603, context: { type: 'project', id: 40123458 } }, time_updated: 1_760_000_100 },
+        { id: 604, thread: { id: 604 } },
+      ] }, users: { '31001': { id: 31_001, username: 'client' } } });
+      return jsonResponse({ result: { messages: [{ id: 9_002, thread_id: 602, from_user: 31_002, message: 'Sudah saya kirim file.', time_created: 1_760_000_200 }] } });
+    });
+    const adapter = new FreelancerReadAdapter({ token: 'test-token-value-1234', fetcher });
+
+    const messages = await adapter.readUpdatedThreads('7', { fromUpdatedTime: 1_759_999_880, known: new Map([[602, 1_760_000_000], [603, 1_760_000_100]]) });
+
+    expect(messages).toEqual([
+      { threadId: 601, projectId: '40123456', messageId: 9001, senderId: '31001', message: 'Kapan bisa mulai?', createdAt: new Date(1_760_000_300_000).toISOString(), threadUpdated: 1_760_000_300 },
+      { threadId: 602, projectId: '40123457', messageId: 9002, senderId: '31002', message: 'Sudah saya kirim file.', createdAt: new Date(1_760_000_200_000).toISOString(), threadUpdated: 1_760_000_200 },
+    ]);
+    expect(urls).toHaveLength(2);
+    expect(Object.fromEntries(urls[0]!.searchParams)).toMatchObject({ 'members[]': '7', limit: '30', last_message: 'true', unread_count: 'true', from_updated_time: '1759999880' });
+    expect(urls[1]!.searchParams.getAll('threads[]')).toEqual(['602']);
+
+    // Full sweep: no time filter, and a thread without time_updated is read because change cannot be ruled out.
+    urls.length = 0;
+    await adapter.readUpdatedThreads('7', { known: new Map([[602, 1_760_000_200], [603, 1_760_000_100]]) });
+    expect(urls[0]!.searchParams.has('from_updated_time')).toBe(false);
+    expect(urls.slice(1).map((url) => url.searchParams.get('threads[]'))).toEqual(['604']);
+  });
+
+  it('keeps messages read before a 429 and records rate-limit header numbers', async () => {
+    let messageCalls = 0;
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      const headers = { 'Content-Type': 'application/json', 'RateLimit-Limit': '50, 50;window=60, 1000;window=3600', 'RateLimit-Remaining': messageCalls >= 1 ? '0' : '12' };
+      if (url.pathname.endsWith('/threads/')) return new Response(JSON.stringify({ result: { threads: [{ id: 501 }, { id: 502 }, { id: 503 }] } }), { headers });
+      messageCalls += 1;
+      if (messageCalls === 2) return new Response(JSON.stringify({ status: 'error', error_code: 'RATE_LIMITED' }), { status: 429, headers });
+      return new Response(JSON.stringify({ result: { messages: [{ id: 7_001, from_user: 42, message: 'Halo', time_created: 1_760_000_000 }] } }), { headers });
+    });
+    const adapter = new FreelancerReadAdapter({ token: 'test-token-value-1234', fetcher, now: () => new Date('2026-10-20T00:00:00.000Z') });
+
+    const error = await adapter.readLatestThreadMessages('7', 3).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(FreelancerPartialReadError);
+    expect(error).toMatchObject({ code: 'rate_limited', statusCode: 429, partial: [{ threadId: 501, messageId: 7001, senderId: '42' }] });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(lastFreelancerRateLimit()).toEqual({ limit: 50, remaining: 0, status: 429, seenAt: '2026-10-20T00:00:00.000Z' });
+  });
+
+  it('searches recently updated projects by job IDs with one request', async () => {
+    const urls: URL[] = [];
+    const adapter = new FreelancerReadAdapter({
+      token: 'test-token-value-1234', now: () => new Date('2026-10-14T00:00:00.000Z'),
+      fetcher: async (input) => { urls.push(new URL(String(input))); return jsonResponse({ result: { projects: [{ id: 40123459, title: 'Laravel API', owner_id: 5512309 }], users: { '5512309': { id: 5512309, username: 'buyer' } } } }); },
+    });
+
+    const result = await adapter.searchProjectsByJobs([3, 13], 1_760_000_000);
+
+    expect(result.projects.map((project) => [project.id, project.clientName])).toEqual([['freelancer:40123459', 'buyer']]);
+    expect(urls[0]!.searchParams.getAll('jobs[]')).toEqual(['3', '13']);
+    expect(Object.fromEntries(urls[0]!.searchParams)).toMatchObject({ sort_field: 'time_updated', from_time: '1760000000', limit: '50' });
+    expect(urls[0]!.searchParams.has('query')).toBe(false);
+    await expect(adapter.searchProjectsByJobs([], 1)).rejects.toMatchObject({ code: 'invalid_query' });
   });
 
   it('searches active projects and imports only rows that contain project identifiers and titles', async () => {

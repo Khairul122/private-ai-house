@@ -28,7 +28,7 @@ export function projectsCoIdSearchTerms(settings: ProjectsCoIdSettings, profileS
   return all.filter(term => !seen.has(term.toLowerCase()) && !!seen.add(term.toLowerCase()));
 }
 
-const containsTerm = (haystack: string, term: string) => new RegExp(`(^|[^\\p{L}\\p{N}])${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\p{L}\\p{N}])`, 'iu').test(haystack);
+export const containsTerm = (haystack: string, term: string) => new RegExp(`(^|[^\\p{L}\\p{N}])${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\p{L}\\p{N}])`, 'iu').test(haystack);
 
 /** Field ids whose terms appear in the project's title, description or skills. */
 export function projectsCoIdFieldsOf(project: Pick<ProjectOpportunity, 'title' | 'description' | 'skills'>): string[] {

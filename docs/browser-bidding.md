@@ -19,7 +19,7 @@ Mode dan pilihan menyambung kembali disimpan pada `browser-bid-settings.json` di
 
 Izin debugging memberi aplikasi akses kontrol pada sesi Chrome, sehingga pemilik harus mengaktifkan dan menyetujui izin tersebut di browser. Ini diperlukan oleh mekanisme resmi Chrome, tidak dapat dilewati oleh aplikasi. Bila tidak ingin memberi izin, mode API tetap tersedia.
 
-Pemeriksaan dashboard dijalankan tiap 60 detik selama browser tersedia. Saat menunggu login/CAPTCHA, navigasi berkala dihentikan agar tidak menghapus input pemilik; gunakan tombol pemeriksaan setelah selesai. Status siap berumur lebih dari 90 detik dianggap lama. Putusnya API identitas, akun berbeda, kuota tidak terbaca, CAPTCHA, atau layout berubah menghentikan jalur browser. Sesi dapat kedaluwarsa menurut Freelancer dan memerlukan login ulang.
+Pemeriksaan dashboard dijalankan tiap 10 menit selama browser tersedia, dan selalu sekali lagi tepat sebelum setiap pengiriman (di dalam `submit`). Hasil API identitas di-cache selama 10 menit yang sama. Saat menunggu login/CAPTCHA, navigasi berkala dihentikan agar tidak menghapus input pemilik; gunakan tombol pemeriksaan setelah selesai. Status siap berumur lebih dari 11 menit dianggap lama. Putusnya API identitas, akun berbeda, kuota tidak terbaca, CAPTCHA, atau layout berubah menghentikan jalur browser. Sesi dapat kedaluwarsa menurut Freelancer dan memerlukan login ulang.
 
 ## Pengiriman dan bukti
 

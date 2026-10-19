@@ -24,6 +24,7 @@ import { PublicPortfolioResolver } from './services/portfolio.js';
 import { BrowserBiddingService, SharedChromeSession } from './services/browser-bidding.js';
 import { ProjectsCoIdService } from './services/projects-co-id.js';
 import { HermesKanban, hermesKanbanRunner } from './services/hermes-kanban.js';
+import { announceWrites, LiveEvents } from './lib/live-events.js';
 
 function findProjectRoot(start: string): string {
   let directory = resolve(start);
@@ -70,13 +71,15 @@ const linkedinOAuth = new LinkedInOAuthService({
 const envFile = join(projectRoot, '.env');
 const databaseUrl = (process.env.DATABASE_URL ?? (existsSync(envFile) ? parseEnv(readFileSync(envFile, 'utf8')).DATABASE_URL : undefined))?.trim();
 if (!databaseUrl) throw new Error('DATABASE_URL belum diatur di .env (connection string Postgres Supabase).');
-const repository = await WorkspaceRepository.open(await createDatabase(databaseUrl));
+const live = new LiveEvents();
+// Every repository (and OperationsRepository via repository.sql) writes through this one wrapper.
+const repository = await WorkspaceRepository.open(announceWrites(await createDatabase(databaseUrl), live));
 const createFreelancerReader = async () => new FreelancerReadAdapter({ token: await getFreelancerToken() });
 const businessSync = new BusinessSync({
   repository,
   readOwnBids: async (bidIds) => (await createFreelancerReader()).readOwnBids(bidIds),
   readSelfId: async () => (await (await createFreelancerReader()).readOwnProfile()).id,
-  readThreads: async (selfId) => (await createFreelancerReader()).readLatestThreadMessages(selfId, 30),
+  readThreads: async (selfId, options) => (await createFreelancerReader()).readUpdatedThreads(selfId, { limit: 30, ...options }),
 });
 const draftingConfig = readDraftingEnvironment(projectRoot);
 const hermesEnabled = draftingConfig.valid && draftingConfig.mode === 'hermes' && draftingConfig.consent;
@@ -103,6 +106,7 @@ const autopilot = new FreelancerAutopilot({
   repository,
   readProfile: async () => (await createFreelancerReader()).readOwnProfile(),
   readProjects: async (query, limit) => (await createFreelancerReader()).searchActiveProjects(query, limit),
+  readProjectsByJobs: async (jobIds, fromTime, limit) => (await createFreelancerReader()).searchProjectsByJobs(jobIds, fromTime, limit),
   syncProfileJobs: async (jobIds) => new FreelancerProductionWriteAdapter({ token: await getFreelancerToken() }).run({ operation: 'edit_profile', jobIds }),
   submitBid: async (input) => new FreelancerProductionWriteAdapter({ token: await getFreelancerToken() }).run(input),
   ...(drafting ? { draftProposal: (input: Parameters<typeof drafting.draftBid>[0]) => drafting.draftBid(input) } : {}),
@@ -121,7 +125,15 @@ const googleCalendar = new GoogleCalendarService(integrationVault,new Operations
 const operations = new OperationsService({repository,messenger:whatsapp,calendar:googleCalendar,...(drafting?{review:(facts:string[])=>drafting.reviewOperations(facts)}:{})});
 const hasWebBuild = existsSync(webBuild);
 const hermesKanban = hermesEnabled ? new HermesKanban(hermesKanbanRunner(draftingConfig.executable)) : undefined;
+live.watch(['autopilot', 'capabilities'], () => autopilot.liveState());
+live.watch(['business-sync'], () => businessSync.getStatus());
+live.watch(['browser-bidding'], () => browserBidding.status());
+live.watch(['projects-co-id'], () => projectsCoId.liveState());
+live.watch(['operations'], () => [operations.status(), whatsapp.status(), googleCalendar.status()]);
+// checkedAt moves on every read; only a changed board is news.
+if (hermesKanban) live.watch(['hermes-kanban'], () => { const board = hermesKanban.peek(); return board && { ...board, checkedAt: null }; });
 const app = await createApp({
+  live,
   publicPortfolio:(evidence)=>portfolio.select(evidence),
   operations,whatsapp,googleCalendar,browserBidding,projectsCoId,
   // Cards carry stored app data to the Hermes team, so they follow the same consent as drafting.
