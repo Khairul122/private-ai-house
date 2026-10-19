@@ -23,6 +23,9 @@ import type { WhatsAppService } from './whatsapp.js';
 import type { GoogleCalendarService } from './google-calendar.js';
 import type { BrowserBiddingService } from './browser-bidding.js';
 import { registerBrowserBiddingRoutes } from './browser-bidding-routes.js';
+import { registerProjectsCoIdRoutes } from './projects-co-id-routes.js';
+import type { ProjectsCoIdService } from './projects-co-id.js';
+import { PROJECTS_CO_ID_AUTO_REASON, validProjectsCoIdProposal } from './projects-co-id-types.js';
 
 const paramsSchema = z.object({ id: z.string().min(1).max(150) });
 const FOLLOW_UP_DAYS = 3;
@@ -46,6 +49,7 @@ type FreelancerSandboxWriteCheck = { statusCode: number | null; checkedAt: strin
 type FreelancerProductionWriteCheck = FreelancerSandboxWriteCheck;
 
 export type AppOptions = {
+  projectsCoId?: ProjectsCoIdService;
   browserBidding?: BrowserBiddingService;
   operations?: OperationsService;
   whatsapp?: WhatsAppService;
@@ -168,6 +172,7 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
   app.get('/api/business-sync', async () => options.businessSync?.getStatus() ?? null);
   registerOperationsRoutes(app, {repository,operations,whatsapp:options.whatsapp,google:options.googleCalendar});
   registerBrowserBiddingRoutes(app,options.browserBidding,repository);
+  registerProjectsCoIdRoutes(app, options.projectsCoId);
   // Thread project ids are bare Freelancer ids; local project ids are 'freelancer:<id>'.
   const threadProjectIds = async () => new Set((await repository.listClientThreads()).map((thread) => thread.projectId).filter((id): id is string => id !== null).map((id) => `freelancer:${id}`));
   const dayDiff = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
@@ -283,6 +288,7 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     const credentialStatus = options.getCredentialStatus?.() ?? options.credentialStatus;
     const linkedin = linkedinVerification(credentialStatus, now());
     return {
+    projectsCoId: { available: !!options.projectsCoId, autoAvailable: false, reason: PROJECTS_CO_ID_AUTO_REASON },
     marketplace: getFreelancerCapabilities(freelancerVerification).map((capability) => {
       const productionVerification = freelancerProductionWriteChecks.get(capability.operation as FreelancerWriteOperation);
       return {
@@ -325,7 +331,7 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
       reason: 'Hanya profil OIDC ringan yang diminta. Produk OIDC LinkedIn harus disetujui dan URL callback yang ditampilkan harus diterima di Developer Portal; akses profil lengkap tetap tidak tersedia.',
     },
     hermes: {
-      draft: 'optional', active: draftingMode === 'hermes', draftsInProgress: draftsInProgress + ((await options.autopilot?.getStatus())?.draftsInProgress ?? 0),
+      draft: 'optional', active: draftingMode === 'hermes', draftsInProgress: draftsInProgress + ((await options.autopilot?.getStatus())?.draftsInProgress ?? 0) + (options.projectsCoId?.draftsInProgress ?? 0),
       reason: draftingMode === 'hermes'
         ? 'Data proyek terpilih, fakta profil yang diberikan, dan hingga empat potongan bukti lokal dikirim ke profil Hermes yang dikonfigurasi; kredensial marketplace tidak disertakan.'
         : options.draftingReason ?? 'Hermes belum aktif. Draf AI tidak dibuat sampai profil Hermes dikonfigurasi dan persetujuan pemrosesan data diberikan.',
@@ -686,6 +692,12 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     if (!params.success) return reply.code(400).send({ error: 'ID peluang tidak valid.' });
     const project = await repository.getProject(params.data.id);
     if (!project) return reply.code(404).send({ error: 'Peluang tidak ditemukan.' });
+    if (project.source === 'projects_co_id') {
+      if (!request.headers.origin) return reply.code(403).send({ error: 'Header Origin diperlukan.' });
+      if (!options.projectsCoId) return reply.code(503).send({ error: 'Worker projects.co.id tidak tersedia.' });
+      try { return reply.code(201).send(await options.projectsCoId.createDraft(project.id)); }
+      catch { return reply.code(409).send({ error: 'Draf ditolak; periksa worker, kebijakan dan Aktivitas projects.co.id.' }); }
+    }
     if (project.status !== 'open') return reply.code(409).send({ error: 'Peluang ini sudah tidak terbuka.' });
     if (draftingMode === 'disabled') return reply.code(503).send({ error: options.draftingReason ?? 'Hermes belum aktif. Hubungkan profil Hermes dan aktifkan persetujuan pemrosesan data sebelum meminta draf AI.' });
     const profile = await repository.getProfile();
@@ -722,6 +734,10 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     if ('issues' in parsed) return reply.code(400).send({ error: 'Draf tidak valid.', issues: parsed.issues });
     const before = await repository.getDraft(params.data.id);
     if (!before) return reply.code(404).send({ error: 'Draf tidak ditemukan.' });
+    if (before.projectId.startsWith('projects_co_id:')) {
+      if (!request.headers.origin) return reply.code(403).send({ error: 'Header Origin diperlukan.' });
+      if (parsed.value.proposedPrice !== before.proposedPrice || !validProjectsCoIdProposal(parsed.value.proposal, before.proposedPrice, before.durationDays)) return reply.code(400).send({ error: 'Harga dan durasi draf IDR tetap dari kebijakan; proposal maksimal 1.200 karakter.' });
+    }
     const updated = await repository.updateDraft(params.data.id, parsed.value);
     if (!updated) return reply.code(404).send({ error: 'Draf tidak ditemukan.' });
     await repository.appendAudit({ type: 'bid.draft_updated', resourceId: updated.projectId, status: 'recorded', reason: 'Pemilik memperbarui draf lokal.', policyVersion: (await repository.getPolicy()).version, payloadHash: hashPayload({ proposal: updated.proposal, proposedPrice: updated.proposedPrice, currency: updated.currency }) });
@@ -733,6 +749,7 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     const project = await repository.getProject(params.data.id);
     const draft = await repository.getLatestDraft(params.data.id);
     if (!project || !draft) return reply.code(404).send({ error: 'Buat draf sebelum menjalankan simulasi.' });
+    if (project.source === 'projects_co_id') return reply.code(409).send({ error: 'Gunakan kartu projects.co.id untuk draf dan penandaan manual pemilik.' });
     const policy = await repository.getPolicy();
     const audits = (await repository.listAudit(1000)).filter((event) => event.type === 'bid.simulated' && event.status === 'recorded');
     const today = localDateKey(now(), policy.timezone);
@@ -773,7 +790,7 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
       counts: {
         openProjects: projects.filter((project) => project.status === 'open').length,
         drafts: draftCount,
-        submittedBids: projects.filter((project) => project.pipelineStatus === 'submitted').length,
+        submittedBids: projects.filter((project) => project.source === 'freelancer' && project.pipelineStatus === 'submitted').length,
         policySkips: await repository.countAuditByStatus('blocked'),
         knowledgeSources: sources.length,
       },

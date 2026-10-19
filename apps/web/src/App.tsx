@@ -8,9 +8,11 @@ import type { BoardContent, CameraCommand } from './VisualOffice.js';
 import { bindOwnerKeyboard, createOwnerInput, type OwnerDirection, type OwnerInput } from './owner-input.js';
 import OperationsPage from './OperationsPage.js';
 import BrowserBiddingCard from './BrowserBiddingCard.js';
+import ProjectsCoIdPage from './ProjectsCoIdPage.js';
+import type { ProjectsCoIdStatus } from './projects-co-id-api.js';
 import type { BrowserBiddingStatus } from './browser-bidding-api.js';
 import type { OperationsData } from './operations-api.js';
-import { OPERATIONS_ROSTER } from '@fvh/domain';
+import { OPERATIONS_ROSTER, PROJECTS_CO_ID_DEFAULTS } from '@fvh/domain';
 import { FLOOR_TWO_PODS } from './office-layout.js';
 
 const VisualOffice = lazy(() => import('./VisualOffice.js'));
@@ -115,15 +117,17 @@ function calendarMonthCells(year: number, month: number) {
   });
 }
 
-function StateLabel({ state }: { state: string }) {
+function StateLabel({ state, source }: { state: string; source?: Opportunity['source'] }) {
   const labels: Record<string, string> = {
     active: 'Aktif', running: 'Berjalan', starting: 'Menyiapkan', connected: 'Terhubung', supported: 'Didukung API', unknown: 'Tidak diketahui', unverified: 'Belum diuji', invalid: 'Token tidak valid', unavailable: 'Tidak dapat diperiksa', expired: 'Kedaluwarsa', paused: 'Dijeda', draft: 'Belum aktif', recorded: 'Tercatat', blocked: 'Dilewati', failed: 'Gagal',
     new: 'Baru', scored: 'Dinilai', draft_ready: 'Draf siap', policy_check: 'Pemeriksaan kebijakan', submitted: 'Terkirim',
     in_conversation: 'Percakapan', won: 'Berhasil', lost: 'Tidak lanjut', skipped: 'Dilewati',
     reconciliation_required: 'Perlu rekonsiliasi', error: 'Kesalahan', allowed: 'Diizinkan',
   };
-  return <span className={`state-label state-${state}`}>{labels[state] ?? state}</span>;
+  return <span className={`state-label state-${state}`}>{source === 'projects_co_id' && state === 'submitted' ? 'Ditandai terkirim oleh Anda' : labels[state] ?? state}</span>;
 }
+
+const opportunitySource = (source: Opportunity['source']) => source === 'projects_co_id' ? 'projects.co.id' : source === 'freelancer' ? 'Freelancer.com' : 'Fixture pengujian';
 
 function ErrorNotice({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
@@ -147,7 +151,7 @@ function Metric({ label, value, note, tone = 'plain', to }: { label: string; val
   return to ? <Link to={to} className={`metric metric-${tone} metric-link`}>{body}</Link> : <div className={`metric metric-${tone}`}>{body}</div>;
 }
 
-const PIPELINE_STAGES: Array<[string, string]> = [['new', 'Baru'], ['scored', 'Dinilai'], ['draft_ready', 'Draf siap'], ['policy_check', 'Pemeriksaan'], ['submitted', 'Terkirim'], ['in_conversation', 'Percakapan'], ['skipped', 'Dilewati']];
+const PIPELINE_STAGES: Array<[string, string]> = [['new', 'Baru'], ['scored', 'Dinilai'], ['draft_ready', 'Draf siap'], ['policy_check', 'Pemeriksaan'], ['submitted', 'Dikirim / ditandai Anda'], ['in_conversation', 'Percakapan'], ['skipped', 'Dilewati']];
 
 function ActivityRows({ events }: { events: AuditEvent[] }) {
   if (!events.length) return <div className="empty-state"><h3>Belum ada aktivitas</h3><p>Perubahan kebijakan, draf, simulasi, dan impor akan muncul di sini.</p></div>;
@@ -169,6 +173,11 @@ function ActivityRows({ events }: { events: AuditEvent[] }) {
 
 function activityTitle(type: string) {
   const titles: Record<string, string> = {
+    'projects_co_id.scan_completed': 'Pemindaian projects.co.id selesai', 'projects_co_id.scan_failed': 'Pemindaian projects.co.id gagal',
+    'projects_co_id.draft_created': 'Draf otomatis projects.co.id dibuat', 'projects_co_id.manual_draft_created': 'Draf manual projects.co.id dibuat',
+    'projects_co_id.draft_skipped': 'Draf projects.co.id ditolak kebijakan', 'projects_co_id.mode_changed': 'Mode projects.co.id diubah',
+    'projects_co_id.owner_marked_sent': 'Ditandai terkirim oleh Anda', 'projects_co_id.owner_skipped': 'Proyek dilewati oleh Anda',
+    'projects_co_id.write_blocked': 'Request tulis worker diblokir', 'autopilot.draft_fallback': 'Template proposal digunakan',
     'policy.updated': 'Kebijakan diperbarui', 'policy.activated': 'Kebijakan diaktifkan', 'policy.paused': 'Kill switch dijalankan',
     'policy.resumed': 'Kebijakan dilanjutkan', 'policy.reactivation_required': 'Aktivasi ulang diperlukan', 'profile.updated': 'Profil lokal diperbarui',
     'bid.draft_created': 'Draf proposal dibuat', 'bid.draft_updated': 'Draf proposal diubah', 'bid.simulated': 'Simulasi bid dicatat',
@@ -299,12 +308,12 @@ function OpportunitiesPage() {
       {visible.length === 0 && <div className="empty-state"><h3>Tidak ada peluang sesuai filter</h3><p>Ubah pencarian atau status peluang. Daftar diperbarui pada siklus berikutnya.</p></div>}
       {visible.slice(0, shown).map((project) => (
         <article className="opportunity-row" id={'opportunity-' + project.id} key={project.id}>
-          <div className="opportunity-topline"><span className="eyebrow">{project.clientName} / {project.source === 'freelancer' ? 'FREELANCER.COM' : 'FIXTURE PENGUJIAN'}</span><span className="score-mark"><strong>{project.score}</strong><small>skor kecocokan</small></span></div>
+          <div className="opportunity-topline"><span className="eyebrow">{project.clientName} / {opportunitySource(project.source)}</span><span className="score-mark"><strong>{project.score}</strong><small>skor kecocokan</small></span></div>
           <h2><Link to={`/opportunities?project=${encodeURIComponent(project.id)}`}>{project.title}</Link></h2>
           <p className="opportunity-description">{project.description}</p>
           <div className="tag-row">{project.skills.map((skill) => <span className="skill-tag" key={skill}>{skill}</span>)}</div>
           <div className="factor-list" aria-label="Alasan skor">{project.factors.map((factor) => <span key={factor.key}><small>{factor.label}</small><strong>{factor.value}</strong></span>)}</div>
-          <div className="opportunity-footer"><div><strong>{formatMoney(project.budgetMin, project.currency)} - {formatMoney(project.budgetMax, project.currency)}</strong><span>{project.deadlineDays === null ? 'Deadline tidak diberikan; proposal menetapkan durasi 14 hari' : 'Sisa ' + project.deadlineDays + ' hari'} / brief {Math.round(project.briefQuality * 100)}%</span></div><StateLabel state={project.pipelineStatus} /></div>
+          <div className="opportunity-footer"><div><strong>{formatMoney(project.budgetMin, project.currency)} - {formatMoney(project.budgetMax, project.currency)}</strong><span>{project.deadlineDays === null ? 'Deadline tidak diberikan; proposal menetapkan durasi 14 hari' : 'Sisa ' + project.deadlineDays + ' hari'} / brief {Math.round(project.briefQuality * 100)}%</span></div><StateLabel state={project.pipelineStatus} source={project.source} /></div>
         </article>
       ))}
     </div>
@@ -323,7 +332,7 @@ function OpportunityDetail({ project }: { project: Opportunity | undefined }) {
     ['Klien', project.clientName],
     ['Kualitas brief', Math.round(project.briefQuality * 100) + '%'],
     ['Risiko', Math.round(project.riskScore * 100) + '%'],
-    ['Sumber', project.source === 'freelancer' ? 'Freelancer.com' : 'Fixture pengujian'],
+    ['Sumber', opportunitySource(project.source)],
   ];
   return <article className="opp-detail">
     {back}
@@ -331,12 +340,12 @@ function OpportunityDetail({ project }: { project: Opportunity | undefined }) {
       <div><p className="eyebrow">{project.clientName}</p><h2>{project.title}</h2></div>
       <div className="opp-score"><strong>{project.score}</strong><small>skor kecocokan</small></div>
     </header>
-    <div className="opp-status"><StateLabel state={project.pipelineStatus} /></div>
+    <div className="opp-status"><StateLabel state={project.pipelineStatus} source={project.source} /></div>
     <dl className="opp-facts">{facts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
     <section><h3>Deskripsi</h3><p className="opp-description">{project.description}</p></section>
     <section><h3>Skill dibutuhkan</h3><div className="tag-row">{project.skills.map((skill) => <span className="skill-tag" key={skill}>{skill}</span>)}</div></section>
     <section><h3>Alasan skor</h3><ul className="opp-factors">{project.factors.map((factor) => <li key={factor.key}><span>{factor.label}</span><strong>{factor.value}</strong><em>{factor.points > 0 ? '+' : ''}{factor.points}</em></li>)}</ul></section>
-    <ProposalPanel key={project.id} project={project} />
+    {project.source === 'projects_co_id' ? <Link className="button button-primary" to="/projects-co-id">Buka draf projects.co.id</Link> : <ProposalPanel key={project.id} project={project} />}
   </article>;
 }
 
@@ -372,15 +381,15 @@ function PipelinePage() {
   const projects = query.data;
   const visible = projects.filter((project) => (filter === 'all' || project.pipelineStatus === filter) && `${project.title} ${project.clientName}`.toLowerCase().includes(search.toLowerCase()));
   return <>
-    <PageIntro eyebrow="Pipeline bid" title="Status dari respons marketplace." description="Bid live masuk ke status terkirim hanya setelah Freelancer mengembalikan HTTP 200. Draft dan alasan kebijakan tersimpan di sini." />
-    <div className="pipeline-summary"><strong>{projects.filter((project) => project.latestDraft).length}</strong><span>draf lokal</span><span className="pipeline-divider" /><strong>{projects.filter((project) => project.pipelineStatus === 'submitted').length}</strong><span>terkonfirmasi dari marketplace</span></div>
+    <PageIntro eyebrow="Pipeline bid" title="Status penawaran dan draf." description="Bid Freelancer dikonfirmasi dari respons marketplace. Untuk projects.co.id, penandaan terkirim berasal dari konfirmasi Anda dan tidak diverifikasi aplikasi." />
+    <div className="pipeline-summary"><strong>{projects.filter((project) => project.latestDraft).length}</strong><span>draf lokal</span><span className="pipeline-divider" /><strong>{projects.filter((project) => project.source === 'freelancer' && project.pipelineStatus === 'submitted').length}</strong><span>terkonfirmasi dari Freelancer</span><strong>{projects.filter(project => project.source === 'projects_co_id' && project.pipelineStatus === 'submitted').length}</strong><span>ditandai terkirim oleh Anda</span></div>
     <div className="form-grid"><label className="form-field"><span>Cari judul atau klien</span><input type="search" value={search} onChange={(event) => { setSearch(event.target.value); setShown(30); }} /></label><label className="form-field"><span>Tahap pipeline</span><select value={filter} onChange={(event) => { setFilter(event.target.value); setShown(30); }}><option value="all">Semua tahap</option>{[...new Set(projects.map((project) => project.pipelineStatus))].map((stage) => <option key={stage} value={stage}>{PIPELINE_STAGES.find(([key]) => key === stage)?.[1] ?? stage}</option>)}</select></label></div>
     <p className="form-help">{visible.length} proyek sesuai filter</p>{visible.length === 0 && <div className="empty-state"><h3>Tidak ada proyek sesuai filter</h3><p>Ubah pencarian atau tahap pipeline.</p></div>}
     <div className="pipeline-list">{visible.slice(0, shown).map((project) => (
       <article className="pipeline-row" key={project.id}>
-        <div><p className="eyebrow">{project.clientName}</p><h2>{project.title}</h2><p>{project.latestDraft ? project.latestDraft.proposal.slice(0, 180) : 'Belum ada proposal. Siapkan draf dari antrean peluang.'}</p></div>
-        <div className="pipeline-state"><StateLabel state={project.pipelineStatus} /><strong>{project.latestDraft ? formatMoney(project.latestDraft.proposedPrice, project.currency) : 'Belum ada harga'}</strong></div>
-        <Link to={`/opportunities?project=${encodeURIComponent(project.id)}`} className="button button-secondary">{project.latestDraft ? 'Buka draf' : 'Lihat peluang'}</Link>
+        <div><p className="eyebrow">{project.clientName} / {opportunitySource(project.source)}</p><h2>{project.title}</h2><p>{project.latestDraft ? project.latestDraft.proposal.slice(0, 180) : 'Belum ada proposal. Siapkan draf dari antrean peluang.'}</p></div>
+        <div className="pipeline-state"><StateLabel state={project.pipelineStatus} source={project.source} /><strong>{project.latestDraft ? formatMoney(project.latestDraft.proposedPrice, project.currency) : 'Belum ada harga'}</strong></div>
+        <Link to={project.source === 'projects_co_id' ? '/projects-co-id' : `/opportunities?project=${encodeURIComponent(project.id)}`} className="button button-secondary">{project.latestDraft ? 'Buka draf' : 'Lihat peluang'}</Link>
       </article>
     ))}</div>
     {visible.length > shown && <button className="button button-secondary" type="button" onClick={() => setShown(shown + 30)}>Tampilkan 30 proyek berikutnya</button>}
@@ -388,6 +397,7 @@ function PipelinePage() {
 }
 
 function AgentsPage() {
+  const projectsCoId = useQuery({ queryKey: ['projects-co-id'], queryFn: () => api<ProjectsCoIdStatus | null>('/projects-co-id'), refetchInterval: 3000 });
   const operations=useQuery({queryKey:['operations'],queryFn:()=>api<OperationsData>('/operations'),refetchInterval:5000});
   const knowledgeSync = useQuery({ queryKey: ['knowledge-sync'], queryFn: () => api<{ job: { state: string; provider: string; current: string | null } | null }>('/knowledge/sync-status'), refetchInterval: 3_000 });
   const dashboard = useQuery({ queryKey: ['dashboard'], queryFn: () => api<{
@@ -408,6 +418,7 @@ function AgentsPage() {
 
   const inboxWaiting = inbox.isError ? undefined : inbox.data?.needsReply.length;
   const derived = deriveOfficeAgents(autopilot.isError ? undefined : autopilot.data, dashboard.data.activity, {
+    projectsCoId: projectsCoId.isError ? undefined : projectsCoId.data,
     sync: sync.isError ? undefined : sync.data, inboxWaiting, dueSoon: work.isError ? undefined : work.data?.dueSoon, hermes: capabilities.data.hermes, knowledge: knowledgeSync.isError ? undefined : knowledgeSync.data?.job,operations:operations.isError?undefined:operations.data,browserBidding:browserBidding.isError?undefined:browserBidding.data,
   });
   const agents = [
@@ -502,6 +513,7 @@ function AgentsPage() {
       metric: 'Tidak ada komponen runtime di aplikasi',
     },
     {id:'browser-bid-operator',name:'Operator Browser Bid',dept:'Lantai 1',role:'Pengiriman bid melalui Chrome',task:'Mengirim proposal autopilot melalui tab kerja pada Chrome berprofil pemilik.',boundary:'Kebijakan, kuota, akun dan payload diperiksa sebelum klik; hasil tidak pasti ditahan.',metric:browserBidding.isError?'Status tidak tersedia':browserBidding.data?.reason ?? 'Worker belum tersedia.'},
+    { id: 'projects-co-id-scout', name: 'Scout projects.co.id', dept: 'Lantai 1', role: 'Cari proyek & siapkan draf projects.co.id', task: 'Membaca proyek dan menulis draf lokal sesuai kebijakan IDR.', boundary: 'Worker hanya membaca; pemilik mengirim sendiri di situs.', metric: projectsCoId.isError ? 'Status tidak tersedia' : projectsCoId.data?.reason ?? 'Worker belum tersedia.' },
     ...OPERATIONS_ROSTER.map(a=>({id:a.id,name:a.name,dept:`Lantai ${a.floor}`,role:a.role,task:a.role,boundary:'Pekerjaan dari data tersimpan. Pesan hanya untuk proyek yang diaktifkan pemilik; pembayaran tidak ditebak.',metric:operations.isError?'Status tidak tersedia':operations.data?.runtime.jobs[a.id]?.lastRunAt?`Terakhir ${formatDate(operations.data.runtime.jobs[a.id]!.lastRunAt!)}`:'Menunggu tugas sesuai peran.'})),
   ];
 
@@ -618,7 +630,7 @@ function TaskBoardPage() {
                 <article className="kanban-card" key={p.id}>
                   <div className="kanban-card-top">
                     <span className="kanban-card-client">{p.clientName}</span>
-                    <StateLabel state={p.pipelineStatus} />
+                    <StateLabel state={p.pipelineStatus} source={p.source} />
                   </div>
                   <h4>{p.title}</h4>
                   <div className="tag-row">
@@ -1035,6 +1047,7 @@ function PolicyPage() {
   const save = useMutation({
     mutationFn: (value: Policy) => api<Policy>('/policy', jsonRequest('PUT', {
       allowedActions: value.allowedActions,
+      projectsCoId: value.projectsCoId ?? PROJECTS_CO_ID_DEFAULTS,
       keywords: value.keywords,
       minimumConfidence: value.minimumConfidence,
       minPrice: value.minPrice,
@@ -1067,6 +1080,8 @@ function PolicyPage() {
   if (policyQuery.isPending) return <LoadingPanel label="Membaca kebijakan autopilot..." />;
   if (policyQuery.isError) return <ErrorNotice message="Kebijakan belum dapat dimuat." onRetry={() => policyQuery.refetch()} />;
   const policy = draft ?? policyQuery.data;
+  const projectsSettings = policy.projectsCoId ?? PROJECTS_CO_ID_DEFAULTS;
+  const setProjectsSettings = (patch: Partial<typeof projectsSettings>) => setDraft({ ...policy, projectsCoId: { ...projectsSettings, ...patch } });
   const autopilot = autopilotQuery.isError ? undefined : autopilotQuery.data;
   const setList = (key: 'keywords' | 'noNegotiationTerms', value: string) => { setListText({ ...listText, [key]: value }); setDraft({ ...policy, [key]: [...new Map(value.split(/[,\n]/).map((item) => item.trim()).filter(Boolean).map((item) => [item.toLowerCase(), item])).values()] }); };
   return <>
@@ -1097,6 +1112,15 @@ function PolicyPage() {
           <label className="form-field"><span>Kata kunci proyek ({policy.keywords.length}/300)</span><textarea rows={6} value={listText.keywords ?? policy.keywords.join(', ')} onChange={(event) => setList('keywords', event.target.value)} placeholder="Python, Laravel, API" /><small>Pisahkan dengan koma atau baris baru. Minimal satu kata cocok; kosong berarti tanpa filter kata kunci.</small></label>
           <details className="keyword-catalog"><summary>Tambahkan katalog coding</summary>{presets.isError ? <ErrorNotice message="Katalog tidak dapat dimuat." onRetry={() => presets.refetch()} /> : <><p className="form-help">Pilih bidang yang relevan atau seluruh katalog. Kata kunci tidak menambahkan klaim keahlian ke profil.</p><div className="form-actions"><button className="button button-secondary" type="button" disabled={!presets.data} onClick={() => setList('keywords', [...policy.keywords, ...(presets.data?.keywords ?? [])].join(', '))}>Tambahkan seluruh katalog ({presets.data?.keywords.length ?? '…'})</button>{presets.data?.groups.map((group) => <button className="button button-secondary" type="button" key={group.id} onClick={() => setList('keywords', [...policy.keywords, ...group.keywords].join(', '))}>{group.label} ({group.keywords.length})</button>)}</div></>}</details>
           <label className="form-field"><span>Istilah non-negosiasi</span><input value={listText.noNegotiationTerms ?? policy.noNegotiationTerms.join(', ')} onChange={(event) => setList('noNegotiationTerms', event.target.value)} placeholder="pembayaran di muka, onsite" /></label>
+          <fieldset className="projects-policy-fields"><legend>projects.co.id: draf lokal dalam Rupiah</legend>
+            <p className="form-help">Akun {projectsSettings.username}. Mode diatur di <Link to="/projects-co-id">kartu projects.co.id</Link>. Kuota ini membatasi draf otomatis, terpisah dari bid Freelancer. Menyimpan tidak mengubah status aktif atau jeda kebijakan.</p>
+            <div className="form-grid">
+              <label className="form-field"><span>Harga minimum IDR</span><NumField min="1" step="1000" value={projectsSettings.minPrice} onChange={value => setProjectsSettings({ minPrice: value })} /></label>
+              <label className="form-field"><span>Harga maksimum IDR</span><NumField min="1" step="1000" value={projectsSettings.maxPrice} onChange={value => setProjectsSettings({ maxPrice: value })} /></label>
+              <label className="form-field"><span>Draf otomatis / hari</span><NumField min="0" max="50" value={projectsSettings.dailyBidLimit} onChange={value => setProjectsSettings({ dailyBidLimit: value })} /></label>
+              <label className="form-field"><span>Draf otomatis / minggu</span><NumField min="0" max="200" value={projectsSettings.weeklyBidLimit} onChange={value => setProjectsSettings({ weeklyBidLimit: value })} /></label>
+            </div>
+          </fieldset>
           <label className="check-row"><input type="checkbox" checked={extendValidity} onChange={(event) => setExtendValidity(event.target.checked)} /><span>Perbarui masa berlaku saat disimpan</span></label>{extendValidity && <label className="form-field"><span>Berlaku sejak sekarang (hari)</span><NumField min="1" max="365" value={validityDays} onChange={setValidityDays} /></label>}
           <div className="form-actions"><button className="button button-primary" type="submit" disabled={(!draft && !extendValidity) || save.isPending}>{save.isPending ? 'Menyimpan...' : 'Simpan kebijakan ke Supabase'}</button><button className="button button-secondary" type="button" disabled={activate.isPending || policy.state !== 'draft' || !!draft} onClick={() => activate.mutate('simulation')}>Aktifkan simulasi lokal</button>{(policy.state === 'draft' || policy.simulationOnly) && <button className="button button-primary" type="button" disabled={activate.isPending || policy.state === 'paused' || !!draft} onClick={() => activate.mutate('live')}>Aktifkan bid live sesuai batas tersimpan</button>}{(draft || extendValidity) && <button className="button button-text" type="button" onClick={() => { setDraft(null); setListText({}); setExtendValidity(false); }}>Batalkan perubahan</button>}</div>
         </form>
@@ -1408,12 +1432,14 @@ type StateChange = { key: string; at: string; name: string; from: AgentState; to
 
 const SHEET_TITLES: Record<string, string> = { '/overview': 'Ringkasan', ...Object.fromEntries(BOARDS.map((board) => [board.route, board.label])) };
 const BOARD_ACCENTS: Record<BoardId, string> = {
+  'projects-co-id': '#476b68',
   operations:'#67518b',
   opportunities: '#2a9d8f', pipeline: '#457b9d', tasks: '#6a4c93', calendar: '#e76f51', inbox: '#1c7ed6', work: '#2f9e44',
   activity: '#495057', agents: '#d62828', profile: '#f4a261', policy: '#9c6ade', knowledge: '#8ab17d', capabilities: '#277da1',
 };
 
 type ShellData = {
+  projectsCoId?: ProjectsCoIdStatus | null | undefined;
   operations?: OperationsData | undefined;
   dashboard?: { counts: { openProjects: number; drafts: number; submittedBids: number; policySkips: number; knowledgeSources: number }; policy: { state: Policy['state'] }; bidUsage?: { today: number; week: number }; externalWrites: boolean } | undefined;
   autopilot?: Autopilot | undefined; pipeline?: Opportunity[] | undefined; policy?: Policy | undefined; profile?: Profile | undefined;
@@ -1430,9 +1456,10 @@ function buildBoards(data: ShellData): BoardContent[] {
   const unavailable = ['Tidak tersedia', 'Data gagal dimuat'];
   const count = (status: string[]) => data.pipeline?.filter((item) => status.includes(item.pipelineStatus)).length ?? 0;
   const lines: Record<BoardId, { lines: string[]; alert?: boolean }> = {
+    'projects-co-id': data.projectsCoId ? { lines: [`${data.projectsCoId.readyDrafts} draf siap`, data.projectsCoId.reason] } : { lines: unavailable },
     operations:data.operations?{lines:[`${data.operations.projects.filter(p=>p.status==='active').length} proyek aktif`,`${data.operations.tasks.filter(t=>!t.done).length} tugas · ${data.operations.invoices.length} invoice`]}:{lines:unavailable},
     opportunities: data.dashboard ? { lines: [`${data.dashboard.counts.openProjects} peluang`, data.autopilot?.nextRunAt ? `Pindai berikutnya ${timeOf(data.autopilot.nextRunAt)}` : `Autopilot ${data.autopilot?.state ?? 'tidak diketahui'}`] } : { lines: unavailable },
-    pipeline: data.pipeline ? { lines: [`${count(['submitted', 'in_conversation'])} terkirim`, `${count(['won'])} menang · ${count(['lost'])} kalah`] } : { lines: unavailable },
+    pipeline: data.pipeline ? { lines: [`${data.pipeline.filter(p => p.source === 'freelancer' && ['submitted', 'in_conversation'].includes(p.pipelineStatus)).length} dari Freelancer`, `${data.pipeline.filter(p => p.source === 'projects_co_id' && p.pipelineStatus === 'submitted').length} ditandai oleh Anda`] } : { lines: unavailable },
     tasks: data.pipeline ? { lines: [`${count(['new', 'scored'])} di antrean`, `${count(['draft_ready', 'policy_check'])} draf · ${count(['skipped', 'lost', 'expired', 'reconciliation_required', 'error'])} selesai`] } : { lines: unavailable },
     calendar: data.dashboard?.bidUsage && data.policy ? { lines: [`Bid ${data.dashboard.bidUsage.today}/${data.policy.dailyBidLimit} hari ini`, data.work?.dueSoon ? `${data.work.dueSoon} tenggat klien ≤ 2 hari` : `${data.dashboard.bidUsage.week}/${data.policy.weeklyBidLimit} minggu ini`], alert: Boolean(data.work?.dueSoon) } : { lines: unavailable },
     inbox: data.inbox ? { lines: [`${data.inbox.needsReply.length} menunggu balasan`, `${data.inbox.followUps.length} perlu follow-up`], alert: data.inbox.needsReply.length > 0 } : { lines: unavailable },
@@ -1473,6 +1500,7 @@ function OwnerControls({ input, moving }: { input: OwnerInput; moving: boolean }
 }
 
 function OfficeShell() {
+  const projectsCoId = useQuery({ queryKey: ['projects-co-id'], queryFn: () => api<ProjectsCoIdStatus | null>('/projects-co-id'), refetchInterval: 3000 });
   const operations=useQuery({queryKey:['operations'],queryFn:()=>api<OperationsData>('/operations'),refetchInterval:3000});
   const [floor,setFloor]=useState<1|2>(1);
   const [arrival,setArrival]=useState<{floor:1|2;at:P2}|null>(null);
@@ -1536,12 +1564,13 @@ function OfficeShell() {
   const hermes = fresh(capabilities)?.hermes;
   const knowledgeJob = fresh(knowledgeSync)?.job;
   const operationsData=fresh(operations);
-  const allAgents = useMemo(() => deriveOfficeAgents(autopilotData, activityData, { sync: syncData, inboxWaiting, dueSoon, hermes, knowledge: knowledgeJob,operations:operationsData,browserBidding:browserBidding.isError?undefined:browserBidding.data }), [browserBidding.isError,browserBidding.data,autopilotData, activityData, syncData, inboxWaiting, dueSoon, hermes, knowledgeJob,operationsData]);
+  const allAgents = useMemo(() => deriveOfficeAgents(autopilotData, activityData, { projectsCoId: projectsCoId.isError ? undefined : projectsCoId.data, sync: syncData, inboxWaiting, dueSoon, hermes, knowledge: knowledgeJob,operations:operationsData,browserBidding:browserBidding.isError?undefined:browserBidding.data }), [projectsCoId.isError, projectsCoId.data, browserBidding.isError,browserBidding.data,autopilotData, activityData, syncData, inboxWaiting, dueSoon, hermes, knowledgeJob,operationsData]);
   const agents=useMemo(()=>allAgents.filter(a=>(a.floor ?? 1)===floor),[allAgents,floor]);
   const spots = useMemo(() => spotsFor(agents), [agents]);
   const ownerTarget = selectedId ? spots.get(selectedId) ?? null : null;
   const counts = summarize(agents);
   const boards = buildBoards({
+    projectsCoId: fresh(projectsCoId),
     operations:operationsData,
     dashboard: fresh(dashboard), autopilot: autopilotData, pipeline: fresh(pipeline), policy: fresh(policy), profile: fresh(profile),
     knowledge: fresh(knowledge), capabilities: fresh(capabilities), inbox: fresh(inbox), work: fresh(work), activity: activityData, counts,
@@ -1552,6 +1581,7 @@ function OfficeShell() {
   const knowledgeData = fresh(knowledge);
   const query = search.trim().toLocaleLowerCase();
   const visibleAgents = query ? agents.filter((agent) => `${agent.name} ${agent.role}`.toLocaleLowerCase().includes(query)) : agents;
+  const matchingBoards = query ? BOARDS.filter(board => board.label.toLocaleLowerCase().includes(query)) : [];
   const stateKey = agents.map((agent) => agent.state).join();
   const sheetOpen = location.pathname !== '/';
   const dashboardData = fresh(dashboard);
@@ -1666,6 +1696,14 @@ function OfficeShell() {
   const externalLabel = !dashboardData ? 'Status aksi eksternal tidak diketahui' : autopilotData?.marketplaceNotice?.quotaExhausted ? 'Bid terakhir ditolak: kuota akun Freelancer habis' : dashboardData.externalWrites ? 'Bid live ke Freelancer aktif' : 'Aksi eksternal nonaktif';
   const lastCycle = !autopilotData ? 'Tidak tersedia' : autopilotData.lastRunAt ? formatDate(autopilotData.lastRunAt) : 'Belum tercatat';
   const employeeMetrics = (id: string) => {
+    if (id === 'projects-co-id-scout') {
+      const worker = fresh(projectsCoId);
+      return [
+        { label: 'Mode worker', value: worker ? ({ off: 'Nonaktif', 'scan-only': 'Pindai saja', drafts: 'Pindai & buat draf' })[worker.mode] : 'Tidak tersedia' },
+        { label: 'Draf siap ditinjau', value: worker ? String(worker.readyDrafts) : 'Tidak tersedia' },
+        { label: 'Scan terakhir', value: worker ? worker.lastScanAt ? formatDate(worker.lastScanAt) : 'Belum pernah' : 'Tidak tersedia' },
+      ];
+    }
     if(OPERATIONS_ROSTER.some(a=>a.id===id)) {
       const signal=operationsData?.runtime.jobs[id];
       return [{label:'Pekerjaan terakhir',value:!operationsData?'Tidak tersedia':signal?.lastRunAt?formatDate(signal.lastRunAt):'Belum tercatat'},{label:'Tugas runtime',value:signal?.reason ?? 'Menunggu tugas sesuai peran'}];
@@ -1741,11 +1779,11 @@ function OfficeShell() {
           {BOARDS.map((board) => <Link key={board.id} to={board.route}>{board.label}</Link>)}
         </nav>
       </details>
-      <label className="vo3d-search"><OfficeIcon name="search" /><span className="sr-only">Cari agen</span>
-        <input ref={searchInput} type="search" placeholder="Cari agen" value={search} onChange={(event) => setSearch(event.target.value)}
-          onKeyDown={(event) => { if (event.key === 'Enter' && visibleAgents[0]) selectAgent(visibleAgents[0].id); if (event.key === 'Escape') setSearch(''); }} />
+      <div className="vo3d-search-wrap"><label className="vo3d-search"><OfficeIcon name="search" /><span className="sr-only">Cari agen atau papan</span>
+        <input ref={searchInput} type="search" placeholder="Cari agen atau papan" value={search} onChange={(event) => setSearch(event.target.value)}
+          onKeyDown={(event) => { if (event.key === 'Enter') { if (matchingBoards[0]) { navigate(matchingBoards[0].route); setSearch(''); } else if (visibleAgents[0]) selectAgent(visibleAgents[0].id); } if (event.key === 'Escape') setSearch(''); }} />
         <kbd>Ctrl K</kbd>
-      </label>
+      </label>{matchingBoards.length > 0 && <nav className="vo3d-search-results" aria-label="Hasil pencarian papan">{matchingBoards.map(board => <Link key={board.id} to={board.route} onClick={() => setSearch('')}>{board.label}</Link>)}</nav>}</div>
       {dashboardData && dashboardData.policy.state !== 'draft' && <button type="button" className={`vo3d-kill${dashboardData.policy.state === 'active' ? ' is-danger' : ''}`} disabled={pause.isPending}
         onClick={() => pause.mutate(dashboardData.policy.state === 'active' ? 'pause' : 'resume')}>{dashboardData.policy.state === 'active' ? 'Jeda automasi' : 'Lanjutkan kebijakan'}</button>}
       <button type="button" className="vo3d-icon" aria-pressed={fullscreen} aria-label={fullscreen ? 'Keluar dari layar penuh' : 'Layar penuh'} onClick={() => { if (document.fullscreenElement) void document.exitFullscreen(); else void stage.current?.requestFullscreen?.(); }}><OfficeIcon name="expand" /></button>
@@ -2047,6 +2085,7 @@ export default function App() {
       <Route path="activity" element={<ActivityPage />} />
       <Route path="capabilities" element={<CapabilitiesPage />} />
       <Route path="operations" element={<OperationsPage />} />
+      <Route path="projects-co-id" element={<ProjectsCoIdPage />} />
       <Route path="office" element={<Navigate to="/" replace />} />
       <Route path="*" element={<NotFoundPage />} />
     </Route>

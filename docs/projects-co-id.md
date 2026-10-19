@@ -1,0 +1,42 @@
+# projects.co.id: pindai dan draf lokal
+
+## Cara memakai
+
+Buka papan **projects.co.id** lantai 1 atau `/projects-co-id`. Login sebagai `KhairulHuda06` pada tab Chrome biasa, aktifkan izin debugging dan Hubungkan Chrome saya. Periksa akun, lalu Pindai sekarang. Tab worker sendiri memblokir semua request tulis; jangan gunakan tab worker untuk login.
+
+Mode awal `scan-only`; `drafts` memindai dan membuat draf otomatis, `off` menghentikan worker. Harga awal Rp100.000–Rp10.000.000, batas draf otomatis 4/hari dan 12/minggu. Harga/batas disimpan di JSON kebijakan, bisa disunting di Kebijakan tanpa menonaktifkan Freelancer atau melanjutkan kebijakan yang dijeda. Mode tersimpan di JSON yang sama agar tidak ada dua sumber pengaturan. Sambungan Chrome tidak dibuka otomatis saat restart; Hubungkan kembali.
+
+Sunting lalu Simpan proposal, Salin proposal, Buka di projects.co.id dan kirim sendiri. “Sudah saya kirim” memerlukan konfirmasi dan tampil sebagai **Ditandai terkirim oleh Anda**, tidak diverifikasi aplikasi. “Lewati” menghentikan pembuatan draf untuk proyek tersebut. Tidak ada mode kirim, pengisian form, pembelian upgrade atau otomatisasi pesan.
+
+## Recon 19 Oktober 2026
+
+Recon read-only berhasil melalui `connectOverCDP('chrome', { noDefaults: true })` pada Chrome pemilik. Tepat satu tautan berteks `Logged in as KhairulHuda06` dengan pathname `/user/home` teramati. HTTP `127.0.0.1:9222/json/version` mengembalikan 404; mekanisme Chrome aplikasi berhasil. Tidak ada form bid dibuka atau request tulis dilepas.
+
+- Login `/public/home/login`, dashboard `/user/home`.
+- Daftar `/public/browse_projects/listing`, paginasi GET `?page=2` terbukti menghasilkan proyek berbeda. DOM `#ds h2 a`, metadata pada parent judul, owner pada parent baris; `.pagination a` menyebut `dsLoadPage('page', '2')`.
+- Detail `/public/browse_projects/view/<id>/<slug>`. ID teramati enam digit **heksadesimal**, bukan numerik seperti dugaan rencana. Tanpa slug detail tidak dikenali. Slug publik tervalidasi disimpan; origin selalu tetap dan URL tidak diterima melalui API.
+- Detail memakai `h1.title`, `.blog-content`, skill `listing?search=`, metadata `Published Budget`, `Published Date`, `Select Deadline`, `Project Status`, owner `/browse_users/view/`. Rupiah memakai koma ribuan; tanggal `DD/MM/YYYY HH:mm:ss WIB`; status terbuka `Published`.
+- Daftar/detail terbaca sebelum login. Worker tetap mensyaratkan akun cocok, berhenti saat sesi berubah atau challenge muncul.
+- FAQ worker tidak menyebut batas karakter. Batas **lokal** proposal 1.200 karakter mengikuti prompt Hermes; bukan klaim batas resmi situs. Field form tidak diperiksa karena worker dilarang membuka form bid.
+- Tidak ditemukan API resmi pada navigasi/FAQ yang diperiksa; gunakan DOM. Ini bukan bukti bahwa API resmi sama sekali tidak ada.
+- Pemeriksaan publik sebelumnya: robots.txt HTTP 200, `User-agent: *`, `Allow: /`, sitemap `/meta/sitemap.xml`. GET tanpa Chrome pernah mendapat challenge HTTP 403. Tidak ada upaya melewati challenge.
+- Dua koneksi CDP bersamaan belum diuji; tidak ada refactor koneksi bersama tanpa bukti kebutuhan.
+
+## Invarian implementasi
+
+- Siklus 30 menit; maksimum tiga halaman daftar, jeda navigasi minimal tiga detik. Mode off dan kill switch menghentikan scan/drafting, termasuk pemeriksaan ulang setelah Hermes selesai. CAPTCHA, akun berubah atau struktur tidak dikenal menghentikan siklus.
+- `page.route('**/*')` membatalkan metode selain GET/HEAD/OPTIONS sepanjang sesi; pelanggaran dihitung dan diaudit tanpa menyimpan payload/URL. WebSocket ditutup; service worker dilewati hanya pada tab worker. Disconnect menutup tab worker dan melepaskan CDP, mempertahankan Chrome serta tab pemilik.
+- Harga `max(minPrice, budgetMin)` tidak melebihi batas kebijakan/budget. Durasi `min(deadlineDays,14)` atau 14. Hermes mendapat fixedBid IDR, fakta profil dan hingga empat potongan Knowledge Hub; tanpa kredensial. Harga/durasi salah, nominal lain (termasuk juta/jt/ribu/rb), mata uang lain, output invalid/error atau terlalu panjang memakai template Bahasa Indonesia dan audit `autopilot.draft_fallback`.
+- Skor brief/risiko adalah heuristik eksplisit dari panjang deskripsi, jumlah skill dan istilah risiko; bukan verifikasi reputasi owner. Detail lengkap dibaca ulang sebelum drafting. Tenggat adalah penutupan listing saat sinkronisasi, bukan durasi pengerjaan.
+- `dailyBidLimit`/`weeklyBidLimit` pada `projectsCoId` berarti batas **draf otomatis**. Kuota memakai audit `projects_co_id.draft_created`, zona waktu kebijakan; draf manual memakai `projects_co_id.manual_draft_created` dan tetap melewati kebijakan/guard. Harga Freelancer dan USD tetap terpisah.
+- Penyimpanan draf, pipeline dan audit dilakukan satu transaksi dengan lock kebijakan/proyek; kebijakan diperiksa ulang, draf ganda dan kuota penuh ditolak. Hermes/browser berjalan di luar transaksi. Tanpa migrasi skema; proyek/draf memakai tabel yang ada.
+- Penandaan pemilik memakai `projects_co_id.owner_marked_sent`/`owner_skipped`, idempoten dan transaksional. Tidak masuk `bid_results`, kuota submit Freelancer atau BusinessSync. Origin/Host/no-store tetap aktif.
+- Scout hanya bekerja dari sinyal worker. Mode off/login/challenge/akun beda/ditutup/error/jeda berarti Offline; sumber gagal berarti Tidak diketahui. Lead Hermes juga menghitung drafting worker ini.
+
+## Verifikasi
+
+`pnpm --filter @fvh/server exec tsx ../../scripts/verify-projects-co-id.ts` memakai Chrome headless dengan profil kosong milik tes, fixture situs localhost, PGlite dan Hermes palsu. Tidak memakai profil atau database pemilik. Skrip menghitung request tulis situs (wajib nol), memeriksa lifecycle, dua halaman, harga/kuota/fallback/jeda/disconnect, lalu menjalankan web Vite dengan API fixture untuk menguji kartu. Screenshot fixture ada di `.local/projects-co-id-fixture-*.png` (gitignored).
+
+Verifikasi 19 Oktober 2026: lint dan typecheck bersih; `pnpm test` lulus 233 eksekusi tes. Sesudah perbaikan status/kontrol, 17 tes terarah lulus; sesudah guard template diperketat, 8 tes worker lulus. Build web berhasil (peringatan ukuran chunk VisualOffice yang sudah dikenal). Skrip fixture penuh lulus: 10 skenario worker dengan request tulis situs nol, kemudian navigasi papan/Ctrl+K, kontrol worker, draf manual, lewati, edit/simpan, clipboard, tautan, penandaan/riwayat, Esc dan mobile tanpa overflow. Review diff dan screenshot fixture dilakukan.
+
+Recon live akun/daftar/detail berhasil. Percobaan menghubungkan worker aplikasi sesudahnya gagal pada sambungan Chrome; worker dilepas kembali dan mode tetap scan-only. Setelah pemilik mengecek debugging kembali, koneksi channel masih gagal; percobaan endpoint WebSocket Chrome `ws://127.0.0.1:9222/devtools/browser` juga timeout 60 detik sebelum handshake selesai. Tidak ada fallback endpoint baru yang dipasang tanpa sambungan terverifikasi. Scan live tersimpan, draf Hermes live dan pengiriman manual oleh pemilik belum terverifikasi. Tidak ada perubahan kebijakan/kill switch atau penawaran yang dikirim dalam pengujian ini.

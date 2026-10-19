@@ -2,7 +2,7 @@
 
 Dokumen ini adalah **sumber konteks utama** untuk agen AI (Claude Code, Codex, OpenCode, Hermes, dll.) yang bekerja di repositori ini. Baca seluruhnya sebelum mengubah kode. Dokumen lama (`AGENT-gpt.md`, `PRD-gpt.md`, `TECH_STACK-gpt.md`, `TASKS-gpt.md`) adalah rancangan awal; jika bertentangan dengan dokumen ini, **ikuti dokumen ini dan kode yang berjalan**.
 
-Terakhir diperbarui: 16 Oktober 2026.
+Terakhir diperbarui: 19 Oktober 2026.
 
 ---
 
@@ -95,6 +95,7 @@ Nama paket npm: `@fvh/<nama>`. Semua paket diekspor langsung dari `src/index.ts`
 3. **`FreelancerAutopilot`** (`autopilot.ts`): siklus tiap 15 menit.
 4. **`BusinessSync`** (`business-sync.ts`): tiap 10 menit, **read-only**, jalan terlepas dari status kebijakan: cek hasil bid lalu baca pesan klien.
 5. **`createApp`** (`app.ts`): semua route, hook keamanan, header CSP.
+6. **`ProjectsCoIdService`** (`projects-co-id.ts`): worker Chrome read-only, maksimum tiga halaman tiap 30 menit; mode `off/scan-only/drafts`. Hermes membuat draf Bahasa Indonesia dengan harga IDR deterministik; pemilik mengirim sendiri. Baca `docs/projects-co-id.md` sebelum mengubah worker, guard proposal, kuota atau penandaan sumber ini. Tidak ada mode submit.
 
 ### 5.1 Siklus autopilot
 1. `start()`: baca profil Freelancer; **isi profil lokal dari Freelancer hanya sekali** (saat `specializations` lokal kosong). Bootstrap kebijakan bila belum aktif (kecuali dijeda).
@@ -137,6 +138,8 @@ Koneksi: `DATABASE_URL` (Session pooler Supabase, port 5432) dibaca dari `.env` 
 
 Pipeline status: `new, scored, draft_ready, policy_check, submitted, in_conversation, won, lost, skipped, expired, reconciliation_required, error`. `submitted` **hanya** diset setelah HTTP 200 dari Freelancer.
 
+Pengecualian pemilik 19 Oktober 2026: proyek `projects_co_id` boleh `submitted` setelah pemilik mengonfirmasi “Sudah saya kirim”. Audit `projects_co_id.owner_marked_sent`: “Ditandai terkirim oleh pemilik; tidak diverifikasi aplikasi”. UI selalu “Ditandai terkirim oleh Anda”. Tidak masuk `bid_results`, BusinessSync atau hitungan bid terkonfirmasi Freelancer. ID publik enam digit heksadesimal dan slug tervalidasi disimpan di JSON proyek; tidak perlu migrasi. Batas draf otomatis dihitung dari `projects_co_id.draft_created` dalam zona waktu kebijakan.
+
 ---
 
 ## 7. API (`apps/server/src/app.ts`)
@@ -146,6 +149,7 @@ Pipeline status: `new, scored, draft_ready, policy_check, submitted, in_conversa
 | `GET /api/health` | Mode, status AI (`ai: hermes/disabled`), autopilot |
 | `GET /api/autopilot` | `state, lastRunAt, nextRunAt, lastMessage, cycleInProgress, draftsInProgress, …` |
 | `GET /api/browser-bidding` · `PUT /api/browser-bidding/mode` · `POST /api/browser-bidding/open` · `/check` · `/close` | Worker Playwright tersambung ke Chrome berprofil pemilik melalui izin debugging; mode API, fallback 401/403/429, atau browser. Tidak ada submit bebas. Baca `docs/browser-bidding.md`. |
+| `GET /api/projects-co-id` · `/drafts` · `PUT /mode` · `POST /open`, `/check`, `/close`, `/scan` · `POST /projects/:id/draft`, `/mark-sent`, `/skip` | Prefix semua route `/api/projects-co-id`. Worker read-only; aksi penandaan memerlukan `confirm: true`. Tidak menerima URL/selector/skrip atau submit bebas. |
 | `GET /api/business-sync` | Status BusinessSync (null jika tidak tersedia) |
 | `GET /api/dashboard` | Hitungan, kebijakan, `bidUsage {today, week}` (zona waktu kebijakan), `externalWrites` |
 | `GET /api/insights/bids` | Hasil bid (`winRate` null bila belum ada keputusan), alasan skip, waktu cek terakhir |
@@ -174,11 +178,12 @@ Error validasi mengembalikan `{ error, issues[] }`; klien web (`api.ts`) menempe
 | `office-state.ts` | **Aturan status agen** (`deriveOfficeAgents`), label & warna status, `ROSTER` |
 | `office-layout.ts` | Denah: pod, zona, kursi/slot, `planPath` (rute koridor), `BOARDS`, `dayPhase` |
 | `api.ts` | Klien fetch + tipe respons |
+| `ProjectsCoIdPage.tsx`, `projects-co-id-api.ts` | Kartu khusus worker, penyuntingan/clipboard draf, penandaan pemilik dan riwayat projects.co.id |
 | `styles.css` | Gaya lama halaman + blok `.vo3d*` (overlay 3D, kartu). Gaya sidebar/topbar lama masih ada tapi tak terpakai |
 
 ### 8.1 Navigasi
 - `/` = kantor 3D. Rute lain (`/overview, /agents, /tasks, /calendar, /opportunities, /pipeline, /inbox, /work, /profile, /policy, /knowledge, /activity, /capabilities`) membuka **kartu** (drawer kanan) di atas kantor via `<Outlet/>`; kamera terbang ke papannya. `/office` dialihkan ke `/`. Tutup: ✕, Esc, klik backdrop, tombol Back.
-- 12 papan di dinding belakang (Peluang, Pipeline, Papan Tugas, Kalender, Kotak Masuk, Proyek & Pendapatan, Aktivitas) dan kiri (Tim AI, Profil, Kebijakan, Knowledge Hub, Status Integrasi). Isi papan = judul + 1 nilai utama + 1 keterangan, dari data nyata (`buildBoards`); sumber gagal → "Tidak tersedia".
+- 13 papan di lantai 1: belakang (Peluang, Pipeline, Papan Tugas, Kalender, Kotak Masuk, Proyek & Pendapatan, Aktivitas, projects.co.id) dan kiri (Tim AI, Profil, Kebijakan, Knowledge Hub, Status Integrasi). Lantai 2 memiliki papan Operasional Klien. `/projects-co-id` dan `/operations` membuka kartu seperti rute lain. Isi papan dari data nyata (`buildBoards`); sumber gagal → "Tidak tersedia". Kedua lantai diperlebar 4,7 unit ke kanan atas permintaan pemilik; batas gerak dan minimap mengikuti `FLOOR`.
 - Overlay: kartu status (Mission Control, jam, ringkasan kru, status bid live), daftar agen, menu Papan, pencarian (Ctrl+K), **kill switch**, layar penuh, dock zona, minimap, kontrol tampilan (3D/denah/Tur/Pusatkan).
 - Kartu memakai tema 3D lewat override token CSS di `.vo3d-sheet` dan menyembunyikan judul besar halaman (`.page-intro h1`).
 
@@ -198,6 +203,7 @@ Satu sumber kebenaran: `deriveOfficeAgents(autopilot, activity, { sync, hermes, 
 |---|---|---|
 | **Lead Agent (Hermes)** | `capabilities.hermes` | nonaktif → Offline (alasan dari server); `draftsInProgress > 0` → Bekerja; aktif → Idle; data gagal → Tidak diketahui |
 | Operator Browser Bid (lantai 1) | `/api/browser-bidding` | submitting → Bekerja; busy lain → Meninjau; ready/quota habis → Idle; perlu login/ditutup/error → Offline; sumber gagal → Tidak diketahui. Meja khusus di `BROWSER_DESK`. |
+| Scout projects.co.id (lantai 1) | `/api/projects-co-id` | scanning/checking → Meninjau; `draftsInProgress > 0` → Bekerja; ready → Idle dengan jumlah draf menunggu; off/jeda/login/challenge/akun beda/ditutup/error → Offline; sumber gagal → Tidak diketahui. Meja `PROJECTS_CO_ID_DESK`, dekat Operator Browser Bid. |
 | Market Scout | autopilot | running + `cycleInProgress` → Bekerja; running → Idle; paused/blocked/error → Offline (alasan spesifik); starting/undefined → Tidak diketahui |
 | Bid Strategist | autopilot + sync | `sync.step === 'outcomes'` → Meninjau; selain itu seperti Market Scout tapi siklus → Berkolaborasi |
 | Compliance Auditor | autopilot | seperti Market Scout, siklus → Berkolaborasi |

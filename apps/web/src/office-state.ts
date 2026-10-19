@@ -2,6 +2,7 @@ import type { AuditEvent, Autopilot, BusinessSyncStatus } from './api.js';
 import { OPERATIONS_ROSTER } from '@fvh/domain';
 import type { OperationsData } from './operations-api.js';
 import type { BrowserBiddingStatus } from './browser-bidding-api.js';
+import type { ProjectsCoIdStatus } from './projects-co-id-api.js';
 
 export type AgentState = 'working' | 'reviewing' | 'collaborating' | 'idle' | 'offline' | 'unknown';
 // Lobby is the neutral spot for agents whose state cannot be determined.
@@ -39,6 +40,7 @@ export const ROSTER: RosterEntry[] = [
   { id: 'qa-engineer', name: 'QA Engineer', role: 'Verifikator Kontrak & Smoke', color: '#277da1' },
   { id: 'lead-agent', name: 'Lead Agent', role: 'Koordinator Tim AI (Hermes)', color: '#343a40' },
   { id: 'browser-bid-operator', name: 'Operator Browser Bid', role: 'Pengiriman bid melalui Chrome', color: '#476b68', floor: 1 },
+  { id: 'projects-co-id-scout', name: 'Scout projects.co.id', role: 'Cari proyek & siapkan draf projects.co.id', color: '#476b68', floor: 1 },
   ...OPERATIONS_ROSTER,
 ];
 
@@ -75,6 +77,7 @@ function roomFor(state: AgentState): RoomId {
 function activityFor(id: string, activity: AuditEvent[]): AuditEvent[] {
   if (id === 'chief-of-staff') return activity.slice(0, 3);
   const matches = (event: AuditEvent): boolean => {
+    if (id === 'projects-co-id-scout') return event.type.startsWith('projects_co_id.') || event.type === 'autopilot.draft_fallback' && event.resourceId.startsWith('projects_co_id:');
     if (id === 'browser-bid-operator') return event.type.startsWith('browser.') || event.type === 'marketplace.production.submit_bid' && event.reason.includes('melalui browser');
     if (id === 'market-scout') return ['marketplace.projects_synced', 'marketplace.sync_failed', 'autopilot.cycle'].includes(event.type);
     if (id === 'bid-strategist') return event.type.startsWith('bid.') || event.type === 'marketplace.production.submit_bid';
@@ -90,6 +93,7 @@ function activityFor(id: string, activity: AuditEvent[]): AuditEvent[] {
 
 /** Extra real signals beyond the autopilot. `undefined` means the source could not be loaded. */
 export type OfficeContext = {
+  projectsCoId?: ProjectsCoIdStatus | null | undefined;
   browserBidding?: BrowserBiddingStatus | null | undefined;
   operations?: Pick<OperationsData,'runtime'|'whatsapp'|'google'> | undefined;
   sync?: BusinessSyncStatus | null | undefined;
@@ -122,7 +126,15 @@ export function deriveOfficeAgents(autopilot: Autopilot | undefined, activity: A
   return ROSTER.map((entry) => {
     let derived: Derived;
     const signal=context.operations?.runtime.jobs[entry.id];
-    if (entry.id === 'browser-bid-operator') {
+    if (entry.id === 'projects-co-id-scout') {
+      const worker = context.projectsCoId;
+      if (!worker) derived = { state: 'unknown', reason: 'Status projects.co.id tidak tersedia.' };
+      else if (worker.mode === 'off' || ['paused', 'login_required', 'account_mismatch', 'challenge', 'stopped', 'error'].includes(worker.state)) derived = { state: 'offline', reason: worker.reason };
+      else if (worker.draftsInProgress > 0) derived = { state: 'working', reason: worker.reason, task: worker.reason };
+      else if (worker.busy) derived = { state: 'reviewing', reason: worker.reason, task: worker.reason };
+      else derived = { state: 'idle', reason: worker.reason, task: `${worker.readyDrafts} draf menunggu Anda kirim` };
+    }
+    else if (entry.id === 'browser-bid-operator') {
       const browser=context.browserBidding;
       if(!browser) derived={state:'unknown',reason:'Status worker browser tidak tersedia.'};
       else if(browser.busy) derived={state:browser.state==='submitting'?'working':'reviewing',reason:browser.reason,task:browser.reason};

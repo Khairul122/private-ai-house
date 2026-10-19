@@ -146,7 +146,7 @@ export class HermesCliDraftingAdapter implements AiDraftingPort {
     const promptPath = join(directory, 'draft-request.txt');
     try {
       const country = input.project.clientCountry?.trim().toLocaleLowerCase() ?? '';
-      const proposalLanguage = country === 'id' || country === 'idn' || country.includes('indonesia') ? 'Bahasa Indonesia' : 'English';
+      const proposalLanguage = input.project.source === 'projects_co_id' || country === 'id' || country === 'idn' || country.includes('indonesia') ? 'Bahasa Indonesia' : 'English';
       const boundedContext = {
         project: {
           title: input.project.title,

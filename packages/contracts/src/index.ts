@@ -14,7 +14,20 @@ export const updateProfileSchema = z.object({
   facts: z.array(z.object({ label: z.string().trim().min(1).max(100), value: z.string().trim().min(1).max(500), source: z.string().trim().min(1).max(300) })).max(30),
 }).refine((profile) => profile.maxPrice >= profile.minPrice, { path: ['maxPrice'], message: 'Tarif maksimum harus sama atau lebih besar.' });
 
+export const projectsCoIdSettingsSchema = z.object({
+  username: z.string().trim().regex(/^[A-Za-z0-9_-]{1,64}$/, 'Username projects.co.id tidak valid.'),
+  minPrice: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  maxPrice: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  dailyBidLimit: z.number().int().min(0).max(50),
+  weeklyBidLimit: z.number().int().min(0).max(200),
+  mode: z.enum(['off', 'scan-only', 'drafts']),
+}).strict().refine(value => value.maxPrice >= value.minPrice, { path: ['maxPrice'], message: 'Harga maksimum IDR harus sama atau lebih besar.' });
+
+export const projectsCoIdModeSchema = z.object({ mode: z.enum(['off', 'scan-only', 'drafts']) }).strict();
+export const projectsCoIdOwnerActionSchema = z.object({ confirm: z.literal(true) }).strict();
+
 export const updatePolicySchema = z.object({
+  projectsCoId: projectsCoIdSettingsSchema.optional(),
   allowedActions: z.array(z.enum(['bid.submit'])).max(1),
   keywords: z.array(z.string().trim().min(1).max(60)).max(300).transform(normalizeKeywords),
   minimumConfidence: z.number().min(0).max(1),

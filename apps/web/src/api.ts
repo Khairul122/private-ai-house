@@ -43,6 +43,7 @@ export type Profile = {
 };
 
 export type Policy = {
+  projectsCoId?: import('@fvh/domain').ProjectsCoIdSettings;
   version: number;
   state: 'draft' | 'active' | 'paused';
   expiresAt: string;
@@ -80,7 +81,7 @@ export type Opportunity = {
   briefQuality: number;
   riskScore: number;
   status: 'open' | 'closed' | 'expired';
-  source: 'fixture' | 'freelancer';
+  source: 'fixture' | 'freelancer' | 'projects_co_id';
   pipelineStatus: string;
   score: number;
   factors: Array<{ key: string; label: string; points: number; value: string }>;

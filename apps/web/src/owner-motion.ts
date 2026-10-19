@@ -1,4 +1,4 @@
-import { FLOOR, BROWSER_DESK, LEAD_DESK, LIFT, MANAGER_DESK, OWNER_SPOT, PODS, POD_SIZE, type P2, type Spot } from './office-layout.js';
+import { FLOOR, BROWSER_DESK, PROJECTS_CO_ID_DESK, LEAD_DESK, LIFT, MANAGER_DESK, OWNER_SPOT, PODS, POD_SIZE, type P2, type Spot } from './office-layout.js';
 import type { OwnerMoveInput } from './owner-input.js';
 
 const RADIUS = 0.38;
@@ -10,6 +10,7 @@ const box = (x: number, z: number, w: number, d: number): Obstacle => ({ minX: x
 const obstacles: Obstacle[] = [
   box(LIFT.x, LIFT.z, LIFT.w, LIFT.d),
   box(BROWSER_DESK.x,BROWSER_DESK.z,2.8,1),box(BROWSER_DESK.x,BROWSER_DESK.z-0.95,0.6,0.6),
+  box(PROJECTS_CO_ID_DESK.x,PROJECTS_CO_ID_DESK.z,2.8,1),box(PROJECTS_CO_ID_DESK.x,PROJECTS_CO_ID_DESK.z-0.95,0.6,0.6),
   box(MANAGER_DESK.x,MANAGER_DESK.z,2.8,1),box(MANAGER_DESK.x,MANAGER_DESK.z-0.95,0.6,0.6),
   ...PODS.flatMap(({ x, z }) => [
     box(x, z - POD_SIZE / 2, POD_SIZE, 0.12), box(x - POD_SIZE / 2, z, 0.12, POD_SIZE), box(x + POD_SIZE / 2, z, 0.12, POD_SIZE),

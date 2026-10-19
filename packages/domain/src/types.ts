@@ -15,7 +15,8 @@ export type ProjectOpportunity = {
   briefQuality: number;
   riskScore: number;
   status: 'open' | 'closed' | 'expired';
-  source: 'fixture' | 'freelancer';
+  source: 'fixture' | 'freelancer' | 'projects_co_id';
+  sourceSlug?: string | undefined;
   createdAt: string;
 };
 
@@ -33,7 +34,20 @@ export type PipelineStatus =
   | 'reconciliation_required'
   | 'error';
 
+export type ProjectsCoIdSettings = {
+  username: string;
+  minPrice: number;
+  maxPrice: number;
+  dailyBidLimit: number;
+  weeklyBidLimit: number;
+  mode: 'off' | 'scan-only' | 'drafts';
+};
+
+// Owner's initial settings; existing workspaces persist these on the next policy save.
+export const PROJECTS_CO_ID_DEFAULTS: ProjectsCoIdSettings = { username: 'KhairulHuda06', minPrice: 100_000, maxPrice: 10_000_000, dailyBidLimit: 4, weeklyBidLimit: 12, mode: 'scan-only' };
+
 export type AutonomyPolicy = {
+  projectsCoId?: ProjectsCoIdSettings | undefined;
   version: number;
   state: 'draft' | 'active' | 'paused';
   expiresAt: string;

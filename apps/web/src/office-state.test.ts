@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AuditEvent, Autopilot, BusinessSyncStatus } from './api.js';
 import { deriveOfficeAgents, summarize } from './office-state.js';
+import type { ProjectsCoIdStatus } from './projects-co-id-api.js';
 
 const autopilot = (overrides: Partial<Autopilot> = {}): Autopilot => ({
   state: 'running', cycleInProgress: false, lastRunAt: null, nextRunAt: null, lastMessage: 'Memindai.',
@@ -10,6 +11,17 @@ const event = (type: string, id = type): AuditEvent => ({ id, type, resourceId: 
 const agent = (agents: ReturnType<typeof deriveOfficeAgents>, id: string) => agents.find((item) => item.id === id)!;
 
 describe('office state', () => {
+  it('derives the projects.co.id scout only from its current worker signal', () => {
+    const worker: ProjectsCoIdStatus = { mode: 'scan-only', state: 'ready', busy: false, reason: 'Fixture', username: 'KhairulHuda06', remaining: null, checkedAt: null, pageStatus: 200, lastScanAt: null, lastResult: null, autoAvailable: false, draftsInProgress: 0, projectCount: 4, readyDrafts: 2, blockedWrites: 0, draftUsage: { today: 1, week: 1, dailyLimit: 4, weeklyLimit: 12 } };
+    const scout = (changes: Partial<ProjectsCoIdStatus> = {}) => agent(deriveOfficeAgents(autopilot(), [event('projects_co_id.scan_completed'), event('marketplace.production.submit_bid')], { projectsCoId: { ...worker, ...changes } }), 'projects-co-id-scout');
+    expect(scout()).toMatchObject({ state: 'idle', room: 'lounge', task: '2 draf menunggu Anda kirim', floor: 1 });
+    expect(scout({ busy: true, state: 'scanning' })).toMatchObject({ state: 'reviewing', room: 'workspace' });
+    expect(scout({ busy: true, state: 'drafting', draftsInProgress: 1 })).toMatchObject({ state: 'working', room: 'workspace' });
+    for (const state of ['stopped', 'paused', 'login_required', 'account_mismatch', 'challenge', 'error'] as const) expect(scout({ state })).toMatchObject({ state: 'offline', room: null });
+    expect(scout({ mode: 'off' }).state).toBe('offline');
+    expect(agent(deriveOfficeAgents(autopilot(), []), 'projects-co-id-scout').state).toBe('unknown');
+    expect(scout().recentActivity.map(e => e.type)).toEqual(['projects_co_id.scan_completed']);
+  });
   it('uses real knowledge sync activity and explains schedule waits', () => {
     expect(agent(deriveOfficeAgents(autopilot(), [], { knowledge: { state: 'running', provider: 'github', current: 'owner/repo' } }), 'knowledge-curator')).toMatchObject({ state: 'working', room: 'workspace', task: 'owner/repo' });
     expect(agent(deriveOfficeAgents(autopilot(), [], { knowledge: { state: 'completed', provider: 'github', current: null } }), 'knowledge-curator')).toMatchObject({ state: 'idle' });
@@ -72,8 +84,8 @@ describe('office state', () => {
   });
   it('summarizes derived states', () => {
     const agents = deriveOfficeAgents(autopilot({ cycleInProgress: true }), []);
-    expect(summarize(agents)).toEqual({ working: 3, idle: 4, offline: 1, unknown: 12 });
-    expect(summarize(deriveOfficeAgents(undefined, []))).toEqual({ working: 0, idle: 0, offline: 1, unknown: 19 });
+    expect(summarize(agents)).toEqual({ working: 3, idle: 4, offline: 1, unknown: 13 });
+    expect(summarize(deriveOfficeAgents(undefined, []))).toEqual({ working: 0, idle: 0, offline: 1, unknown: 20 });
   });
   it('shows dedicated floor staff only from actual operation signals',()=>{
     const operations={runtime:{running:true,jobs:{'delivery-manager':{busy:true,lastRunAt:null,error:null,reason:'Mengirim laporan ke Lead'},'lead-operations':{busy:true,lastRunAt:null,error:null,reason:'Meninjau'}}},whatsapp:{state:'disconnected',reason:'Belum terhubung',provider:'Baileys'},google:{connected:false,configured:false,reason:'Belum terhubung',redirectUri:''}};

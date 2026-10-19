@@ -1006,3 +1006,22 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .vo3d-floor-picker button { font-size:12px; min-height:36px; padding:5px 10px; }
 @media(max-width:800px) { .operations-grid { grid-template-columns:minmax(0,1fr); } .operations-team { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media(max-width:480px) { .operations-team { grid-template-columns:minmax(0,1fr); } .operations-actions .button { width:100%; } .operations-tabs { gap:6px; } .operations-tabs button { flex:1 1 130px; } }
+/* The worker and drafts use the office sheet's existing colors and controls. */
+.projects-co-id-page { display: grid; gap: 1.5rem; }
+.vo3d-search-wrap { position: relative; }
+.vo3d-search-results { position: absolute; top: 52px; right: 0; width: 270px; max-width: 90vw; padding: 6px; border: 1px solid var(--vo-line); border-radius: 12px; background: var(--vo-card); }
+.vo3d-search-results a { display: block; padding: 12px; color: var(--vo-ink); }
+.projects-co-id-page h2 { margin-bottom: 1rem; }
+.projects-worker-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.projects-worker-facts dt { font-size: .85rem; color: var(--muted); }
+.projects-worker-facts dd { margin: .3rem 0 0; overflow-wrap: anywhere; }
+.projects-draft-row { padding: 1.25rem 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.projects-draft-row h3 { margin: 0 0 .5rem; }
+.projects-draft-row textarea { min-height: 12rem; }
+.projects-policy-fields { margin: 1rem 0; padding: 1rem; border: 1px solid var(--line); min-width: 0; }
+.projects-co-id-page .form-actions > .button { min-height: 44px; white-space: normal; }
+@media (max-width: 560px) {
+  .projects-worker-facts { grid-template-columns: 1fr; }
+  .projects-co-id-page .form-actions { align-items: stretch; }
+  .projects-co-id-page .form-actions > .button { flex: 1 1 100%; }
+}

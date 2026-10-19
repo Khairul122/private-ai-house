@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { AuditEvent, AutonomyPolicy, BidDraft, PipelineStatus, ProjectOpportunity } from '@fvh/domain';
+import { chooseProjectsCoIdBid, evaluatePolicy, PROJECTS_CO_ID_DEFAULTS, projectsCoIdDraftPolicy } from '@fvh/domain';
 import type { KnowledgeChunk, KnowledgeProvider } from '@fvh/knowledge';
 import { createDatabase, type Database, type Queryable } from './database.js';
 
@@ -151,14 +152,20 @@ export class WorkspaceRepository {
   }
 
   async syncFreelancerProjects(incoming: ProjectOpportunity[]) {
+    if (incoming.some(project => project.source !== 'freelancer')) throw new Error('Sumber proyek harus Freelancer.');
+    return this.syncProjects(incoming);
+  }
+
+  async syncProjects(incoming: ProjectOpportunity[]) {
     if (incoming.length === 0) return { upserted: 0 };
     const unique = [...new Map(incoming.map((project) => [project.id, project])).values()];
+    if (unique.some(p => !['freelancer', 'projects_co_id'].includes(p.source) || !p.id.startsWith(`${p.source}:`) || !/^[a-zA-Z0-9]+$/.test(p.id.slice(p.source.length + 1)))) throw new Error('Sumber atau ID proyek tidak valid.');
     await this.database.query(`
       INSERT INTO projects (id, platform, external_id, project_json, pipeline_status, score, score_factors_json, created_at)
-      SELECT id, 'freelancer', external_id, project_json, 'new', 0, '[]', created_at
-      FROM unnest($1::text[], $2::text[], $3::text[], $4::text[]) AS t(id, external_id, project_json, created_at)
+      SELECT id, platform, external_id, project_json, 'new', 0, '[]', created_at
+      FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[]) AS t(id, platform, external_id, project_json, created_at)
       ON CONFLICT (id) DO UPDATE SET project_json = excluded.project_json
-    `, [unique.map((p) => p.id), unique.map((p) => p.id.replace(/^freelancer:/, '')), unique.map((p) => JSON.stringify(p)), unique.map((p) => p.createdAt)]);
+    `, [unique.map(p => p.id), unique.map(p => p.source), unique.map(p => p.id.slice(p.source.length + 1)), unique.map(p => JSON.stringify(p)), unique.map(p => p.createdAt)]);
     return { upserted: incoming.length };
   }
 
@@ -181,6 +188,45 @@ export class WorkspaceRepository {
     await this.database.query('INSERT INTO bid_drafts (id, project_id, draft_json, created_at) VALUES ($1, $2, $3, $4)', [draft.id, draft.projectId, JSON.stringify(draft), draft.createdAt]);
     await this.setPipelineStatus(draft.projectId, 'draft_ready');
     return draft;
+  }
+
+  async createProjectsCoIdDraft(draft: BidDraft, policyVersion: number, automatic: boolean) {
+    return this.database.transaction(async tx => {
+      const [row] = await tx.query<{ policy_json: string }>('SELECT policy_json FROM autonomy_policies WHERE workspace_id = $1 FOR UPDATE', [WORKSPACE_ID]);
+      const policy = parseJson<AutonomyPolicy>(row!.policy_json);
+      const settings = policy.projectsCoId ?? PROJECTS_CO_ID_DEFAULTS;
+      if (policy.version !== policyVersion || settings.mode === 'off' || (automatic && settings.mode !== 'drafts')) throw new Error('Kebijakan berubah; draf tidak disimpan.');
+      const [stored] = await tx.query<{ project_json: string; pipeline_status: PipelineStatus }>('SELECT project_json, pipeline_status FROM projects WHERE id = $1 FOR UPDATE', [draft.projectId]);
+      if (!stored || !['new', 'scored'].includes(stored.pipeline_status) || (await tx.query('SELECT 1 FROM bid_drafts WHERE project_id = $1 LIMIT 1', [draft.projectId])).length) throw new Error('Proyek sudah diproses atau sudah memiliki draf.');
+      const project = parseJson<ProjectOpportunity>(stored.project_json);
+      const bid = chooseProjectsCoIdBid(project, settings);
+      if (!bid || draft.currency !== 'IDR' || draft.proposedPrice !== bid.amount || draft.durationDays !== bid.period) throw new Error('Harga atau durasi draf tidak sesuai kebijakan IDR.');
+      const now = new Date(draft.createdAt);
+      const usage = await this.bidUsage(now, policy.timezone, 'projects_co_id.draft_created', tx);
+      const decision = evaluatePolicy({ policy: projectsCoIdDraftPolicy(policy), project, action: 'bid.submit', capability: 'unknown', executionMode: 'simulated', confidence: draft.confidence, proposedPrice: draft.proposedPrice, dailyUsed: automatic ? usage.today : 0, weeklyUsed: automatic ? usage.week : 0, now });
+      if (!decision.allowed) throw new Error(decision.reason);
+      await tx.query('INSERT INTO bid_drafts (id, project_id, draft_json, created_at) VALUES ($1, $2, $3, $4)', [draft.id, draft.projectId, JSON.stringify(draft), draft.createdAt]);
+      await tx.query("UPDATE projects SET pipeline_status = 'draft_ready' WHERE id = $1", [draft.projectId]);
+      await tx.query(`INSERT INTO audit_events (id, type, resource_id, status, reason, policy_version, payload_hash, created_at)
+        VALUES ($1, $2, $3, 'recorded', $4, $5, NULL, $6)`,
+      [randomUUID(), automatic ? 'projects_co_id.draft_created' : 'projects_co_id.manual_draft_created', draft.projectId, 'Draf lokal dibuat; pemilik mengirim sendiri di situs.', policy.version, draft.createdAt]);
+      return draft;
+    });
+  }
+
+  async markProjectsCoIdProject(id: string, action: 'mark-sent' | 'skip') {
+    return this.database.transaction(async tx => {
+      const [row] = await tx.query<{ pipeline_status: PipelineStatus }>("SELECT pipeline_status FROM projects WHERE id = $1 AND platform = 'projects_co_id' FOR UPDATE", [id]);
+      if (!row) throw new Error('Proyek projects.co.id tidak ditemukan.');
+      const target = action === 'mark-sent' ? 'submitted' : 'skipped';
+      if (row.pipeline_status === target) return;
+      if (['submitted', 'skipped'].includes(row.pipeline_status)) throw new Error('Proyek sudah ditandai selesai.');
+      if (action === 'mark-sent' && !(await tx.query('SELECT 1 FROM bid_drafts WHERE project_id = $1 LIMIT 1', [id])).length) throw new Error('Buat draf sebelum menandai terkirim.');
+      await tx.query('UPDATE projects SET pipeline_status = $1 WHERE id = $2', [target, id]);
+      await tx.query(`INSERT INTO audit_events (id, type, resource_id, status, reason, policy_version, payload_hash, created_at)
+        VALUES ($1, $2, $3, 'recorded', $4, NULL, NULL, $5)`,
+      [randomUUID(), action === 'mark-sent' ? 'projects_co_id.owner_marked_sent' : 'projects_co_id.owner_skipped', id, action === 'mark-sent' ? 'Ditandai terkirim oleh pemilik; tidak diverifikasi aplikasi' : 'Dilewati oleh pemilik.', new Date().toISOString()]);
+    });
   }
 
   /** Newest draft of every project in one query (avoids a round trip per project against the remote database). */
@@ -261,13 +307,13 @@ export class WorkspaceRepository {
     return camel<AuditEvent>(await this.database.query('SELECT id, type, resource_id, status, reason, policy_version, payload_hash, created_at FROM audit_events WHERE type = $1 ORDER BY created_at DESC LIMIT $2', [type, limit]));
   }
 
-  async bidUsage(now: Date, timezone: string): Promise<{ today: number; week: number }> {
-    const rows = await this.database.query<{ today: number; week: number }>(`
+  async bidUsage(now: Date, timezone: string, type: 'marketplace.production.submit_bid' | 'projects_co_id.draft_created' = 'marketplace.production.submit_bid', database: Queryable = this.database): Promise<{ today: number; week: number }> {
+    const rows = await database.query<{ today: number; week: number }>(`
       SELECT COUNT(*) FILTER (WHERE local_day = ($1::timestamptz AT TIME ZONE $2)::date)::int AS today,
         COUNT(*) FILTER (WHERE date_trunc('week', local_day) = date_trunc('week', $1::timestamptz AT TIME ZONE $2))::int AS week
       FROM (SELECT (created_at::timestamptz AT TIME ZONE $2)::date AS local_day FROM audit_events
-        WHERE type = 'marketplace.production.submit_bid' AND status = 'recorded' AND created_at >= $3 AND created_at <= $1) bids`,
-    [now.toISOString(), timezone, new Date(now.getTime() - 9 * 86_400_000).toISOString()]);
+        WHERE type = $4 AND status = 'recorded' AND created_at >= $3 AND created_at <= $1) bids`,
+    [now.toISOString(), timezone, new Date(now.getTime() - 9 * 86_400_000).toISOString(), type]);
     return rows[0] ?? { today: 0, week: 0 };
   }
 

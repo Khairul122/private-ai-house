@@ -28,6 +28,15 @@ function resultEvent(value: unknown) {
 }
 
 describe('HermesCliDraftingAdapter', () => {
+  it('requests Indonesian proposals for projects.co.id regardless of client country', async () => {
+    const runner: ProcessRunner = async (_command, args) => {
+      const prompt = await readFile(args[args.indexOf('--query-file') + 1]!, 'utf8');
+      expect(prompt).toContain('hanya dalam Bahasa Indonesia');
+      return { stdout: resultEvent(output), stderr: '', exitCode: 0 };
+    };
+    const adapter = new HermesCliDraftingAdapter({ executable: 'hermes.exe', profile: 'private-ai-house', workspaceRoot: 'D:/private-ai-house', runner });
+    await adapter.draftBid({ ...input, project: { ...input.project, source: 'projects_co_id', clientCountry: 'US' } });
+  });
   it('rejects invented or private portfolio links and keeps manager reviews tool-free',async()=>{
     const bad:ProcessRunner=async()=>({stdout:resultEvent({...output,proposal:`${output.proposal} Portfolio https://example.com/invented`}),stderr:'',exitCode:0});
     const adapter=new HermesCliDraftingAdapter({executable:'hermes.exe',profile:'private-ai-house',workspaceRoot:'D:/private-ai-house',runner:bad});
