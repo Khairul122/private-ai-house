@@ -133,9 +133,9 @@ try {
   ownerTab.once('dialog', dialog => dialog.accept());
   if (!process.argv.includes('--ui-only')) await card.getByText('Ditulis Hermes (Lead Agent)', { exact: true }).waitFor();
   // Field filter: fixture briefs are TypeScript only, so the AI field must hide every row.
-  await ownerTab.getByLabel('Bidang', { exact: true }).selectOption('ai');
+  await ownerTab.getByLabel(/^Bidang/).selectOption('ai');
   await ownerTab.getByText(/Tidak ada proyek sesuai filter/).waitFor();
-  await ownerTab.getByLabel('Bidang', { exact: true }).selectOption('all');
+  await ownerTab.getByLabel(/^Bidang/).selectOption('all');
   await card.getByRole('button', { name: 'Sudah saya kirim' }).click();
   await card.waitFor({ state: 'detached' });
   await ownerTab.getByRole('button', { name: /Ditandai terkirim/ }).click();
@@ -169,7 +169,7 @@ try {
   await ownerTab.getByRole('button', { name: 'Hubungkan Chrome saya' }).click();
   await ownerTab.getByRole('button', { name: 'Periksa akun' }).click();
   await ownerTab.getByRole('button', { name: 'Pindai sekarang' }).click();
-  await ownerTab.getByLabel('Tahap', { exact: true }).selectOption('all');
+  await ownerTab.getByLabel(/^Tahap/).selectOption('all');
   const manual = ownerTab.locator('.projects-draft-row').filter({ has: ownerTab.getByRole('heading', { name: 'DATA UJI aa0004', exact: true }) });
   await manual.getByRole('button', { name: 'Buat draf' }).click();
   await manual.getByRole('textbox').waitFor();

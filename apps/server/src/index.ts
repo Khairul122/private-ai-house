@@ -21,7 +21,7 @@ import { DpapiIntegrationVault } from './integration-vault.js';
 import { WhatsAppService } from './whatsapp.js';
 import { GoogleCalendarService } from './google-calendar.js';
 import { PublicPortfolioResolver } from './portfolio.js';
-import { BrowserBiddingService } from './browser-bidding.js';
+import { BrowserBiddingService, SharedChromeSession } from './browser-bidding.js';
 import { ProjectsCoIdService } from './projects-co-id.js';
 
 function findProjectRoot(start: string): string {
@@ -87,12 +87,14 @@ const drafting = hermesEnabled ? new HermesCliDraftingAdapter({
   timeoutMs: 180_000,
 }) : undefined;
 const portfolio = new PublicPortfolioResolver();
-const projectsCoId = new ProjectsCoIdService(repository, undefined, undefined, drafting ? input => drafting.draftBid(input) : undefined);
+// Both Chrome workers share one CDP connection so the owner approves Chrome's dialog once.
+const chrome = new SharedChromeSession();
+const projectsCoId = new ProjectsCoIdService(repository, () => chrome.acquire(), undefined, drafting ? input => drafting.draftBid(input) : undefined);
 const browserBidding = new BrowserBiddingService(dataDirectory,async()=>{
   const account=await (await createFreelancerReader()).readOwnProfile();
   if(!account.username) throw new Error('Username API belum tersedia.');
   return {id:account.id,username:account.username};
-});
+},()=>chrome.acquire());
 const autopilot = new FreelancerAutopilot({
   bidTransportReady:()=>browserBidding.readiness(),
   guardedSubmitBid:(input,authorize)=>browserBidding.submit(input,authorize,async()=>new FreelancerProductionWriteAdapter({token:await getFreelancerToken()}).run(input)),

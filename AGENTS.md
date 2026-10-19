@@ -95,7 +95,7 @@ Nama paket npm: `@fvh/<nama>`. Semua paket diekspor langsung dari `src/index.ts`
 3. **`FreelancerAutopilot`** (`autopilot.ts`): siklus tiap 15 menit.
 4. **`BusinessSync`** (`business-sync.ts`): tiap 10 menit, **read-only**, jalan terlepas dari status kebijakan: cek hasil bid lalu baca pesan klien.
 5. **`createApp`** (`app.ts`): semua route, hook keamanan, header CSP.
-6. **`ProjectsCoIdService`** (`projects-co-id.ts`): worker Chrome read-only, maksimum tiga halaman tiap 30 menit; mode `off/scan-only/drafts`. Hermes membuat draf Bahasa Indonesia dengan harga IDR deterministik; pemilik mengirim sendiri. Baca `docs/projects-co-id.md` sebelum mengubah worker, guard proposal, kuota atau penandaan sumber ini. Tidak ada mode submit.
+6. **`ProjectsCoIdService`** (`projects-co-id.ts`): worker Chrome read-only, maksimum tiga halaman tiap 30 menit; mode `off/scan-only/drafts`. Pencarian dari bidang (`PROJECTS_CO_ID_FIELDS`, termasuk AI), kata kunci dan skill profil di Kebijakan; tiga pencarian per scan, bergiliran. Hermes membuat draf Bahasa Indonesia dengan harga IDR deterministik dan `author` tercatat; pemilik mengirim sendiri. Baca `docs/projects-co-id.md` sebelum mengubah worker, guard proposal, kuota atau penandaan sumber ini. Tidak ada mode submit.
 
 ### 5.1 Siklus autopilot
 1. `start()`: baca profil Freelancer; **isi profil lokal dari Freelancer hanya sekali** (saat `specializations` lokal kosong). Bootstrap kebijakan bila belum aktif (kecuali dijeda).
@@ -138,7 +138,7 @@ Koneksi: `DATABASE_URL` (Session pooler Supabase, port 5432) dibaca dari `.env` 
 
 Pipeline status: `new, scored, draft_ready, policy_check, submitted, in_conversation, won, lost, skipped, expired, reconciliation_required, error`. `submitted` **hanya** diset setelah HTTP 200 dari Freelancer.
 
-Pengecualian pemilik 19 Oktober 2026: proyek `projects_co_id` boleh `submitted` setelah pemilik mengonfirmasi “Sudah saya kirim”. Audit `projects_co_id.owner_marked_sent`: “Ditandai terkirim oleh pemilik; tidak diverifikasi aplikasi”. UI selalu “Ditandai terkirim oleh Anda”. Tidak masuk `bid_results`, BusinessSync atau hitungan bid terkonfirmasi Freelancer. ID publik enam digit heksadesimal dan slug tervalidasi disimpan di JSON proyek; tidak perlu migrasi. Batas draf otomatis dihitung dari `projects_co_id.draft_created` dalam zona waktu kebijakan.
+Pengecualian pemilik 19 Oktober 2026: proyek `projects_co_id` boleh `submitted` setelah pemilik mengonfirmasi “Sudah saya kirim”. Audit `projects_co_id.owner_marked_sent`: “Ditandai terkirim oleh pemilik; tidak diverifikasi aplikasi”. UI selalu “Ditandai terkirim oleh Anda”. Tidak masuk `bid_results`, BusinessSync atau hitungan bid terkonfirmasi Freelancer. “Saya menang” (hanya dari `submitted`) memindah pipeline ke `won` dan membuat `client_projects` sumber `projects_co_id` bernilai draf IDR, audit `projects_co_id.owner_marked_won`, satu transaksi. ID publik enam digit heksadesimal dan slug tervalidasi disimpan di JSON proyek; tidak perlu migrasi. Batas draf otomatis dihitung dari `projects_co_id.draft_created` dalam zona waktu kebijakan.
 
 ---
 
@@ -149,7 +149,7 @@ Pengecualian pemilik 19 Oktober 2026: proyek `projects_co_id` boleh `submitted` 
 | `GET /api/health` | Mode, status AI (`ai: hermes/disabled`), autopilot |
 | `GET /api/autopilot` | `state, lastRunAt, nextRunAt, lastMessage, cycleInProgress, draftsInProgress, …` |
 | `GET /api/browser-bidding` · `PUT /api/browser-bidding/mode` · `POST /api/browser-bidding/open` · `/check` · `/close` | Worker Playwright tersambung ke Chrome berprofil pemilik melalui izin debugging; mode API, fallback 401/403/429, atau browser. Tidak ada submit bebas. Baca `docs/browser-bidding.md`. |
-| `GET /api/projects-co-id` · `/drafts` · `PUT /mode` · `POST /open`, `/check`, `/close`, `/scan` · `POST /projects/:id/draft`, `/mark-sent`, `/skip` | Prefix semua route `/api/projects-co-id`. Worker read-only; aksi penandaan memerlukan `confirm: true`. Tidak menerima URL/selector/skrip atau submit bebas. |
+| `GET /api/projects-co-id` · `/drafts` · `PUT /mode` · `POST /open`, `/check`, `/close`, `/scan` · `POST /projects/:id/draft`, `/mark-sent`, `/skip`, `/won` | Prefix semua route `/api/projects-co-id`. Worker read-only; aksi penandaan memerlukan `confirm: true`. Tidak menerima URL/selector/skrip atau submit bebas. |
 | `GET /api/business-sync` | Status BusinessSync (null jika tidak tersedia) |
 | `GET /api/dashboard` | Hitungan, kebijakan, `bidUsage {today, week}` (zona waktu kebijakan), `externalWrites` |
 | `GET /api/insights/bids` | Hasil bid (`winRate` null bila belum ada keputusan), alasan skip, waktu cek terakhir |
@@ -178,7 +178,7 @@ Error validasi mengembalikan `{ error, issues[] }`; klien web (`api.ts`) menempe
 | `office-state.ts` | **Aturan status agen** (`deriveOfficeAgents`), label & warna status, `ROSTER` |
 | `office-layout.ts` | Denah: pod, zona, kursi/slot, `planPath` (rute koridor), `BOARDS`, `dayPhase` |
 | `api.ts` | Klien fetch + tipe respons |
-| `ProjectsCoIdPage.tsx`, `projects-co-id-api.ts` | Kartu khusus worker, penyuntingan/clipboard draf, penandaan pemilik dan riwayat projects.co.id |
+| `ProjectsCoIdPage.tsx`, `projects-co-id-api.ts` | Kartu khusus: status, pencarian aktif, ringkasan per tahap, filter tahap/bidang/penulis/urutan, detail proyek, draf, penandaan terkirim/menang/lewati. Peluang, Pipeline, Papan Tugas dan Aktivitas punya filter `?source=projects_co_id`; Kalender menampilkan penutupan listing (`closesAt`). |
 | `styles.css` | Gaya lama halaman + blok `.vo3d*` (overlay 3D, kartu). Gaya sidebar/topbar lama masih ada tapi tak terpakai |
 
 ### 8.1 Navigasi

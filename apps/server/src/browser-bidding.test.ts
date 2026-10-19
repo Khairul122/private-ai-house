@@ -7,7 +7,7 @@ import { FreelancerWriteError } from '@fvh/adapter-freelancer';
 const fixture = vi.hoisted(() => ({ inspect: vi.fn(), submit: vi.fn(), connect: vi.fn() }));
 vi.mock('./browser-bid-page.js', () => ({ FreelancerBrowserPage: class { inspect = fixture.inspect; submit = fixture.submit; } }));
 vi.mock('playwright-core', () => ({ chromium: { connectOverCDP: fixture.connect } }));
-import { BrowserBiddingService, connectExistingChrome } from './browser-bidding.js';
+import { BrowserBiddingService, connectExistingChrome, SharedChromeSession } from './browser-bidding.js';
 const input = { operation: 'submit_bid' as const, projectId: 71, amount: 100, period: 14, milestonePercentage: 100, description: 'Proposal test' };
 describe('browser bidding service', () => {
   let service: BrowserBiddingService; let directory: string;
@@ -35,6 +35,28 @@ describe('browser bidding service', () => {
     expect(fixture.connect).toHaveBeenCalledWith('chrome', { noDefaults: true, timeout: 15_000 });
     expect(network.send).toHaveBeenCalledWith('Network.setBypassServiceWorker', { bypass: true });
     await connection.disconnect(); expect(page.close).toHaveBeenCalledOnce(); expect(browser.close).toHaveBeenCalledOnce(); expect(userTab.close).not.toHaveBeenCalled();
+  });
+  it('shares one Chrome connection across workers and disconnects only after the last worker leaves', async () => {
+    const pages = [0, 1].map(() => ({ close: vi.fn(async () => undefined), on: vi.fn() }));
+    const newPage = vi.fn().mockResolvedValueOnce(pages[0]).mockResolvedValueOnce(pages[1]);
+    const browser = { contexts: () => [{ newPage, newCDPSession: vi.fn(async () => ({ send: vi.fn(async () => undefined) })) }], close: vi.fn(async () => undefined), on: vi.fn() };
+    const connect = vi.fn(async () => browser as never);
+    const session = new SharedChromeSession(connect);
+    const [first, second] = await Promise.all([session.acquire(), session.acquire()]);
+    expect(connect).toHaveBeenCalledOnce(); expect(first.page).not.toBe(second.page);
+    await first.disconnect(); await first.disconnect();
+    expect(pages[0]!.close).toHaveBeenCalled(); expect(browser.close).not.toHaveBeenCalled();
+    await second.disconnect(); expect(browser.close).toHaveBeenCalledOnce();
+    connect.mockRejectedValueOnce(new Error('Owner cancelled'));
+    await expect(session.acquire()).rejects.toThrow('Owner cancelled');
+    newPage.mockResolvedValue(pages[0]); await session.acquire(); expect(connect).toHaveBeenCalledTimes(3);
+  });
+  it('auto-connects once per server launch, not again after a file-watch restart', async () => {
+    await writeFile(join(directory, 'browser-bid-settings.json'), JSON.stringify({ mode: 'api-fallback', autoStart: true, connection: 'existing-chrome' }));
+    await service.restore(111); expect(fixture.inspect).toHaveBeenCalledTimes(1); await service.close();
+    const restarted = new BrowserBiddingService(directory, async () => ({ id: '42', username: 'owner-fixture' }), async () => ({ page: { setDefaultTimeout: vi.fn() } as unknown as Page, onDisconnect: vi.fn(), disconnect: vi.fn(async () => undefined) }));
+    await restarted.restore(111); expect(fixture.inspect).toHaveBeenCalledTimes(1); expect(restarted.status().state).toBe('stopped');
+    await restarted.restore(222); expect(fixture.inspect).toHaveBeenCalledTimes(2); await restarted.close();
   });
   it('reports actual account and quota and blocks mismatched identities', async () => {
     await service.open(); expect(service.status()).toMatchObject({ state: 'ready', remaining: 3, pageStatus: 200 });

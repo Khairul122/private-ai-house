@@ -8,6 +8,14 @@ Mode awal `scan-only`; `drafts` memindai dan membuat draf otomatis, `off` menghe
 
 Sunting lalu Simpan proposal, Salin proposal, Buka di projects.co.id dan kirim sendiri. “Sudah saya kirim” memerlukan konfirmasi dan tampil sebagai **Ditandai terkirim oleh Anda**, tidak diverifikasi aplikasi. “Lewati” menghentikan pembuatan draf untuk proyek tersebut. Tidak ada mode kirim, pengisian form, pembelian upgrade atau otomatisasi pesan.
 
+## Pencarian, kartu dan integrasi (19 Oktober 2026, revisi)
+
+- Kebijakan → projects.co.id: bidang (AI & Machine Learning, Website, Mobile, Backend & API, Data, Bot & Otomasi, UI/UX), kata kunci tambahan (maks 20, huruf/angka/spasi/. + # / -), pakai spesialisasi Profil, skor minimum draf (menggantikan skor minimum Freelancer untuk sumber ini). Kebijakan lama tanpa kunci ini dibaca dengan nilai bawaan (`projectsCoIdSettings`).
+- Istilah = bidang → kata kunci → skill profil, tanpa duplikat. Scan membuka `listing?search=<istilah>` halaman 1 untuk tiga istilah, lalu tiga berikutnya pada scan berikutnya; tanpa istilah tetap membaca tiga halaman daftar terbaru. Audit `scan_completed` menyebut istilah yang dipakai.
+- Draf baru mencatat `author`: `hermes` atau `template` (fallback). Draf lama tampil "Penulis tidak tercatat".
+- Kartu: status worker, pencarian aktif (istilah scan terakhir ditandai), ringkasan per tahap yang juga menjadi filter, filter bidang/penulis/urutan/cari, detail anggaran, harga draf, penutupan listing, brief, alasan skor, dan tautan ke Pipeline/Papan tugas/Aktivitas. `/projects-co-id?project=<id>` menyorot satu proyek (dipakai Kalender dan Pipeline).
+- “Saya menang” hanya setelah ditandai terkirim; membuat proyek aktif IDR di Proyek & Pendapatan. Tidak diverifikasi aplikasi.
+
 ## Recon 19 Oktober 2026
 
 Recon read-only berhasil melalui `connectOverCDP('chrome', { noDefaults: true })` pada Chrome pemilik. Tepat satu tautan berteks `Logged in as KhairulHuda06` dengan pathname `/user/home` teramati. HTTP `127.0.0.1:9222/json/version` mengembalikan 404; mekanisme Chrome aplikasi berhasil. Tidak ada form bid dibuka atau request tulis dilepas.

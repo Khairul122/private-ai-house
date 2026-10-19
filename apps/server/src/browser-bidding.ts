@@ -10,8 +10,38 @@ export function canFallbackToBrowser(error: unknown): boolean {
 }
 
 export type BrowserBidConnection = { page: Page; disconnect: () => Promise<void>; onDisconnect: (listener: () => void) => void };
-export async function connectExistingChrome(connect: () => Promise<Browser> = () => chromium.connectOverCDP('chrome', { noDefaults: true, timeout: 15_000 })): Promise<BrowserBidConnection> {
+const connectChrome = () => chromium.connectOverCDP('chrome', { noDefaults: true, timeout: 15_000 });
+export async function connectExistingChrome(connect: () => Promise<Browser> = connectChrome): Promise<BrowserBidConnection> {
   const browser = await connect();
+  return openWorkerTab(browser, () => browser.close());
+}
+
+/**
+ * One CDP connection for every worker. Chrome 144+ asks the owner to approve each new connection,
+ * so workers share it and only open their own tab; the connection closes when the last worker leaves.
+ */
+export class SharedChromeSession {
+  private browser: Promise<Browser> | null = null;
+  private users = 0;
+  constructor(private connect: () => Promise<Browser> = connectChrome) {}
+  async acquire(): Promise<BrowserBidConnection> {
+    const pending = this.browser ?? (this.browser = this.connect().then(browser => {
+      browser.on('disconnected', () => { if (this.browser === pending) { this.browser = null; this.users = 0; } });
+      return browser;
+    }, error => { if (this.browser === pending) this.browser = null; throw error; }));
+    const browser = await pending;
+    this.users++;
+    let released = false;
+    const release = async () => {
+      if (released) return; released = true;
+      if (this.browser !== pending) return;
+      if (--this.users === 0) { this.browser = null; await browser.close().catch(() => undefined); }
+    };
+    return openWorkerTab(browser, release);
+  }
+}
+
+async function openWorkerTab(browser: Browser, release: () => Promise<void>): Promise<BrowserBidConnection> {
   let workerPage: Page | undefined;
   try {
     const context = browser.contexts()[0];
@@ -23,10 +53,10 @@ export async function connectExistingChrome(connect: () => Promise<Browser> = ()
     await network.send('Network.setBypassServiceWorker', { bypass: true });
     return {
       page,
-      disconnect: async () => { await page.close().catch(() => undefined); await browser.close().catch(() => undefined); },
+      disconnect: async () => { await page.close().catch(() => undefined); await release().catch(() => undefined); },
       onDisconnect: listener => { browser.on('disconnected', listener); page.on('close', listener); },
     };
-  } catch (error) { await workerPage?.close().catch(() => undefined); await browser.close().catch(() => undefined); throw error; }
+  } catch (error) { await workerPage?.close().catch(() => undefined); await release().catch(() => undefined); throw error; }
 }
 
 export class BrowserBiddingService {
@@ -35,6 +65,8 @@ export class BrowserBiddingService {
   private opening: Promise<void> | null = null;
   private generation = 0;
   private autoStart = false;
+  /** Launcher pid (the tsx watch process in dev) that last auto-connected; watch restarts keep the same one. */
+  private autoStartedFor: number | null = null;
   private writes = Promise.resolve();
   private timer: ReturnType<typeof setInterval> | undefined;
   private current: BrowserBidStatus = { mode: 'api', state: 'stopped', busy: false, reason: 'Belum tersambung ke Chrome berprofil Anda.', username: null, remaining: null, checkedAt: null, pageStatus: null, lastRunAt: null, lastResult: null };
@@ -44,7 +76,7 @@ export class BrowserBiddingService {
     return old && !this.current.busy && this.current.state === 'ready' ? { ...this.current, state: 'error', reason: 'Status browser sudah lama. Periksa kembali sebelum pengiriman.' } : { ...this.current };
   }
   private persist() {
-    const data = JSON.stringify({ mode: this.current.mode, autoStart: this.autoStart, connection: 'existing-chrome' });
+    const data = JSON.stringify({ mode: this.current.mode, autoStart: this.autoStart, connection: 'existing-chrome', autoStartedFor: this.autoStartedFor });
     const next = this.writes.catch(() => undefined).then(async () => {
       await mkdir(this.directory, { recursive: true });
       const file = join(this.directory, 'browser-bid-settings.json');
@@ -54,13 +86,21 @@ export class BrowserBiddingService {
     this.writes = next;
     return next;
   }
-  async restore() {
+  async restore(launcher = process.ppid) {
     const saved: unknown = await readFile(join(this.directory, 'browser-bid-settings.json'), 'utf8').then(s => JSON.parse(s)).catch(() => null);
     if (saved && typeof saved === 'object' && 'mode' in saved && ['api', 'api-fallback', 'browser'].includes(String(saved.mode))) {
       this.current.mode = saved.mode as BrowserBidMode;
       this.autoStart = 'autoStart' in saved && saved.autoStart === true && 'connection' in saved && saved.connection === 'existing-chrome';
+      this.autoStartedFor = 'autoStartedFor' in saved && typeof saved.autoStartedFor === 'number' ? saved.autoStartedFor : null;
     }
-    if (this.autoStart) await this.open().catch(() => undefined);
+    // Ask Chrome once per real server launch, not on every file-watch restart (each ask is an approval dialog).
+    if (!this.autoStart || this.autoStartedFor === launcher) {
+      if (this.autoStart) this.current.reason = 'Sambungan otomatis sudah dicoba saat server dijalankan. Klik Hubungkan Chrome saya bila diperlukan.';
+      return;
+    }
+    this.autoStartedFor = launcher;
+    await this.persist().catch(() => undefined);
+    await this.open().catch(() => undefined);
   }
   async setMode(mode: BrowserBidMode) {
     if (this.current.busy) throw new BrowserBidError('busy', 'Tunggu proses browser selesai sebelum mengganti jalur.');
