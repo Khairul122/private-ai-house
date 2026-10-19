@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FreelancerWriteError } from '@fvh/adapter-freelancer';
-import { canFallbackToBrowser } from './browser-bidding.js';
+import { canFallbackToBrowser } from '../services/browser-bidding.js';
 import { confirmedBrowserBid, isBidEndpoint, matchesBrowserBid, readRemainingBids } from './browser-bid-types.js';
 const input = { operation: 'submit_bid' as const, projectId: 71, amount: 100, period: 14, milestonePercentage: 100, description: 'Proposal fixture' };
 const identity = { id: '42', username: 'owner-fixture' };

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { LIFT, liftDoorReached, OWNER_SPOT, PODS, spotsFor, type P2, type Spot } from './office-layout.js';
 import { deriveOfficeAgents } from './office-state.js';
-import type { Autopilot } from './api.js';
+import type { Autopilot } from '../api/api.js';
 import { createOwnerMotion, ownerCanStand, ownerCanWalk, ownerVisitDestination, planOwnerPath, setOwnerDestination, stepOwnerMotion, stopOwnerMotion } from './owner-motion.js';
 
 const idle = { up: false, down: false, left: false, right: false };

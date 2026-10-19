@@ -1,7 +1,7 @@
 import makeWASocket, { BufferJSON, DisconnectReason, initAuthCreds, proto, type AuthenticationCreds, type AuthenticationState, type SignalDataTypeMap, type WASocket } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import QRCode from 'qrcode';
-import type { IntegrationVault } from './integration-vault.js';
+import type { IntegrationVault } from '../lib/integration-vault.js';
 
 export class WhatsAppService {
   private socket: WASocket | null = null;

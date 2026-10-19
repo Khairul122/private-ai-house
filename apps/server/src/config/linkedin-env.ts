@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseEnv } from 'node:util';
-import type { LinkedInClientCredentials } from './credential-store.js';
+import type { LinkedInClientCredentials } from '../lib/credential-store.js';
 
 export type LinkedInEnvironmentCredentials = {
   declared: boolean;

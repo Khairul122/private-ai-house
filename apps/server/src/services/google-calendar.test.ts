@@ -1,7 +1,7 @@
 import {afterEach,describe,it,expect,vi} from 'vitest';
 import {WorkspaceRepository,OperationsRepository} from '@fvh/persistence';
 import type {OwnerTask} from '@fvh/domain';
-import type {IntegrationVault,VaultKey} from './integration-vault.js';
+import type {IntegrationVault,VaultKey} from '../lib/integration-vault.js';
 import {GoogleCalendarService} from './google-calendar.js';
 class MemoryVault implements IntegrationVault {values=new Map<VaultKey,string>();async read(key:VaultKey){return this.values.get(key)||null;}async write(key:VaultKey,value:string){this.values.set(key,value);}}
 describe('Google Calendar',()=>{

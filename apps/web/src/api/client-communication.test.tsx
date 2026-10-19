@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import ClientWhatsAppCard from './ClientWhatsAppCard.js';
+import ClientWhatsAppCard from '../components/ClientWhatsAppCard.js';
 import { normalizeWhatsAppPhone, saveClientCommunication, type CommunicationInput } from './client-communication.js';
 import type { ClientProject } from './api.js';
 

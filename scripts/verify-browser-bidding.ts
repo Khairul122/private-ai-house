@@ -5,8 +5,8 @@ import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { BrowserType } from '../apps/server/node_modules/playwright-core/index.js';
-import { FreelancerBrowserPage } from '../apps/server/src/browser-bid-page.js';
-import { connectExistingChrome } from '../apps/server/src/browser-bidding.js';
+import { FreelancerBrowserPage } from '../apps/server/src/lib/browser-bid-page.js';
+import { connectExistingChrome } from '../apps/server/src/services/browser-bidding.js';
 
 const require = createRequire(new URL('../apps/server/package.json', import.meta.url));
 const { chromium } = require('playwright-core') as { chromium: BrowserType };

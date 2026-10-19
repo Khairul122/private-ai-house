@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { WorkspaceRepository } from '@fvh/persistence';
-import { createApp } from './app.js';
+import { createApp } from '../app.js';
 import { HermesKanban, type HermesKanbanRunner } from './hermes-kanban.js';
-import { insertTestOpportunity } from './test-fixtures.js';
+import { insertTestOpportunity } from '../test-fixtures.js';
 
 const list = JSON.stringify([{ id: 't_aa11bb22', title: 'Rencana bid', assignee: 'fvh-chief-of-staff', status: 'running', created_by: 'mission-control', created_at: 1792424383, started_at: 1792424392, completed_at: null, last_failure_error: null }]);
 const assignees = JSON.stringify([{ name: 'default' }, { name: 'fvh-market-scout' }, { name: 'fvh-chief-of-staff' }, { name: 'fvh-qa-engineer' }, { name: 'private-ai-house' }]);

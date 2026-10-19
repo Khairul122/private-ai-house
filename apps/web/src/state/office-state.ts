@@ -1,9 +1,9 @@
-import type { AuditEvent, Autopilot, BusinessSyncStatus } from './api.js';
+import type { AuditEvent, Autopilot, BusinessSyncStatus } from '../api/api.js';
 import { OPERATIONS_ROSTER } from '@fvh/domain';
-import type { OperationsData } from './operations-api.js';
-import type { BrowserBiddingStatus } from './browser-bidding-api.js';
-import type { ProjectsCoIdStatus } from './projects-co-id-api.js';
-import type { HermesKanbanStatus } from '../../server/src/hermes-kanban-types.js';
+import type { OperationsData } from '../api/operations-api.js';
+import type { BrowserBiddingStatus } from '../api/browser-bidding-api.js';
+import type { ProjectsCoIdStatus } from '../api/projects-co-id-api.js';
+import type { HermesKanbanStatus } from '../../../server/src/models/hermes-kanban-types.js';
 
 export type AgentState = 'working' | 'reviewing' | 'collaborating' | 'idle' | 'offline' | 'unknown';
 // Lobby is the neutral spot for agents whose state cannot be determined.

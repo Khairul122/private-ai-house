@@ -1,6 +1,6 @@
 import {afterEach,describe,it,expect} from 'vitest';
 import type {FastifyInstance} from 'fastify';
-import {createApp} from './app.js';
+import {createApp} from '../app.js';
 import {WorkspaceRepository} from '@fvh/persistence';
 describe('operations API',()=>{
   let app:FastifyInstance;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Autopilot } from './api.js';
+import type { Autopilot } from '../api/api.js';
 import { BOARD_SIZE, BOARDS, dayPhase, FLOOR, planPath, spotsFor, SPINE_X } from './office-layout.js';
 import { deriveOfficeAgents, ROSTER } from './office-state.js';
 

@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
 import { PROJECTS_CO_ID_FIELDS, projectsCoIdFieldsOf, projectsCoIdSettings } from '@fvh/domain';
-import { api, jsonRequest, type Policy } from './api.js';
-import type { ProjectsCoIdEntry, ProjectsCoIdStatus } from './projects-co-id-api.js';
+import { api, jsonRequest, type Policy } from '../api/api.js';
+import type { ProjectsCoIdEntry, ProjectsCoIdStatus } from '../api/projects-co-id-api.js';
 
 const rupiah = (amount: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(amount);
 const date = (value: string | null | undefined) => value ? new Date(value).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) : 'Belum pernah';

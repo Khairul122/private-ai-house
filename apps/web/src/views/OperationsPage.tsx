@@ -2,12 +2,12 @@ import { useState, type FormEvent } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { currencyDigits, invoiceBalance, OPERATIONS_ROSTER, toMinor } from '@fvh/domain';
-import { api, jsonRequest } from './api.js';
-import type { OperationsData } from './operations-api.js';
-import ClientWhatsAppCard from './ClientWhatsAppCard.js';
-import BrowserBiddingCard from './BrowserBiddingCard.js';
-import WhatsAppStatus from './WhatsAppStatus.js';
-import { checkWhatsAppStatus } from './whatsapp-status.js';
+import { api, jsonRequest } from '../api/api.js';
+import type { OperationsData } from '../api/operations-api.js';
+import ClientWhatsAppCard from '../components/ClientWhatsAppCard.js';
+import BrowserBiddingCard from '../components/BrowserBiddingCard.js';
+import WhatsAppStatus from '../components/WhatsAppStatus.js';
+import { checkWhatsAppStatus } from '../api/whatsapp-status.js';
 
 const TABS=['Klien & progres','Invoice','Jadwal pemilik','WhatsApp','Google Calendar','Laporan tim','Bid browser'] as const;
 const money=(n:number,c:string)=>new Intl.NumberFormat('id-ID',{style:'currency',currency:c,minimumFractionDigits:0,maximumFractionDigits:currencyDigits(c)}).format(n);

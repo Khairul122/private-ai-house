@@ -3,9 +3,9 @@ import { projectsCoIdSettingsSchema, proposalDraftOutputSchema } from '@fvh/cont
 import { createId, type DraftingInput, type DraftingOutput } from '@fvh/application';
 import type { WorkspaceRepository } from '@fvh/persistence';
 import { connectExistingChrome, type BrowserBidConnection } from './browser-bidding.js';
-import { BrowserBidError } from './browser-bid-types.js';
-import { ProjectsCoIdPage } from './projects-co-id-page.js';
-import { validProjectsCoIdProposal, projectsCoIdPath, PROJECTS_CO_ID_ORIGIN, PROJECTS_CO_ID_AUTO_REASON, type ProjectsCoIdStatus } from './projects-co-id-types.js';
+import { BrowserBidError } from '../models/browser-bid-types.js';
+import { ProjectsCoIdPage } from '../lib/projects-co-id-page.js';
+import { validProjectsCoIdProposal, projectsCoIdPath, PROJECTS_CO_ID_ORIGIN, PROJECTS_CO_ID_AUTO_REASON, type ProjectsCoIdStatus } from '../models/projects-co-id-types.js';
 
 export class ProjectsCoIdService {
   private connection: BrowserBidConnection | null = null;

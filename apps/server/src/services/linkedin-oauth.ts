@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import type { LinkedInClientCredentials } from './credential-store.js';
+import type { LinkedInClientCredentials } from '../lib/credential-store.js';
 
 type LinkedInOAuthOptions = {
   getClientCredentials: () => Promise<LinkedInClientCredentials>;

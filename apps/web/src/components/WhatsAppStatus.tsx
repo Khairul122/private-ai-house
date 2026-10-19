@@ -1,4 +1,4 @@
-import { whatsappStateLabels, type WhatsAppCheck } from './whatsapp-status.js';
+import { whatsappStateLabels, type WhatsAppCheck } from '../api/whatsapp-status.js';
 
 export default function WhatsAppStatus({ check, checking, refresh }: { check: WhatsAppCheck | undefined; checking: boolean; refresh: () => void }) {
   const stale = !!check && Date.now() - Date.parse(check.checkedAt) > 15_000;

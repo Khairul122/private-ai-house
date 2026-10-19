@@ -1,5 +1,5 @@
 import {afterEach,beforeEach,describe,it,expect,vi} from 'vitest';
-import type {IntegrationVault,VaultKey} from './integration-vault.js';
+import type {IntegrationVault,VaultKey} from '../lib/integration-vault.js';
 const fixture=vi.hoisted(()=>({handlers:new Map<string,(event:unknown)=>Promise<void>>(),options:null as unknown,send:vi.fn(async()=>({key:{id:'fixture-message'}})),end:vi.fn(),logout:vi.fn(async()=>undefined)}));
 vi.mock('@whiskeysockets/baileys',()=>({
   default:vi.fn((options:unknown)=>{fixture.options=options;return {ev:{on:(event:string,handler:(value:unknown)=>Promise<void>)=>fixture.handlers.set(event,handler)},sendMessage:fixture.send,end:fixture.end,logout:fixture.logout};}),

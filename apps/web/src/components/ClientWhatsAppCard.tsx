@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import type { ClientAutomation } from '@fvh/domain';
-import type { ClientProject } from './api.js';
-import { normalizeWhatsAppPhone, saveClientCommunication } from './client-communication.js';
+import type { ClientProject } from '../api/api.js';
+import { normalizeWhatsAppPhone, saveClientCommunication } from '../api/client-communication.js';
 
 export default function ClientWhatsAppCard({ projects, clients, refresh }: { projects: ClientProject[]; clients: ClientAutomation[]; refresh: () => Promise<void> }) {
   const [selected, setSelected] = useState('');

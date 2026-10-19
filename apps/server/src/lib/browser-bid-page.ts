@@ -1,5 +1,5 @@
 import type { Page, Route } from 'playwright-core';
-import { BrowserBidError, confirmedBrowserBid, isBidEndpoint, matchesBrowserBid, readRemainingBids, type BrowserBidInput, type BrowserIdentity, type BrowserObservation } from './browser-bid-types.js';
+import { BrowserBidError, confirmedBrowserBid, isBidEndpoint, matchesBrowserBid, readRemainingBids, type BrowserBidInput, type BrowserIdentity, type BrowserObservation } from '../models/browser-bid-types.js';
 
 export class FreelancerBrowserPage {
   constructor(private page: Page, private origin = 'https://www.freelancer.com', private responseTimeoutMs = 30_000) {}

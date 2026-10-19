@@ -1,7 +1,7 @@
 import type { Page, Route } from 'playwright-core';
 import type { ProjectOpportunity } from '@fvh/domain';
-import { BrowserBidError } from './browser-bid-types.js';
-import { parseProjectsCoIdProject, projectsCoIdPath, PROJECTS_CO_ID_ORIGIN, type ProjectsCoIdObservation } from './projects-co-id-types.js';
+import { BrowserBidError } from '../models/browser-bid-types.js';
+import { parseProjectsCoIdProject, projectsCoIdPath, PROJECTS_CO_ID_ORIGIN, type ProjectsCoIdObservation } from '../models/projects-co-id-types.js';
 
 export class ProjectsCoIdPage {
   blockedWrites = 0;

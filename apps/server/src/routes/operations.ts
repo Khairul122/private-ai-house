@@ -4,10 +4,10 @@ import { z } from 'zod';
 import { clientAutomationSchema, googleClientSchema, invoiceIdentitySchema, invoiceSchema, ownerTaskSchema, progressNoteSchema } from '@fvh/contracts';
 import type { ClientAutomation, Invoice, InvoiceIdentity, OwnerTask, ProgressNote, TeamBriefing } from '@fvh/domain';
 import type { WorkspaceRepository } from '@fvh/persistence';
-import { invoiceHtml, invoicePrintCss } from './invoice-html.js';
-import type { GoogleCalendarService } from './google-calendar.js';
-import type { OperationsService } from './operations.js';
-import type { WhatsAppService } from './whatsapp.js';
+import { invoiceHtml, invoicePrintCss } from '../views/invoice-html.js';
+import type { GoogleCalendarService } from '../services/google-calendar.js';
+import type { OperationsService } from '../services/operations.js';
+import type { WhatsAppService } from '../services/whatsapp.js';
 
 export function registerOperationsRoutes(app:FastifyInstance, options:{repository:WorkspaceRepository;operations:OperationsService;whatsapp?:WhatsAppService|undefined;google?:GoogleCalendarService|undefined}) {
   const {repository:repo,operations:ops,whatsapp,google}=options;

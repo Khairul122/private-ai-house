@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { WorkspaceRepository } from '@fvh/persistence';
-import { createApp } from './app.js';
-import type { BrowserBiddingService } from './browser-bidding.js';
+import { createApp } from '../app.js';
+import type { BrowserBiddingService } from '../services/browser-bidding.js';
 
 describe('browser controls API', () => {
   let app: FastifyInstance; let repo: WorkspaceRepository;

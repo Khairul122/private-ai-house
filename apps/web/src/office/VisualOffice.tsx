@@ -2,10 +2,10 @@ import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { BOARD_SIZE, BOARDS, FLOOR, FLOOR_TWO_PODS, BROWSER_DESK, PROJECTS_CO_ID_DESK, LEAD_DESK, LIFT, liftDoorReached, LEAD_ID, MANAGER_DESK, OWNER_SPOT, PODS, POD_SIZE, planPath, spotsFor, ZONES, type BoardId, type BoardSlot, type dayPhase, type P2, type Spot } from './office-layout.js';
-import { STATE_COLORS, type OfficeAgent } from './office-state.js';
-import type { OwnerInput } from './owner-input.js';
-import { createOwnerMotion, setOwnerDestination, stepOwnerMotion, stopOwnerMotion } from './owner-motion.js';
+import { BOARD_SIZE, BOARDS, FLOOR, FLOOR_TWO_PODS, BROWSER_DESK, PROJECTS_CO_ID_DESK, LEAD_DESK, LIFT, liftDoorReached, LEAD_ID, MANAGER_DESK, OWNER_SPOT, PODS, POD_SIZE, planPath, spotsFor, ZONES, type BoardId, type BoardSlot, type dayPhase, type P2, type Spot } from '../state/office-layout.js';
+import { STATE_COLORS, type OfficeAgent } from '../state/office-state.js';
+import type { OwnerInput } from '../state/owner-input.js';
+import { createOwnerMotion, setOwnerDestination, stepOwnerMotion, stopOwnerMotion } from '../state/owner-motion.js';
 
 export type CameraCommand = { kind: 'overview' | 'zone' | 'agent' | 'board' | 'owner'; id?: string; n: number };
 /** Live summary drawn on a wall board; lines come from real API data. */

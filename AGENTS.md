@@ -67,8 +67,25 @@ Terakhir diperbarui: 19 Oktober 2026.
 
 ```
 apps/
-  server/   Fastify API, autopilot, sinkronisasi bisnis, kredensial (DPAPI), wiring Hermes
-  web/      React 19 + react-router + @tanstack/react-query + three/@react-three/fiber
+  server/src/   Fastify API (lapisan, refactor 20 Okt 2026):
+    index.ts      perakitan service + start
+    app.ts        createApp: Fastify, hook keamanan Host/Origin, header/CSP, konteks bersama, register routes
+    routes/       satu register<Domain>Routes per domain: method+path → controller
+    controllers/  handler HTTP (validasi zod, panggil repository/service, balasan); shared.ts = AppContext
+    services/     logika bisnis & worker: autopilot, business-sync, operations, projects-co-id, browser-bidding,
+                  whatsapp, google-calendar, linkedin-oauth, portfolio, payment-reminders, hermes-kanban
+    models/       tipe & parser server (*-types.ts), juga diimpor web
+    config/       pembaca .env (ai-env, freelancer-env, linkedin-env, github-env)
+    lib/          infrastruktur: credential-store(.ps1), integration-vault(.ps1), linkedin-api, halaman Playwright
+    views/        template HTML server (invoice-html)
+  web/src/      React 19 + react-router + @tanstack/react-query + three/@react-three/fiber
+    App.tsx       tabel route saja; main.tsx = provider + QueryClient
+    views/        satu file per halaman/kartu
+    components/   UI bersama (ui.tsx, format.ts, source-filter.tsx) + kartu (BrowserBidding, HermesKanban, WhatsApp)
+    api/          klien fetch + tipe respons (api.ts, *-api.ts, queries.ts)
+    state/        logika kantor: office-state, office-layout, owner-motion, owner-input
+    office/       OfficeShell (layout + overlay) dan VisualOffice (3D, lazy)
+  Tes berada di samping file yang diuji. `packages/*` adalah lapisan model inti (domain), data (persistence) dan adapter.
 packages/
   domain/              Tipe inti, scoring proyek, policy engine, transisi pipeline, bidOutcome
   application/         Port drafting (AiDraftingPort, DraftingInput), createId, hashPayload
@@ -96,7 +113,7 @@ Nama paket npm: `@fvh/<nama>`. Semua paket diekspor langsung dari `src/index.ts`
 2. **Hermes:** `ai-env.ts` membaca `FVH_AI_MODE`, `FVH_AI_DATA_CONSENT`, `FVH_HERMES_BIN`, `FVH_HERMES_PROFILE`. Aktif hanya bila mode `hermes` **dan** consent `true` (pemilik sudah memberi consent pada 16 Okt 2026). Adapter: `HermesCliDraftingAdapter` dengan `timeoutMs: 180_000` (model `ComboHermes` lewat 9router butuh 40–95 detik).
 3. **`FreelancerAutopilot`** (`autopilot.ts`): siklus tiap 15 menit.
 4. **`BusinessSync`** (`business-sync.ts`): tiap 10 menit, **read-only**, jalan terlepas dari status kebijakan: cek hasil bid lalu baca pesan klien.
-5. **`createApp`** (`app.ts`): semua route, hook keamanan, header CSP.
+5. **`createApp`** (`app.ts`): hook keamanan, header CSP, lalu route per domain dari `routes/` (handler di `controllers/`).
 6. **`ProjectsCoIdService`** (`projects-co-id.ts`): worker Chrome read-only, maksimum tiga halaman tiap 30 menit; mode `off/scan-only/drafts`. Pencarian dari bidang (`PROJECTS_CO_ID_FIELDS`, termasuk AI), kata kunci dan skill profil di Kebijakan; tiga pencarian per scan, bergiliran. Hermes membuat draf Bahasa Indonesia dengan harga IDR deterministik dan `author` tercatat; pemilik mengirim sendiri. Baca `docs/projects-co-id.md` sebelum mengubah worker, guard proposal, kuota atau penandaan sumber ini. Tidak ada mode submit.
 
 ### 5.1 Siklus autopilot
@@ -144,7 +161,7 @@ Pengecualian pemilik 19 Oktober 2026: proyek `projects_co_id` boleh `submitted` 
 
 ---
 
-## 7. API (`apps/server/src/app.ts`)
+## 7. API (`apps/server/src/routes/`)
 
 | Route | Fungsi |
 |---|---|
@@ -176,13 +193,14 @@ Error validasi mengembalikan `{ error, issues[] }`; klien web (`api.ts`) menempe
 
 | File | Peran |
 |---|---|
-| `App.tsx` | `OfficeShell` (layout tunggal), semua halaman (dirender di dalam kartu), `buildBoards()` |
-| `VisualOffice.tsx` | Scene 3D (lazy): ruangan, pod, agen beranimasi, papan dinding, kamera (OrbitControls), siang/malam |
-| `office-state.ts` | **Aturan status agen** (`deriveOfficeAgents`), label & warna status, `ROSTER` |
-| `office-layout.ts` | Denah: pod, zona, kursi/slot, `planPath` (rute koridor), `BOARDS`, `dayPhase` |
-| `api.ts` | Klien fetch + tipe respons |
-| `HermesKanbanCard.tsx` | Panel kanban Hermes di Papan Tugas: buat kartu untuk orchestrator/karyawan, kolom Antre/Dikerjakan/Butuh Anda/Selesai, hasil per kartu. |
-| `ProjectsCoIdPage.tsx`, `projects-co-id-api.ts` | Kartu khusus: status, pencarian aktif, ringkasan per tahap, filter tahap/bidang/penulis/urutan, detail proyek, draf, penandaan terkirim/menang/lewati. Peluang, Pipeline, Papan Tugas dan Aktivitas punya filter `?source=projects_co_id`; Kalender menampilkan penutupan listing (`closesAt`). |
+| `App.tsx` | Tabel route; setiap halaman di `views/` |
+| `office/OfficeShell.tsx` | Layout tunggal, overlay, `buildBoards()` |
+| `office/VisualOffice.tsx` | Scene 3D (lazy): ruangan, pod, agen beranimasi, papan dinding, kamera (OrbitControls), siang/malam |
+| `state/office-state.ts` | **Aturan status agen** (`deriveOfficeAgents`), label & warna status, `ROSTER` |
+| `state/office-layout.ts` | Denah: pod, zona, kursi/slot, `planPath` (rute koridor), `BOARDS`, `dayPhase` |
+| `api/api.ts` | Klien fetch + tipe respons |
+| `components/HermesKanbanCard.tsx` | Panel kanban Hermes di Papan Tugas: buat kartu untuk orchestrator/karyawan, kolom Antre/Dikerjakan/Butuh Anda/Selesai, hasil per kartu. |
+| `views/ProjectsCoIdPage.tsx`, `api/projects-co-id-api.ts` | Kartu khusus: status, pencarian aktif, ringkasan per tahap, filter tahap/bidang/penulis/urutan, detail proyek, draf, penandaan terkirim/menang/lewati. Peluang, Pipeline, Papan Tugas dan Aktivitas punya filter `?source=projects_co_id`; Kalender menampilkan penutupan listing (`closesAt`). |
 | `styles.css` | Gaya lama halaman + blok `.vo3d*` (overlay 3D, kartu). Gaya sidebar/topbar lama masih ada tapi tak terpakai |
 
 ### 8.1 Navigasi
@@ -229,7 +247,7 @@ Tambah agen baru: entri `ROSTER` + aturan di `deriveOfficeAgents` + tempat duduk
 - ESLint `@typescript-eslint/no-unused-vars` aktif; **tidak ada plugin `react-hooks`** — jangan tambahkan komentar `eslint-disable react-hooks/...` (aturan tak dikenal = error).
 - Gaya: kode ringkas, komentar hanya untuk "mengapa" yang tidak jelas, nama Inggris di kode, teks UI Bahasa Indonesia.
 - Validasi body API dengan skema di `@fvh/contracts`; tanggal `YYYY-MM-DD`; mata uang 3 huruf.
-- **Line ending campuran:** beberapa file CRLF (`App.tsx`, `api.ts`, `app.ts`, tes), lainnya LF. Saat mengedit lewat skrip, deteksi `\r\n` lalu tulis kembali dengan line ending yang sama.
+- **Line ending campuran:** sebagian file CRLF (mis. `services/browser-bidding.ts` dan tesnya), sebagian besar LF. Saat mengedit lewat skrip, deteksi `\r\n` lalu tulis kembali dengan line ending yang sama.
 - **Encoding:** file harus UTF-8 valid. Pernah ada byte Windows-1252 (`0x96`) yang membuat file "tidak valid UTF-8".
 - Saat menulis kode lewat shell heredoc, **backslash bisa hilang** (regex `\d` menjadi `d`) dan kutip bisa memecah heredoc. Lebih aman tulis ke file lalu jalankan `node script.cjs`, atau gunakan tool edit.
 

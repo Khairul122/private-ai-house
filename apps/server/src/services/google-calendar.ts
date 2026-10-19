@@ -1,7 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { OwnerTask } from '@fvh/domain';
 import { OperationsRepository } from '@fvh/persistence';
-import type { IntegrationVault } from './integration-vault.js';
+import type { IntegrationVault } from '../lib/integration-vault.js';
 
 type Client = {clientId:string;clientSecret:string};
 type Token = {accessToken:string;refreshToken:string;expiresAt:number};

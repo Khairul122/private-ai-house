@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { AuditEvent, Autopilot, BusinessSyncStatus } from './api.js';
+import type { AuditEvent, Autopilot, BusinessSyncStatus } from '../api/api.js';
 import { deriveOfficeAgents, summarize } from './office-state.js';
-import type { ProjectsCoIdStatus } from './projects-co-id-api.js';
+import type { ProjectsCoIdStatus } from '../api/projects-co-id-api.js';
 
 const autopilot = (overrides: Partial<Autopilot> = {}): Autopilot => ({
   state: 'running', cycleInProgress: false, lastRunAt: null, nextRunAt: null, lastMessage: 'Memindai.',

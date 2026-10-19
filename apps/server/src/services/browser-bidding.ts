@@ -2,8 +2,8 @@ import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { FreelancerWriteError, type FreelancerWriteResult } from '@fvh/adapter-freelancer';
-import { FreelancerBrowserPage } from './browser-bid-page.js';
-import { BrowserBidError, type BrowserBidInput, type BrowserBidMode, type BrowserBidStatus, type BrowserIdentity } from './browser-bid-types.js';
+import { FreelancerBrowserPage } from '../lib/browser-bid-page.js';
+import { BrowserBidError, type BrowserBidInput, type BrowserBidMode, type BrowserBidStatus, type BrowserIdentity } from '../models/browser-bid-types.js';
 
 export function canFallbackToBrowser(error: unknown): boolean {
   return error instanceof FreelancerWriteError && [401, 403, 429].includes(error.statusCode ?? 0) && !/BID_LIMIT_EXCEEDED/.test(error.message);

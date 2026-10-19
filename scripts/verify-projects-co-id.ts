@@ -8,10 +8,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { BrowserType } from '../apps/server/node_modules/playwright-core/index.js';
 import { WorkspaceRepository } from '../packages/persistence/src/index.js';
 import { PROJECTS_CO_ID_DEFAULTS } from '../packages/domain/src/index.js';
-import { ProjectsCoIdService } from '../apps/server/src/projects-co-id.js';
-import { connectExistingChrome } from '../apps/server/src/browser-bidding.js';
+import { ProjectsCoIdService } from '../apps/server/src/services/projects-co-id.js';
+import { connectExistingChrome } from '../apps/server/src/services/browser-bidding.js';
 import { createApp } from '../apps/server/src/app.js';
-import { parseProjectsCoIdProject } from '../apps/server/src/projects-co-id-types.js';
+import { parseProjectsCoIdProject } from '../apps/server/src/models/projects-co-id-types.js';
 
 const require = createRequire(new URL('../apps/server/package.json', import.meta.url));
 const { chromium } = require('playwright-core') as { chromium: BrowserType };

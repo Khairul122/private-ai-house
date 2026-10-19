@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { projectsCoIdModeSchema, projectsCoIdOwnerActionSchema } from '@fvh/contracts';
-import type { ProjectsCoIdService } from './projects-co-id.js';
-import { PROJECTS_CO_ID_AUTO_REASON } from './projects-co-id-types.js';
+import type { ProjectsCoIdService } from '../services/projects-co-id.js';
+import { PROJECTS_CO_ID_AUTO_REASON } from '../models/projects-co-id-types.js';
 
 const projectParams = z.object({ id: z.string().regex(/^projects_co_id:[a-f0-9]{6}$/) });
 export function registerProjectsCoIdRoutes(app: FastifyInstance, service: ProjectsCoIdService | undefined) {

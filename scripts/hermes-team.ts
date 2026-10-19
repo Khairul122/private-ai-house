@@ -3,8 +3,8 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ROSTER } from '../apps/web/src/office-state.js';
-import { CODE_PROFILES } from '../apps/server/src/hermes-kanban.js';
+import { ROSTER } from '../apps/web/src/state/office-state.js';
+import { CODE_PROFILES } from '../apps/server/src/services/hermes-kanban.js';
 
 const HERMES = process.env.FVH_HERMES_BIN || 'hermes';
 const SOURCE = process.env.FVH_HERMES_PROFILE || 'private-ai-house';

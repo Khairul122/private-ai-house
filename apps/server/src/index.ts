@@ -5,25 +5,25 @@ import fastifyStatic from '@fastify/static';
 import { FreelancerProductionWriteAdapter, FreelancerReadAdapter, FreelancerReadError, FreelancerSandboxWriteAdapter } from '@fvh/adapter-freelancer';
 import { HermesCliDraftingAdapter } from '@fvh/adapter-hermes';
 import { createDatabase, WorkspaceRepository } from '@fvh/persistence';
-import { deleteLinkedInAccessToken, getFreelancerAccessToken, getLinkedInAccessToken, getLinkedInClientCredentials, readCredentialStatus, storeLinkedInAccessToken } from './credential-store.js';
-import { LinkedInOAuthService } from './linkedin-oauth.js';
-import { readLinkedInEnvironment } from './linkedin-env.js';
-import { readGitHubEnvironment } from './github-env.js';
-import { readFreelancerEnvironment } from './freelancer-env.js';
-import { readDraftingEnvironment } from './ai-env.js';
-import { readLinkedInProfile, syncLinkedInProfile } from './linkedin-api.js';
+import { deleteLinkedInAccessToken, getFreelancerAccessToken, getLinkedInAccessToken, getLinkedInClientCredentials, readCredentialStatus, storeLinkedInAccessToken } from './lib/credential-store.js';
+import { LinkedInOAuthService } from './services/linkedin-oauth.js';
+import { readLinkedInEnvironment } from './config/linkedin-env.js';
+import { readGitHubEnvironment } from './config/github-env.js';
+import { readFreelancerEnvironment } from './config/freelancer-env.js';
+import { readDraftingEnvironment } from './config/ai-env.js';
+import { readLinkedInProfile, syncLinkedInProfile } from './lib/linkedin-api.js';
 import { createApp } from './app.js';
-import { FreelancerAutopilot } from './autopilot.js';
-import { BusinessSync } from './business-sync.js';
-import { OperationsService } from './operations.js';
+import { FreelancerAutopilot } from './services/autopilot.js';
+import { BusinessSync } from './services/business-sync.js';
+import { OperationsService } from './services/operations.js';
 import { OperationsRepository } from '@fvh/persistence';
-import { DpapiIntegrationVault } from './integration-vault.js';
-import { WhatsAppService } from './whatsapp.js';
-import { GoogleCalendarService } from './google-calendar.js';
-import { PublicPortfolioResolver } from './portfolio.js';
-import { BrowserBiddingService, SharedChromeSession } from './browser-bidding.js';
-import { ProjectsCoIdService } from './projects-co-id.js';
-import { HermesKanban, hermesKanbanRunner } from './hermes-kanban.js';
+import { DpapiIntegrationVault } from './lib/integration-vault.js';
+import { WhatsAppService } from './services/whatsapp.js';
+import { GoogleCalendarService } from './services/google-calendar.js';
+import { PublicPortfolioResolver } from './services/portfolio.js';
+import { BrowserBiddingService, SharedChromeSession } from './services/browser-bidding.js';
+import { ProjectsCoIdService } from './services/projects-co-id.js';
+import { HermesKanban, hermesKanbanRunner } from './services/hermes-kanban.js';
 
 function findProjectRoot(start: string): string {
   let directory = resolve(start);
@@ -42,7 +42,7 @@ const dataDirectory = process.env.FVH_DATA_DIR
   : resolve(projectRoot, '.local');
 mkdirSync(dataDirectory, { recursive: true });
 const credentialStorePath = resolve(dataDirectory, 'credentials.dpapi.json');
-const credentialScriptPath = resolve(projectRoot, 'apps/server/src/credential-store.ps1');
+const credentialScriptPath = resolve(projectRoot, 'apps/server/src/lib/credential-store.ps1');
 const freelancerEnvironment = readFreelancerEnvironment(projectRoot);
 async function getFreelancerToken(): Promise<string> {
   if (freelancerEnvironment.declared) {
@@ -115,7 +115,7 @@ const draftingReason = !draftingConfig.valid
       ? 'Hermes sudah dipilih, tetapi persetujuan pengiriman data belum diberikan. Tidak ada draf sintetis yang digunakan.'
       : 'Hermes belum tersedia. Periksa instalasi profile private-ai-house dan jalankan ulang server.';
 const webBuild = resolve(projectRoot, 'apps/web/dist');
-const integrationVault = new DpapiIntegrationVault(dataDirectory,resolve(projectRoot,'apps/server/src/integration-vault.ps1'));
+const integrationVault = new DpapiIntegrationVault(dataDirectory,resolve(projectRoot,'apps/server/src/lib/integration-vault.ps1'));
 const whatsapp = new WhatsAppService(integrationVault);
 const googleCalendar = new GoogleCalendarService(integrationVault,new OperationsRepository(repository.sql));
 const operations = new OperationsService({repository,messenger:whatsapp,calendar:googleCalendar,...(drafting?{review:(facts:string[])=>drafting.reviewOperations(facts)}:{})});

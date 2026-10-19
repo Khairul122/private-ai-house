@@ -2,9 +2,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { WorkspaceRepository } from '@fvh/persistence';
 import { projectsCoIdSettingsSchema } from '@fvh/contracts';
 import { PROJECTS_CO_ID_DEFAULTS, projectsCoIdDraftPolicy, projectsCoIdFieldsOf, projectsCoIdSearchTerms, projectsCoIdSettings, scoreProject, type AutonomyPolicy } from '@fvh/domain';
-import { chooseProjectsCoIdBid, mentionedRupiahAmounts, parseProjectsCoIdProject, projectsCoIdPath, validProjectsCoIdProposal, readRupiahBudget } from './projects-co-id-types.js';
+import { chooseProjectsCoIdBid, mentionedRupiahAmounts, parseProjectsCoIdProject, projectsCoIdPath, validProjectsCoIdProposal, readRupiahBudget } from '../models/projects-co-id-types.js';
 import { ProjectsCoIdService } from './projects-co-id.js';
-import { createApp } from './app.js';
+import { createApp } from '../app.js';
 
 const now = new Date('2026-10-19T09:00:00Z');
 const listing = {

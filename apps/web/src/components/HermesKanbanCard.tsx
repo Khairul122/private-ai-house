@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, jsonRequest } from './api.js';
-import { ROSTER } from './office-state.js';
-import type { HermesKanbanDetail, HermesKanbanStatus, HermesKanbanTask } from '../../server/src/hermes-kanban-types.js';
+import { api, jsonRequest } from '../api/api.js';
+import { ROSTER } from '../state/office-state.js';
+import type { HermesKanbanDetail, HermesKanbanStatus, HermesKanbanTask } from '../../../server/src/models/hermes-kanban-types.js';
 
 const ORCHESTRATOR = 'fvh-chief-of-staff';
 const COLUMNS: Array<{ title: string; hint: string; statuses: string[] }> = [

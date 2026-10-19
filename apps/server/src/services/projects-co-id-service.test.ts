@@ -4,9 +4,9 @@ import { WorkspaceRepository } from '@fvh/persistence';
 import { PROJECTS_CO_ID_DEFAULTS, type ProjectOpportunity } from '@fvh/domain';
 import type { DraftingInput } from '@fvh/application';
 const driver = vi.hoisted(() => ({ inspect: vi.fn(), listOpenProjects: vi.fn(), readProject: vi.fn(), protect: vi.fn() }));
-vi.mock('./projects-co-id-page.js', () => ({ ProjectsCoIdPage: class { inspect = driver.inspect; listOpenProjects = driver.listOpenProjects; readProject = driver.readProject; protect = driver.protect; blockedWrites = 0; } }));
+vi.mock('../lib/projects-co-id-page.js', () => ({ ProjectsCoIdPage: class { inspect = driver.inspect; listOpenProjects = driver.listOpenProjects; readProject = driver.readProject; protect = driver.protect; blockedWrites = 0; } }));
 import { ProjectsCoIdService } from './projects-co-id.js';
-import { validProjectsCoIdProposal } from './projects-co-id-types.js';
+import { validProjectsCoIdProposal } from '../models/projects-co-id-types.js';
 
 const project = (id = '55601d'): ProjectOpportunity => ({
   id: `projects_co_id:${id}`, sourceSlug: 'aplikasi-online', title: 'Aplikasi TypeScript', description: 'Membuat aplikasi TypeScript dengan pengujian dan dokumentasi sesuai alur yang disepakati. '.repeat(5),

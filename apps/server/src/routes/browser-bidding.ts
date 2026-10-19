@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { WorkspaceRepository } from '@fvh/persistence';
-import type { BrowserBiddingService } from './browser-bidding.js';
+import type { BrowserBiddingService } from '../services/browser-bidding.js';
 
 const modeSchema = z.object({ mode: z.enum(['api', 'api-fallback', 'browser']) }).strict();
 export function registerBrowserBiddingRoutes(app: FastifyInstance, service: BrowserBiddingService | undefined, repo: WorkspaceRepository) {

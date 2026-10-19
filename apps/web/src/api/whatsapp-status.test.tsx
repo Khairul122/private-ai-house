@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import WhatsAppStatus from './WhatsAppStatus.js';
+import WhatsAppStatus from '../components/WhatsAppStatus.js';
 import { checkWhatsAppStatus } from './whatsapp-status.js';
 
 afterEach(() => vi.unstubAllGlobals());

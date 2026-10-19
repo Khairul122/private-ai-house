@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, jsonRequest } from './api.js';
-import type { BrowserBiddingStatus } from './browser-bidding-api.js';
+import { api, jsonRequest } from '../api/api.js';
+import type { BrowserBiddingStatus } from '../api/browser-bidding-api.js';
 
 const labels: Record<BrowserBiddingStatus['state'], string> = { stopped: 'Belum tersambung', opening: 'Meminta sambungan Chrome', login_required: 'Perlu login', challenge: 'Perlu verifikasi manusia', account_mismatch: 'Akun berbeda', ready: 'Akun & kuota siap', quota_exhausted: 'Kuota akun habis', checking: 'Memeriksa', submitting: 'Mengirim bid', error: 'Perlu diperiksa' };
 const date = (value: string) => new Date(value).toLocaleString('id-ID');

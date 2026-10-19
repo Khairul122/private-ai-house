@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { Page } from 'playwright-core';
 import { FreelancerWriteError } from '@fvh/adapter-freelancer';
 const fixture = vi.hoisted(() => ({ inspect: vi.fn(), submit: vi.fn(), connect: vi.fn() }));
-vi.mock('./browser-bid-page.js', () => ({ FreelancerBrowserPage: class { inspect = fixture.inspect; submit = fixture.submit; } }));
+vi.mock('../lib/browser-bid-page.js', () => ({ FreelancerBrowserPage: class { inspect = fixture.inspect; submit = fixture.submit; } }));
 vi.mock('playwright-core', () => ({ chromium: { connectOverCDP: fixture.connect } }));
 import { BrowserBiddingService, connectExistingChrome, SharedChromeSession } from './browser-bidding.js';
 const input = { operation: 'submit_bid' as const, projectId: 71, amount: 100, period: 14, milestonePercentage: 100, description: 'Proposal test' };
@@ -76,7 +76,7 @@ describe('browser bidding service', () => {
   });
   it('retains an uncertain result and does not retry the browser driver', async () => {
     await service.open(); await service.setMode('browser');
-    const { BrowserBidError } = await import('./browser-bid-types.js'); fixture.submit.mockRejectedValue(new BrowserBidError('uncertain', 'Hasil belum pasti.', true));
+    const { BrowserBidError } = await import('../models/browser-bid-types.js'); fixture.submit.mockRejectedValue(new BrowserBidError('uncertain', 'Hasil belum pasti.', true));
     await expect(service.submit(input, async () => undefined, vi.fn())).rejects.toThrow();
     expect(fixture.submit).toHaveBeenCalledTimes(1); expect(service.status().lastResult?.outcome).toBe('uncertain');
   });

@@ -3,7 +3,7 @@ import type { AutonomyPolicy, BidDraft, ProjectOpportunity } from '@fvh/domain';
 import type { FreelancerProfile, FreelancerWriteResult } from '@fvh/adapter-freelancer';
 import { createId, hashPayload, type AiDraftingPort } from '@fvh/application';
 import type { WorkspaceRepository, ServiceProfile } from '@fvh/persistence';
-import type { BrowserBidInput } from './browser-bid-types.js';
+import type { BrowserBidInput } from '../models/browser-bid-types.js';
 
 type AutopilotDependencies = {
   repository: WorkspaceRepository;
