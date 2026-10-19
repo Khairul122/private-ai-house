@@ -76,7 +76,7 @@ export function registerOperationsRoutes(app:FastifyInstance, options:{repositor
   app.get('/api/operations/google/callback',async(req,reply)=>{
     const params=z.object({code:z.string().min(1).max(4000),state:z.string().regex(/^[a-f0-9]{64}$/)}).safeParse(req.query);
     if(!google || !params.success) return reply.code(400).type('text/html').send('<p>Persetujuan Google dibatalkan atau tidak valid. Kembali ke kartu Lantai 2 dan coba lagi.</p>');
-    try {await google.callback(params.data.code,params.data.state);return reply.type('text/html').send('<p>Google Calendar terhubung.</p><a href="http://127.0.0.1:5174/operations">Kembali ke Lantai 2</a>');}
+    try {await google.callback(params.data.code,params.data.state);return reply.type('text/html').send('<p>Google Calendar terhubung.</p><a href="/operations">Kembali ke Lantai 2</a>');}
     catch {return reply.code(400).type('text/html').send('<p>Koneksi Google belum berhasil. Ulangi melalui kartu Lantai 2.</p>');}
   });
 }

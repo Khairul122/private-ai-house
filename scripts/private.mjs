@@ -51,7 +51,9 @@ function hermesLine() {
 }
 
 async function start() {
-  if ((await Promise.all(ports.map(portOpen))).some(Boolean)) return console.error('Mission Control (atau sebagiannya) sudah berjalan. Jalankan `pnpm private:stop` dulu.'), process.exit(1);
+  const open = await Promise.all(servePorts.map(portOpen));
+  if (open.every(Boolean)) return console.log(`Mission Control sudah berjalan: ${url}`);
+  if (open.some(Boolean)) return console.error('Sebagian layanan masih berjalan. Jalankan `pnpm private:stop` dulu.'), process.exit(1);
   mkdirSync(stateDir, { recursive: true });
   if (!dev) {
     console.log('Membangun web untuk mode produksi...');

@@ -146,7 +146,7 @@ export class LinkedInOAuthService {
 
   async handleCallback(input: { state?: string; code?: string; error?: string }): Promise<LinkedInCallbackResult> {
     const flow = this.pending;
-    if (!flow) return { statusCode: 410, title: 'Alur OAuth tidak ditemukan', message: 'Mulai koneksi LinkedIn kembali dari dashboard.', returnUrl: 'http://127.0.0.1:5173/capabilities' };
+    if (!flow) return { statusCode: 410, title: 'Alur OAuth tidak ditemukan', message: 'Mulai koneksi LinkedIn kembali dari dashboard.', returnUrl: 'http://127.0.0.1:3001/capabilities' };
     const callbackState = validateLinkedInCallback(input.state ?? '', flow.state, flow.expiresAt);
     if (callbackState === 'invalid_state') return { statusCode: 401, title: 'Otorisasi tidak valid', message: 'Pemeriksaan keamanan OAuth gagal. Mulai koneksi lagi dari dashboard.', returnUrl: flow.returnUrl };
     if (callbackState === 'expired') {

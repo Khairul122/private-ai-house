@@ -164,7 +164,7 @@ export function deriveOfficeAgents(autopilot: Autopilot | undefined, activity: A
     else if (entry.id === 'operations-analyst' && autopilot && dueSoon) derived = { state: 'reviewing', reason: `Memantau ${dueSoon} tenggat proyek dalam 48 jam.`, task: `Memantau ${dueSoon} tenggat proyek dalam 48 jam.` };
     else if (['chief-of-staff', 'profile-editor', 'operations-analyst', 'knowledge-curator'].includes(entry.id)) derived = autopilot ? { state: 'idle', reason: ON_DEMAND_REASON } : { state: 'unknown', reason: 'Data server tidak tersedia.' };
     else if (context.kanban?.team.includes(`fvh-${entry.id}`)) derived = { state: 'idle', reason: 'Siap mengerjakan kartu kanban Hermes.' };
-    else if (context.kanban === undefined) derived = { state: 'unknown', reason: 'Status kanban Hermes belum tersedia.' };
+    else if (context.kanban === undefined || (context.kanban && !context.kanban.available)) derived = { state: 'unknown', reason: context.kanban ? 'Kanban Hermes tidak dapat dibaca.' : 'Status kanban Hermes belum tersedia.' };
     else derived = { state: 'offline', reason: 'Tidak ada komponen runtime; tes dijalankan di luar aplikasi.' };
     const { state, reason } = derived;
     const task = derived.task !== undefined ? derived.task : (state === 'working' || state === 'collaborating') ? autopilot?.lastMessage ?? null : null;

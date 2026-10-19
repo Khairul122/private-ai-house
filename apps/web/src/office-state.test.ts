@@ -31,6 +31,7 @@ describe('office state', () => {
     expect(agent(agents, 'qa-engineer')).toMatchObject({ state: 'idle', reason: 'Siap mengerjakan kartu kanban Hermes.' });
     expect(agent(deriveOfficeAgents(autopilot(), []), 'qa-engineer').state).toBe('unknown');
     expect(agent(deriveOfficeAgents(autopilot(), [], { kanban: null }), 'qa-engineer').state).toBe('offline');
+    expect(agent(deriveOfficeAgents(autopilot(), [], { kanban: { available: false, team: [], tasks: [] } }), 'qa-engineer')).toMatchObject({ state: 'unknown', reason: 'Kanban Hermes tidak dapat dibaca.' });
   });
   it('uses real knowledge sync activity and explains schedule waits', () => {
     expect(agent(deriveOfficeAgents(autopilot(), [], { knowledge: { state: 'running', provider: 'github', current: 'owner/repo' } }), 'knowledge-curator')).toMatchObject({ state: 'working', room: 'workspace', task: 'owner/repo' });

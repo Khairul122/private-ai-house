@@ -31,7 +31,7 @@ export const projectsCoIdSettingsSchema = z.object({
 export const projectsCoIdModeSchema = z.object({ mode: z.enum(['off', 'scan-only', 'drafts']) }).strict();
 export const projectsCoIdOwnerActionSchema = z.object({ confirm: z.literal(true) }).strict();
 export const hermesKanbanTaskSchema = z.object({
-  title: z.string().trim().min(3).max(200),
+  title: z.string().trim().min(3).max(200).regex(/^[^-]/, 'Judul tidak boleh diawali tanda minus.'),
   goal: z.string().trim().max(4000).default(''),
   assignee: z.string().regex(/^fvh-[a-z0-9-]{1,60}$/),
   includeData: z.boolean().default(true),

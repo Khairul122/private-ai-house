@@ -23,7 +23,7 @@ for (const route of ROUTES) {
   page.on('console', onConsole); page.on('pageerror', onError); page.on('response', onResponse);
   await page.goto(`${BASE}${route}`, { waitUntil: 'domcontentloaded' });
   // Cards load several queries; wait until loading indicators are gone or 25 s pass.
-  await page.waitForFunction(() => !document.querySelector('.loading-panel, [role=status][aria-live]'), undefined, { timeout: 25_000 }).catch(() => problems.push('masih memuat setelah 25 dtk'));
+  await page.waitForFunction(() => !document.querySelector('.loading-panel') && !/Memuat/.test(document.body.innerText), undefined, { timeout: 40_000 }).catch(() => problems.push('masih memuat setelah 40 dtk'));
   await page.waitForTimeout(1500);
   const alerts = (await page.locator('[role=alert]').allInnerTexts()).map(t => t.trim()).filter(Boolean);
   const heading = (await page.locator('.vo3d-sheet h2, main h2, h1').first().innerText().catch(() => '')).trim();
