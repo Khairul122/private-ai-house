@@ -277,6 +277,7 @@ Tes penting: `office-state.test.ts` (aturan status), `office-layout.test.ts` (ku
 - Worker bid browser: baca `docs/browser-bidding.md`. Pemilik meminta memakai Chrome berprofil yang sudah login; jangan launch profil kosong atau menyalin profil. Sambungkan ke sesi Chrome yang berjalan setelah pemilik memberi izin debugging; worker memakai tab sendiri dan disconnect tidak menutup Chrome pemilik. Guard kebijakan sebelum klik dan sebelum melepas POST; sukses harus memiliki HTTP 200 serta ID bid yang cocok. Jangan mengekspor sesi, memilih upgrade, menandatangani perjanjian, atau retry hasil tidak pasti. Kuota akun habis bukan pemicu fallback.
 - Deteksi menang/kalah belum pernah teramati pada data nyata (belum ada bid diputuskan).
 - Kanal/sesi Hermes (mis. Telegram) tidak dilaporkan → ditampilkan "Tidak tersedia".
+- Tim Hermes: profile `fvh-<id>` per karyawan + board kanban `fvh-house`, orchestrator `fvh-chief-of-staff`, project Hermes `fvh` terikat ke board (worktree per kartu); hanya `fvh-qa-engineer` dan `fvh-knowledge-curator` punya tool file/terminal; dibuat oleh `scripts/hermes-team.ts` (lihat `docs/hermes-agent-setup.md` §7). Board ini belum terhubung ke aplikasi; status agen di kantor tidak membacanya.
 - API lokal tanpa autentikasi (dilindungi loopback + Host + Origin) — cukup untuk lokal satu pengguna.
 - Ide: sinyal kerja nyata untuk Knowledge Curator (saat sinkronisasi GitHub), kamera mengikuti agen yang berjalan, menghapus CSS sidebar lama, membaca milestone Freelancer untuk pendapatan otomatis.
 

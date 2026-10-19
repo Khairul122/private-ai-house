@@ -111,6 +111,29 @@ Buka `http://127.0.0.1:5173`, lalu halaman **Status integrasi**. Hermes Agent ha
 
 Dengan consent masih `false`, endpoint health akan melaporkan `ai: "disabled"`, dan tombol draf nonaktif. Setelah Anda memilih untuk mengaktifkan consent dan memulai ulang server, endpoint health harus melaporkan `ai: "hermes"` serta capability Hermes aktif. Di **Antrean peluang**, sinkronkan proyek melalui pencarian baca-saja Freelancer. Draf baru dibuat lokal setelah konfigurasi Hermes aktif dan lolos validasi schema. Mengubah jadwal Hermes cron tidak mengubah atau mengirim draf aplikasi.
 
+## 7. Tim karyawan dan kanban Hermes
+
+`scripts/hermes-team.ts` membuat satu profile Hermes `fvh-<id>` untuk tiap karyawan di `ROSTER` (kecuali Lead Agent, yang tetap profile drafting di atas) dan board kanban `fvh-house`. Skrip aman dijalankan ulang setelah peran diubah:
+
+```powershell
+pnpm --filter @fvh/server exec tsx ../../scripts/hermes-team.ts
+```
+
+- Profile dikloning dari `FVH_HERMES_PROFILE` (model dan kunci provider), lalu semua tool, plugin, dan server MCP hasil kloning dibuang. Karyawan hanya mendapat siklus kartu kanban; `fvh-chief-of-staff` mendapat toolset `kanban` untuk membagi kartu.
+- Deskripsi profile dan `SOUL.md` ditulis ulang dari `FOCUS` di skrip. Orchestrator hanya boleh menugaskan profile `fvh-*`.
+- Karyawan tidak punya akses file, web, database, atau aplikasi; hasilnya usulan untuk pemilik dan tidak pernah mengirim bid, pesan, atau invoice.
+- Pengecualian (keputusan pemilik 19 Oktober 2026): `fvh-qa-engineer` dan `fvh-knowledge-curator` mendapat toolset `file`, `terminal`, `todo` untuk bekerja di kode. Skrip juga membuat project Hermes `fvh` (repo ini) yang terikat ke board, sehingga kartu mendapat git worktree dan cabang sendiri. Worktree tidak berisi `.env`/`.local` (gitignored), tetapi tool terminal bukan sandbox: path absolut ke repo utama tetap bisa dibuka, jadi larangan membaca rahasia ditulis di `SOUL.md` mereka. Mereka tidak boleh push atau mengubah `main`; tinjau cabang `wt/*` sebelum merge.
+
+Memberi tujuan ke tim (tanpa `--triage`, agar decomposer bawaan tidak memilih profile di luar tim):
+
+```powershell
+hermes kanban --board fvh-house create "Susun strategi bid minggu ini untuk proyek AI" --assignee fvh-chief-of-staff
+hermes kanban --board fvh-house list
+hermes kanban --board fvh-house show <id>
+```
+
+Dispatcher gateway Hermes mengambil kartu `ready` otomatis; `hermes kanban --board fvh-house dispatch` menjalankan satu putaran sekarang. Setiap kartu memakai kuota model provider. `hermes pause` menghentikan dispatch kanban.
+
 ## Referensi resmi
 
 - [CLI Hermes](https://hermes-agent.nousresearch.com/docs/user-guide/cli) — query file dan output `stream-json`.
