@@ -36,7 +36,7 @@ export default function OpportunitiesPage() {
       <label className="search-field"><span>Filter daftar lokal</span><input type="search" value={search} onChange={(event) => { setSearch(event.target.value); setShown(20); }} placeholder="Judul atau teknologi" /></label>
       <label className="form-field"><span>Status peluang</span><select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setShown(20); }}><option value="open">Terbuka</option><option value="closed">Ditutup</option><option value="expired">Kedaluwarsa</option><option value="all">Semua status</option></select></label>
       <SourceSelect value={source} onChange={next => { setSource(next); setShown(20); }} />
-      <div className="filter-note"><strong>{visible.length}</strong> sesuai filter dari {query.data.length} peluang <span>{status?.lastRunAt ? 'Siklus Freelancer terakhir ' + formatDate(status.lastRunAt) : 'Siklus Freelancer belum tercatat'}</span></div>
+      <div className="filter-note" role="status"><strong>{visible.length}</strong> sesuai filter dari {query.data.length} peluang <span>{status?.lastRunAt ? 'Siklus Freelancer terakhir ' + formatDate(status.lastRunAt) : 'Siklus Freelancer belum tercatat'}</span><span>Diperbarui {new Date(query.dataUpdatedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</span></div>
     </section>
     <details className="card-disclosure"><summary>Status pemindaian Freelancer</summary><section className="sync-panel" aria-label="Status pemindaian otomatis Freelancer">
       <div className="section-heading"><div><p className="eyebrow">Freelancer.com</p><h2>Pemindaian otomatis</h2></div><StateLabel state={status?.state ?? 'unknown'} /></div>
@@ -46,7 +46,7 @@ export default function OpportunitiesPage() {
     </section></details>
     <p className="card-status-note">Skor berasal dari penilaian aplikasi. Waktu penutupan mengikuti sinkronisasi terakhir; periksa listing sebelum mengambil keputusan.</p>
     <div className="opportunity-list">
-      {visible.length === 0 && <div className="empty-state"><h3>Tidak ada peluang sesuai filter</h3><p>Ubah pencarian atau status peluang. Daftar diperbarui pada siklus berikutnya.</p></div>}
+      {visible.length === 0 && <div className="empty-state"><h3>{query.data.length === 0 ? 'Belum ada peluang tersimpan' : 'Tidak ada peluang sesuai filter'}</h3><p>{query.data.length === 0 ? 'Jalankan pemindaian Freelancer dari halaman Kebijakan, atau tunggu siklus autopilot berikutnya.' : 'Ubah pencarian, status, atau sumber. Daftar diperbarui pada siklus berikutnya.'}</p></div>}
       {visible.slice(0, shown).map((project) => (
         <article className="opportunity-row" id={'opportunity-' + project.id} key={project.id}>
           <div className="opportunity-topline"><span className="eyebrow">{project.clientName} / {opportunitySource(project.source)}</span><span className="score-mark"><strong>{project.score}</strong><small>skor kecocokan</small></span></div>

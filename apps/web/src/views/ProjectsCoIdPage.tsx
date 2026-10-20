@@ -85,7 +85,7 @@ export default function ProjectsCoIdPage() {
           <div><dt>Respons halaman</dt><dd>{worker.pageStatus === null ? 'Tidak diketahui' : `HTTP ${worker.pageStatus}`}</dd></div>
           {worker.telegram && <div><dt>Kanal proyek baru</dt><dd>{worker.telegram.ok === null ? 'Belum diperiksa' : worker.telegram.ok ? 'Pemeriksaan terakhir berhasil' : 'Pemeriksaan terakhir gagal'} · {date(worker.telegram.lastCheckedAt)}</dd></div>}
         </dl>
-        <p className="form-help">HTTP menunjukkan respons halaman; akun hanya terverifikasi bila username terbaca.</p>
+        <p className="form-help">HTTP menunjukkan respons halaman; akun hanya terverifikasi bila username terbaca. Status ini diperbarui otomatis setiap 10 detik.</p>
         <div className="card-toolbar"><button className="button button-primary" disabled={busy || !workerOk} onClick={() => run({ action: 'scan' })}>Pindai sekarang</button><button className="button button-secondary" disabled={busy || ['stopped', 'paused'].includes(worker.state) || worker.mode === 'off'} onClick={() => run({ action: 'check' })}>Periksa akun</button></div>
       </>}
       <div className="pci-stage-strip" role="group" aria-label="Ringkasan proyek per tahap">
@@ -101,6 +101,7 @@ export default function ProjectsCoIdPage() {
         <button className="button button-text" disabled={control.isPending} onClick={() => run({ action: 'close' })}>Lepas sambungan</button>
       </div>
       <p className="form-help">Login sebagai {settings?.username ?? 'akun di Kebijakan'} dan selesaikan verifikasi Cloudflare di tab Chrome biasa pada profil yang sama, lalu Periksa akun. Tab worker memblokir semua request tulis. Jeda automasi juga menghentikan Scout.</p>
+      <p className="form-help">“Pindai sekarang” membuka halaman di Chrome dan hanya membaca listing; tidak mengirim proposal.</p>
     </details>}
 
     <details className="card-disclosure"><summary>Pencarian dan batas draf</summary>
@@ -132,9 +133,10 @@ export default function ProjectsCoIdPage() {
         <label className="form-field"><span>Urutkan</span><select value={sort} onChange={e => setSort(e.target.value as Sort)}><option value="score">Skor tertinggi</option><option value="budget">Anggaran tertinggi</option><option value="closing">Listing segera ditutup</option><option value="newest">Terbit terbaru</option></select></label>
         <label className="form-field pci-search-input"><span>Cari</span><input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Judul, owner atau skill" /></label>
       </div>
+      <p className="form-help" role="status">Diperbarui {entries.dataUpdatedAt ? new Date(entries.dataUpdatedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : 'belum diketahui'} · status worker tiap 10 detik.</p>
       {entries.isPending && <p role="status">Memuat proyek dan draf…</p>}
       {entries.isError && <p className="notice notice-error" role="alert">Proyek dan draf tidak tersedia. <button className="button button-text" onClick={() => entries.refetch()}>Muat ulang</button></p>}
-      {projects && !visible.length && <p className="form-help">Tidak ada proyek sesuai filter. {stage === 'ready' ? 'Pilih mode draf atau buat draf dari tahap Tanpa draf.' : 'Ubah filter atau pindai lagi.'}</p>}
+      {projects && !visible.length && <div className="empty-state"><h3>{projects.length === 0 ? 'Belum ada proyek dari projects.co.id' : 'Tidak ada proyek sesuai filter'}</h3><p>{projects.length === 0 ? 'Hubungkan Chrome lalu jalankan Pindai sekarang; hasilnya muncul di sini.' : stage === 'ready' ? 'Pilih mode draf atau buat draf dari tahap Tanpa draf.' : 'Ubah filter atau pindai lagi.'}</p></div>}
       {visible.map(({ project, stage: itemStage, fields }) => <ProjectEntry key={project.latestDraft?.id ?? project.id} project={project} stage={itemStage!} fields={fields} focused={project.id === focusId}
         proposalEdit={proposalEdits[project.id]} onProposalChange={value => setProposalEdits(current => ({ ...current, [project.id]: value }))}
         refresh={refresh} canDraft={!busy && !!worker && worker.mode !== 'off' && workerOk} onClearFocus={() => setParams({}, { replace: true })} />)}

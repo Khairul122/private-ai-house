@@ -244,6 +244,7 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
     </div>}
 
     <div className="calendar-source-state" aria-live="polite">
+      <span>Diperbarui {(() => { const latest = Math.max(autopilotQuery.dataUpdatedAt, agendaQuery.dataUpdatedAt, projectsQuery.dataUpdatedAt); return latest > 0 ? new Date(latest).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : 'belum diketahui'; })()}</span>
       {autopilotQuery.isPending && <span role="status">Memuat jadwal siklus server...</span>}
       {autopilotQuery.isError && <span>Jadwal siklus server tidak tersedia; data lama disembunyikan.</span>}
       {agendaQuery.isError && <span>Riwayat aktivitas tidak tersedia; data lama disembunyikan.</span>}
@@ -291,9 +292,9 @@ export default function CalendarPage() {
 
       <section className="calendar-card card-section">
         <h2>Jadwal automasi</h2>
-        <div className={`hours-status-badge ${isWithinHours && policy.state === 'active' ? 'hours-active' : 'hours-inactive'}`}>
-          <span className="mode-indicator" style={{ background: isWithinHours && policy.state === 'active' ? 'var(--success)' : 'var(--danger)' }} />
-          {!operationData ? 'Status operasi tidak tersedia' : operationData.waitingReason ?? (isWithinHours ? `Operasi aktif (${policy.activeHours.start}:00 - ${policy.activeHours.end}:00)` : 'Operasi memerlukan perhatian')}
+        <div className={`hours-status-badge ${isWithinHours && policy.state === 'active' ? 'hours-active' : 'hours-inactive'}`} aria-live="polite">
+          <span className="mode-indicator" style={{ background: isWithinHours && policy.state === 'active' ? 'var(--success)' : 'var(--danger)' }} aria-hidden="true" />
+          {operation.isPending ? 'Memuat status operasi…' : !operationData ? 'Status operasi tidak tersedia' : operationData.waitingReason ?? (isWithinHours ? `Operasi aktif (${policy.activeHours.start}:00 - ${policy.activeHours.end}:00)` : 'Operasi memerlukan perhatian')}
         </div>
         <p className="form-help">
           Zona waktu kerja: <strong>{policy.timezone}</strong>. Hari aktif: {(policy.activeDays ?? [0, 1, 2, 3, 4, 5, 6]).map((day) => ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'][day]).join(', ')}. Bid mengikuti jadwal dan masa berlaku kebijakan.
@@ -304,7 +305,7 @@ export default function CalendarPage() {
             <span>Batas Penawaran Harian</span>
             <strong>{dashboard.bidUsage.today} / {policy.dailyBidLimit}</strong>
           </div>
-          <div className="meter-track">
+          <div className="meter-track" role="progressbar" aria-label="Batas penawaran harian" aria-valuemin={0} aria-valuemax={Math.max(1, policy.dailyBidLimit)} aria-valuenow={dashboard.bidUsage.today}>
             <div className="meter-fill" style={{ width: `${Math.min(100, Math.round((dashboard.bidUsage.today / (policy.dailyBidLimit || 1)) * 100))}%` }} />
           </div>
         </div>
@@ -314,7 +315,7 @@ export default function CalendarPage() {
             <span>Batas Penawaran Mingguan</span>
             <strong>{dashboard.bidUsage.week} / {policy.weeklyBidLimit}</strong>
           </div>
-          <div className="meter-track">
+          <div className="meter-track" role="progressbar" aria-label="Batas penawaran mingguan" aria-valuemin={0} aria-valuemax={Math.max(1, policy.weeklyBidLimit)} aria-valuenow={dashboard.bidUsage.week}>
             <div className="meter-fill" style={{ width: `${Math.min(100, Math.round((dashboard.bidUsage.week / (policy.weeklyBidLimit || 1)) * 100))}%` }} />
           </div>
         </div>
@@ -359,6 +360,7 @@ export default function CalendarPage() {
 
       <section className="calendar-card calendar-wide card-section">
         <details className="card-disclosure"><summary>Penutupan listing Freelancer ({deadlineProjects.length})</summary>
+        {projectsQuery.isFetching && <p className="form-help" role="status">Menyegarkan penutupan listing…</p>}
         {deadlineProjects.length === 0 ? (
           <p className="form-help">Belum ada proyek dengan tenggat tercatat.</p>
         ) : (

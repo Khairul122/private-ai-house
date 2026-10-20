@@ -33,10 +33,10 @@ export default function ActivityPage() {
       <button type="button" aria-pressed={filter === 'failed'} className={`filter-tab ${filter === 'failed' ? 'active' : ''}`} onClick={() => setFilter('failed')}>Gagal ({query.data.filter((e) => e.status === 'failed').length})</button>
     </div>
     <div className="form-grid card-toolbar"><label className="search-field activity-search"><span>Cari jejak aktivitas</span><input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Alasan, tipe, atau ID catatan" /></label><SourceSelect value={source} onChange={setSource} labels={{ freelancer: 'Freelancer & sistem' }} /></div>
-    <p className="form-help" role="status">{filteredEvents.length} dari {query.data.length} catatan ditampilkan.</p>
+    <p className="form-help" role="status">{filteredEvents.length} dari {query.data.length} catatan ditampilkan. Diperbarui {query.dataUpdatedAt ? new Date(query.dataUpdatedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : 'belum diketahui'}.</p>
     <section className="activity-section">
-      {filteredEvents.length ? <ActivityRows events={filteredEvents} /> : <div className="empty-state"><h3>Tidak ada aktivitas sesuai filter</h3><p>Ubah kata pencarian, sumber, atau status. Filter hanya berlaku pada catatan yang sudah dimuat.</p></div>}
+      {filteredEvents.length ? <ActivityRows events={filteredEvents} /> : <div className="empty-state"><h3>{query.data.length === 0 ? 'Belum ada aktivitas tercatat' : 'Tidak ada aktivitas sesuai filter'}</h3><p>{query.data.length === 0 ? 'Keputusan autopilot, draf, bid, dan impor akan muncul di sini setelah aplikasi bekerja.' : 'Ubah kata pencarian, sumber, atau status. Filter hanya berlaku pada catatan yang sudah dimuat.'}</p></div>}
     </section>
-    <p className="form-help">Pencarian dan filter berlaku pada {query.data.length} catatan terbaru yang dimuat.</p>{query.data.length >= limit && limit < 500 && <button className="button button-secondary" type="button" onClick={() => setLimit(Math.min(500, limit + 100))}>Muat 100 catatan lebih lama</button>}
+    <p className="form-help">Pencarian dan filter berlaku pada {query.data.length} catatan terbaru yang dimuat. Data diperbarui otomatis setiap 10 detik.</p>{query.data.length >= limit && limit < 500 && <button className="button button-secondary" type="button" onClick={() => setLimit(Math.min(500, limit + 100))}>Muat 100 catatan lebih lama</button>}
   </>;
 }

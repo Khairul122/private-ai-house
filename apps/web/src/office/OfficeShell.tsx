@@ -16,10 +16,11 @@ import { useLiveUpdates } from '../api/live.js';
 import { StateLabel, useClock } from '../components/ui.js';
 import { CardDataStatus } from '../components/CardDataStatus.js';
 import { isCardQuery } from '../api/card-data.js';
+import { isTabletShortcut } from './tablet-shortcut.js';
 
 const VisualOffice = lazy(() => import('./VisualOffice.js'));
 
-type OfficeIconName = 'grid' | 'search' | 'expand' | 'cube' | 'top' | 'play' | 'target' | 'users' | 'activity' | 'signal' | 'close' | 'pin' | 'sun';
+type OfficeIconName = 'grid' | 'search' | 'expand' | 'cube' | 'top' | 'play' | 'target' | 'users' | 'close' | 'sun';
 
 function OfficeIcon({ name }: { name: OfficeIconName }) {
   const paths: Record<OfficeIconName, ReactNode> = {
@@ -31,10 +32,7 @@ function OfficeIcon({ name }: { name: OfficeIconName }) {
     play: <path d="m7 4 13 8-13 8z" />,
     target: <><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="2" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3" /></>,
     users: <><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-4-6" /></>,
-    activity: <path d="M3 12h4l3-8 4 16 3-8h4" />,
-    signal: <><path d="M5 12a10 10 0 0 1 14 0M8.5 15.5a5 5 0 0 1 7 0" /><circle cx="12" cy="19" r="1" /></>,
     close: <path d="M6 6l12 12M18 6 6 18" />,
-    pin: <><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z" /><circle cx="12" cy="10" r="2.5" /></>,
     sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></>,
   };
   return <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
@@ -47,6 +45,13 @@ const wideScreen = () => window.matchMedia('(min-width: 900px)').matches;
 type StateChange = { key: string; at: string; name: string; from: AgentState; to: AgentState };
 
 const SHEET_TITLES: Record<string, string> = { '/overview': 'Ringkasan', ...Object.fromEntries(BOARDS.map((board) => [board.route, board.label])) };
+const TABLET_GROUPS = [
+  { label: 'Pantauan', routes: ['/overview', '/activity'] },
+  { label: 'Peluang', routes: ['/opportunities', '/projects-co-id', '/pipeline', '/tasks'] },
+  { label: 'Klien', routes: ['/inbox', '/work', '/operations', '/calendar'] },
+  { label: 'Tim', routes: ['/agents', '/profile', '/knowledge'] },
+  { label: 'Sistem', routes: ['/policy', '/capabilities'] },
+] as const;
 const BOARD_ACCENTS: Record<BoardId, string> = {
   'projects-co-id': '#476b68',
   operations:'#67518b',
@@ -131,6 +136,8 @@ export default function OfficeShell() {
   const stage = useRef<HTMLDivElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const ownerButton = useRef<HTMLButtonElement>(null);
+  const tabletButton = useRef<HTMLButtonElement>(null);
+  const officeSurface = useRef<HTMLDivElement>(null);
   const panelBody = useRef<HTMLDivElement>(null);
   const sheetHeading = useRef<HTMLHeadingElement>(null);
   const sheetElement = useRef<HTMLElement>(null);
@@ -204,6 +211,7 @@ export default function OfficeShell() {
   const matchingBoards = query ? BOARDS.filter(board => board.label.toLocaleLowerCase().includes(query)) : [];
   const stateKey = agents.map((agent) => agent.state).join();
   const sheetOpen = location.pathname !== '/';
+  const tabletGroup = TABLET_GROUPS.find((group) => group.routes.some((route) => route === location.pathname));
   const dashboardData = fresh(dashboard);
 
   useEffect(() => {
@@ -218,7 +226,7 @@ export default function OfficeShell() {
       else if (!event.shiftKey && (document.activeElement === last || !items.includes(document.activeElement as HTMLElement))) { event.preventDefault(); first.focus(); }
     };
     document.addEventListener('keydown', onTab);
-    return () => { document.removeEventListener('keydown', onTab); if (returnFocus?.isConnected && returnFocus.checkVisibility()) returnFocus.focus(); else ownerButton.current?.focus(); };
+    return () => { document.removeEventListener('keydown', onTab); if (returnFocus !== document.body && returnFocus?.isConnected && returnFocus.checkVisibility()) returnFocus.focus(); else tabletButton.current?.focus(); };
   }, [sheetOpen]);
   useEffect(() => { sheetElement.current?.querySelector('.vo3d-sheet-body')?.scrollTo({ top: 0 }); }, [location.pathname]);
 
@@ -252,16 +260,21 @@ export default function OfficeShell() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (location.pathname === '/' && isTabletShortcut(event,
+        event.target === document.body || event.target === officeSurface.current || event.target instanceof Element && Boolean(event.target.closest('.vo3d-canvas')))) {
+        event.preventDefault();
+        officeSurface.current?.focus();
+        navigate('/overview');
+        return;
+      }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        if (window.location.pathname !== '/') sheetElement.current?.querySelector<HTMLElement>('input[type="search"], .sheet-navigation summary')?.focus();
+        if (location.pathname !== '/') sheetElement.current?.querySelector<HTMLElement>('input[type="search"], .vo3d-tablet-nav a[aria-current="page"]')?.focus();
         else searchInput.current?.focus();
       }
       if (event.key === 'Escape') {
         ownerInput.stop();
-        const disclosure = stage.current?.querySelector<HTMLDetailsElement>('.sheet-navigation[open], .vo3d-menu[open]');
-        if (disclosure) { disclosure.open = false; disclosure.querySelector<HTMLElement>('summary')?.focus(); }
-        else if (window.location.pathname !== '/') navigate('/');
+        if (location.pathname !== '/') navigate('/');
         else { setPanel(null); ownerButton.current?.focus(); }
       }
     };
@@ -269,7 +282,7 @@ export default function OfficeShell() {
     window.addEventListener('keydown', onKey);
     document.addEventListener('fullscreenchange', onFullscreen);
     return () => { window.removeEventListener('keydown', onKey); document.removeEventListener('fullscreenchange', onFullscreen); };
-  }, [navigate, ownerInput]);
+  }, [location.pathname, navigate, ownerInput]);
 
   const fly = (next: Omit<CameraCommand, 'n'>) => {
     setFollowId(null); setTour(false);
@@ -281,7 +294,6 @@ export default function OfficeShell() {
     setFloor(n); fly({ kind: 'overview' });
   };
   useEffect(() => {
-    stage.current?.querySelectorAll<HTMLDetailsElement>('.sheet-navigation[open], .vo3d-menu[open]').forEach(item => { item.open = false; });
     const board = BOARDS.find((slot) => slot.route === location.pathname);
     if(board) setFloor(board.floor ?? 1);
     if (board) fly({ kind: 'board', id: board.id });
@@ -369,10 +381,10 @@ export default function OfficeShell() {
 
   return <div className="vo3d vo3d-app" ref={stage} style={{ background: phase.sky }}>
     <div className="vo3d-office-layer" inert={sheetOpen}>
-    <div className="vo3d-canvas" role="img" aria-label={`Kantor 3D Mission Control. ${summary}. Gunakan menu Papan dan daftar agen untuk navigasi dengan keyboard.`}>
+    <div ref={officeSurface} className="vo3d-canvas" role="img" tabIndex={0} aria-label={`Kantor 3D Mission Control. ${summary}. Tekan Tab untuk membuka tablet. Gunakan tablet dan daftar agen untuk navigasi dengan keyboard.`}>
       {webgl ? <Suspense fallback={<div className="vo3d-fallback">Memuat kantor visual...</div>}>
         <VisualOffice key={floor} floor={floor} ownerStart={arrival?.floor===floor?arrival.at:[OWNER_SPOT.x,OWNER_SPOT.z]} onLift={()=>goToFloor(floor===1?2:1,true)} agents={agents} ready={!autopilot.isPending} selectedId={selectedId} ownerSelected={panel === 'owner'} ownerInput={ownerInput} ownerTarget={ownerTarget} ownerVisitVersion={ownerVisitVersion} onOwnerMoving={setOwnerMoving} followId={followId} onSelect={selectAgent} onOwnerSelect={openOwner} onCameraInteract={() => { setFollowId(null); setTour(false); }} command={command} view={view} tour={tour} phase={phase} reducedMotion={reducedMotion} boards={boards} onOpenBoard={openBoard} />
-      </Suspense> : <div className="vo3d-fallback">WebGL tidak tersedia di browser ini. Gunakan menu Papan untuk membuka setiap kartu.</div>}
+      </Suspense> : <div className="vo3d-fallback">WebGL tidak tersedia di browser ini. Gunakan tablet untuk membuka setiap kartu.</div>}
     </div>
 
     <div className="vo3d-left-rail">
@@ -399,14 +411,8 @@ export default function OfficeShell() {
     </div>
 
     <div className="vo3d-float vo3d-tools">
+      <button ref={tabletButton} type="button" className="vo3d-icon vo3d-tablet-trigger" aria-label="Buka tablet Mission Control" title="Buka tablet (Tab saat fokus di kantor)" onClick={() => navigate('/overview')}><OfficeIcon name="grid" /><span>Tablet <kbd>Tab</kbd></span></button>
       <button ref={ownerButton} type="button" className="vo3d-owner-action" aria-pressed={panel === 'owner'} onClick={openOwner}><OfficeIcon name="target" />Pemilik</button>
-      <details className="vo3d-menu">
-        <summary className="vo3d-icon vo3d-board-action" aria-label="Menu papan"><OfficeIcon name="grid" />Papan</summary>
-        <nav aria-label="Papan Mission Control">
-          <Link to="/overview">Ringkasan</Link>
-          {([1, 2] as const).map(n => <div className="vo3d-board-group" key={n}><strong>Lantai {n}</strong>{BOARDS.filter(board => (board.floor ?? 1) === n).map((board) => <Link key={board.id} to={board.route}>{board.label}</Link>)}</div>)}
-        </nav>
-      </details>
       <div className="vo3d-search-wrap"><label className="vo3d-search"><OfficeIcon name="search" /><span className="sr-only">Cari agen atau papan</span>
         <input ref={searchInput} type="search" placeholder="Cari agen atau papan" value={search} onChange={(event) => setSearch(event.target.value)}
           onKeyDown={(event) => { if (event.key === 'Enter') { if (matchingBoards[0]) { navigate(matchingBoards[0].route); setSearch(''); } else if (visibleAgents[0]) selectAgent(visibleAgents[0].id); } if (event.key === 'Escape') setSearch(''); }} />
@@ -524,12 +530,11 @@ export default function OfficeShell() {
     </figure>}
 
     <nav className="vo3d-float vo3d-dock" aria-label="Navigasi ruangan">
-      {ZONES.map((zone) => <button key={zone.id} type="button" onClick={() => fly({ kind: 'zone', id: zone.id })}>
-        <OfficeIcon name="pin" />{zone.label}<em>{[...spots.values()].filter((spot) => zoneOf(spot) === zone.id).length}</em>
-      </button>)}
-      <span className="vo3d-dock-sep" aria-hidden="true" />
-      <button type="button" aria-pressed={panel === 'activity'} onClick={() => setPanel(panel === 'activity' ? null : 'activity')}><OfficeIcon name="activity" />Aktivitas</button>
-      <button type="button" aria-pressed={panel === 'channels'} onClick={() => setPanel(panel === 'channels' ? null : 'channels')}><OfficeIcon name="signal" />Kanal</button>
+      {ZONES.map((zone) => { const count = [...spots.values()].filter((spot) => zoneOf(spot) === zone.id).length; return <button key={zone.id} type="button" aria-label={`${zone.label}, ${count} agen`} onClick={() => fly({ kind: 'zone', id: zone.id })}>
+        {zone.label}<span className="vo3d-dock-count" aria-hidden="true">{count}</span>
+      </button>; })}
+      <button className="vo3d-dock-panel" type="button" aria-pressed={panel === 'activity'} onClick={() => setPanel(panel === 'activity' ? null : 'activity')}>Aktivitas</button>
+      <button className="vo3d-dock-panel" type="button" aria-pressed={panel === 'channels'} onClick={() => setPanel(panel === 'channels' ? null : 'channels')}>Kanal</button>
     </nav>
 
     <div className="vo3d-float vo3d-seg" role="toolbar" aria-label="Kontrol tampilan">
@@ -540,15 +545,28 @@ export default function OfficeShell() {
     </div>
     </div>
 
-    {sheetOpen && <div className="vo3d-sheet-backdrop" onClick={() => navigate('/')}>
-      <section ref={sheetElement} className="vo3d-sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" onClick={(event) => event.stopPropagation()}>
-        <header className="vo3d-sheet-head">
-          <div className="sheet-heading"><h2 id="sheet-title" ref={sheetHeading} tabIndex={-1}>{SHEET_TITLES[location.pathname] ?? 'Halaman'}</h2><details className="sheet-navigation"><summary>Pindah kartu</summary><nav aria-label="Kartu lain">{Object.entries(SHEET_TITLES).map(([route, title]) => <Link to={route} aria-current={location.pathname === route ? 'page' : undefined} key={route}>{title}</Link>)}</nav></details></div>
-          <button type="button" className="button button-secondary sheet-refresh" disabled={refreshingSheet} onClick={async () => { setRefreshingSheet(true); try { await queryClient.invalidateQueries({ predicate: query => isCardQuery(query, location.pathname) }); } finally { setRefreshingSheet(false); } }}>{refreshingSheet ? 'Memperbarui…' : 'Perbarui'}</button>
-          <button type="button" className="vo3d-icon" aria-label="Tutup kartu dan kembali ke kantor" onClick={() => navigate('/')}><OfficeIcon name="close" /></button>
-        </header>
-        <CardDataStatus path={location.pathname} live={live} />
-        <div className="vo3d-sheet-body page-content"><Outlet /></div>
+    {sheetOpen && <div className="vo3d-sheet-backdrop vo3d-tablet-backdrop" onClick={() => navigate('/')}>
+      <section ref={sheetElement} className="vo3d-sheet vo3d-tablet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" onClick={(event) => event.stopPropagation()}>
+        <aside className="vo3d-tablet-sidebar" aria-label="Modul tablet">
+          <div className="vo3d-tablet-brand"><OfficeIcon name="grid" /><span>MISSION CONTROL<small>Tablet kerja</small></span></div>
+          <nav className="vo3d-tablet-nav" aria-label="Semua modul">
+            {TABLET_GROUPS.map((group) => <div className="vo3d-tablet-nav-group" key={group.label}>
+              <h3>{group.label}</h3>
+              {group.routes.map((route) => <Link to={route} aria-current={location.pathname === route ? 'page' : undefined} key={route}>{SHEET_TITLES[route]}</Link>)}
+            </div>)}
+          </nav>
+        </aside>
+        <main className="vo3d-tablet-main">
+          <header className="vo3d-sheet-head vo3d-tablet-head">
+            <div className="sheet-heading vo3d-tablet-heading"><span>{tabletGroup?.label ?? 'Modul'}</span><h2 id="sheet-title" ref={sheetHeading} tabIndex={-1}>{SHEET_TITLES[location.pathname] ?? 'Halaman'}</h2></div>
+            <div className="vo3d-tablet-actions">
+              <button type="button" className="button button-secondary sheet-refresh" disabled={refreshingSheet} onClick={async () => { setRefreshingSheet(true); try { await queryClient.invalidateQueries({ predicate: query => isCardQuery(query, location.pathname) }); } finally { setRefreshingSheet(false); } }}>{refreshingSheet ? 'Memperbarui…' : 'Perbarui'}</button>
+              <button type="button" className="vo3d-icon" aria-label="Tutup tablet dan kembali ke kantor" onClick={() => navigate('/')}><OfficeIcon name="close" /></button>
+            </div>
+          </header>
+          <CardDataStatus path={location.pathname} live={live} />
+          <div className="vo3d-sheet-body vo3d-tablet-body page-content"><Outlet /></div>
+        </main>
       </section>
     </div>}
   </div>;

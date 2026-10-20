@@ -59,15 +59,16 @@ export default function TaskBoardPage() {
       description="Tugas tim Hermes dan tahapan peluang diperbarui mengikuti aktivitas aplikasi."
     />
     <HermesKanbanCard />
-    <div className="section-heading"><div><h2>Alur peluang dan penawaran</h2><p className="form-help">Buka kartu untuk membaca detail proyek, draf, atau hasilnya.</p></div><Link to="/pipeline" className="text-link">Lihat pipeline</Link></div>
+    <div className="section-heading"><div><h2>Alur peluang dan penawaran</h2><p className="form-help" role="status">Buka kartu untuk membaca detail proyek, draf, atau hasilnya. Papan diperbarui otomatis setiap 10 detik.</p></div><Link to="/pipeline" className="text-link">Lihat pipeline</Link></div>
     <section className="filter-bar card-toolbar" aria-label="Filter papan tugas">
       <label className="search-field">
         <span>Cari proyek, klien, atau skill di papan tugas</span>
         <input type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Judul, klien, atau teknologi" />
       </label>
       <SourceSelect value={source} onChange={setSource} />
-      <div className="filter-note">
+      <div className="filter-note" role="status">
         <strong>{projects.length}</strong> kartu ditampilkan
+        <span>Diperbarui {new Date(pipeline.dataUpdatedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</span>
       </div>
     </section>
 
@@ -83,7 +84,7 @@ export default function TaskBoardPage() {
             <p className="kanban-hint">{col.hint}</p>
             {colProjects.length === 0 ? (
               <div className="kanban-empty">
-                Tidak ada kartu
+                {filter.trim() || source !== 'all' ? 'Tidak ada kartu sesuai filter' : `Tidak ada kartu di tahap ${col.title.toLowerCase()}`}
               </div>
             ) : (
               <>{colProjects.slice(0, expanded[col.id] ? colProjects.length : KANBAN_LIMIT).map((p) => (

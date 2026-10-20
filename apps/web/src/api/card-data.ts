@@ -1,7 +1,7 @@
 import type { Query } from '@tanstack/react-query';
 
 const CARD_QUERIES: Record<string, string[]> = {
-  '/overview': ['dashboard', 'projects', 'pipeline', 'insights', 'autopilot'],
+  '/overview': ['dashboard', 'projects', 'autopilot', 'inbox', 'work'],
   '/agents': ['dashboard', 'autopilot', 'profile', 'capabilities', 'business-sync', 'inbox', 'work', 'activity', 'operations', 'knowledge-sync', 'browser-bidding', 'projects-co-id', 'hermes-kanban'],
   '/tasks': ['pipeline', 'hermes-kanban'],
   '/calendar': ['operations', 'autopilot', 'agenda', 'projects', 'policy', 'dashboard', 'work'],
@@ -22,14 +22,28 @@ export function isCardQuery(query: Pick<Query, 'queryKey' | 'isActive'>, path: s
   return query.isActive() && query.queryKey[1] !== 'office' && (CARD_QUERIES[path]?.includes(String(query.queryKey[0])) ?? false);
 }
 
+export type CardDataKind = 'waiting' | 'loading' | 'refreshing' | 'ready' | 'error';
+
 type DataState = { status: string; fetchStatus: string; dataUpdatedAt: number };
 
-export function describeCardData(states: DataState[]): string {
-  if (!states.length) return 'Menunggu data kartu';
+export type CardDataSummary = {
+  kind: CardDataKind;
+  label: string;
+  updatedAt: number | null;
+};
+
+export function summarizeCardData(states: DataState[]): CardDataSummary {
+  if (!states.length) return { kind: 'waiting', label: 'Menunggu sumber data kartu', updatedAt: null };
   const failed = states.filter(state => state.status === 'error').length;
-  if (failed) return `${failed} sumber gagal dimuat${states.some(state => state.fetchStatus === 'fetching') ? ' · mencoba kembali' : ' · periksa pesan di kartu'}`;
-  if (states.some(state => state.status === 'pending')) return 'Memuat sumber data kartu…';
-  if (states.some(state => state.fetchStatus === 'fetching')) return 'Memperbarui data kartu…';
-  const oldest = Math.min(...states.map(state => state.dataUpdatedAt));
-  return oldest > 0 ? `Data dibaca ${new Date(oldest).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : 'Waktu pembacaan belum tersedia';
+  if (failed) return {
+    kind: 'error',
+    label: `${failed} sumber gagal dimuat${states.some(state => state.fetchStatus === 'fetching') ? ', mencoba kembali' : ', periksa pesan di kartu'}`,
+    updatedAt: null,
+  };
+  if (states.some(state => state.status === 'pending')) return { kind: 'loading', label: 'Memuat sumber data kartu', updatedAt: null };
+  const updatedAt = Math.min(...states.map(state => state.dataUpdatedAt));
+  if (states.some(state => state.fetchStatus === 'fetching')) return { kind: 'refreshing', label: 'Memperbarui data kartu', updatedAt: updatedAt || null };
+  return updatedAt > 0
+    ? { kind: 'ready', label: `Data dibaca pukul ${new Date(updatedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`, updatedAt }
+    : { kind: 'waiting', label: 'Waktu pembacaan belum tersedia', updatedAt: null };
 }

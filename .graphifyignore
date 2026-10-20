@@ -1,0 +1,13 @@
+.pnpm-store/
+.agents/
+.claude/
+.opencode/
+.worktrees/
+.local/
+node_modules/
+dist/
+graphify-out/
+tasks/
+pnpm-lock.yaml
+skills-lock.json
+*-gpt.md

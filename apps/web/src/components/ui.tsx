@@ -15,7 +15,7 @@ export function StateLabel({ state, source }: { state: string; source?: Opportun
 
 export function ErrorNotice({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <div className="notice notice-error" role="alert">
+    <div className="notice notice-error" role="alert" aria-atomic="true">
       <span>{message}</span>
       {onRetry && <button className="button button-text" type="button" onClick={onRetry}>Coba lagi</button>}
     </div>
@@ -23,7 +23,11 @@ export function ErrorNotice({ message, onRetry }: { message: string; onRetry?: (
 }
 
 export function LoadingPanel({ label = 'Memuat data lokal...' }: { label?: string }) {
-  return <div className="loading-panel" role="status" aria-live="polite"><span className="loading-line" />{label}</div>;
+  return <div className="loading-panel" role="status" aria-live="polite" aria-atomic="true" aria-busy="true"><span className="loading-line" aria-hidden="true" />{label}</div>;
+}
+
+export function EmptyState({ title, description, action }: { title: string; description: string; action?: ReactNode }) {
+  return <div className="empty-state"><h3>{title}</h3><p>{description}</p>{action && <div className="empty-state-action">{action}</div>}</div>;
 }
 
 export function PageIntro({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: ReactNode }) {
@@ -36,7 +40,7 @@ export function Metric({ label, value, note, tone = 'plain', to }: { label: stri
 }
 
 export function ActivityRows({ events }: { events: AuditEvent[] }) {
-  if (!events.length) return <div className="empty-state"><h3>Belum ada aktivitas</h3><p>Perubahan kebijakan, draf, bid, dan impor akan muncul di sini.</p></div>;
+  if (!events.length) return <EmptyState title="Belum ada aktivitas" description="Perubahan kebijakan, draf, bid, dan impor akan muncul di sini." />;
   return <ol className="activity-list">
     {events.map((event) => (
       <li key={event.id} className="activity-row">
@@ -59,7 +63,7 @@ export function OperationStatus({ data, unavailable = false }: { data: Autopilot
   const reasons = Object.entries(data.summary?.reasons ?? {}).sort((a, b) => b[1] - a[1]);
   return <section className="form-card operation-status" aria-label="Diagnosis operasi otomatis">
     <div className="section-heading"><div><p className="eyebrow">Operasi otomatis</p><h2>{data.cycleInProgress ? 'Siklus sedang berjalan' : data.waitingReason ?? (data.state === 'running' ? 'Aktif, menunggu siklus berikutnya' : 'Operasi memerlukan perhatian')}</h2></div><StateLabel state={data.state} /></div>
-    <p>{data.lastMessage}</p>
+    <p>{data.cycleInProgress && data.lastRunAt ? `Hasil siklus sebelumnya: ${data.lastMessage}` : data.lastMessage}</p>
     {data.marketplaceNotice && <div className="notice notice-warning" role="status"><strong>{data.marketplaceNotice.quotaExhausted ? 'Kuota akun Freelancer habis pada percobaan terakhir' : 'Pengiriman bid terakhir gagal'}</strong><small>Tercatat {formatDate(data.marketplaceNotice.at)}.</small><details className="card-disclosure"><summary>Rincian hasil pengiriman</summary><p>{data.marketplaceNotice.reason}</p>{data.marketplaceNotice.retryAt && <p>Kandidat baru dapat dicoba pada siklus setelah {formatDate(data.marketplaceNotice.retryAt)}. Waktu kuota pulih mengikuti Freelancer.</p>}{data.marketplaceNotice.quotaExhausted && <p><a href="https://www.freelancer.com/dashboard" target="_blank" rel="noreferrer">Periksa jatah bid di Freelancer</a></p>}</details></div>}
     <dl className="operation-facts"><div><dt>Siklus terakhir</dt><dd>{data.lastRunAt ? formatDate(data.lastRunAt) : 'Belum tercatat'}</dd></div><div><dt>Siklus berikutnya</dt><dd>{data.nextRunAt ? formatDate(data.nextRunAt) : 'Tidak terjadwal'}</dd></div><div><dt>Interval saat ini</dt><dd>{data.intervalMinutes === undefined ? 'Tidak tersedia' : `${data.intervalMinutes} menit selama server aktif`}</dd></div><div><dt>Proposal diproses</dt><dd>{data.draftsInProgress ?? 'Tidak diketahui'}</dd></div></dl>
     {data.summary && data.lastRunAt && <p><strong>{data.summary.considered}</strong> proyek terbuka ditinjau, <strong>{data.summary.eligible}</strong> lolos pemeriksaan awal, <strong>{data.lastSubmitted}</strong> bid terkirim pada siklus terakhir.</p>}

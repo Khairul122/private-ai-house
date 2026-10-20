@@ -85,7 +85,7 @@ async function waitForCard(page) {
 }
 
 async function checkOfficePanels(page, viewport) {
-  await check(`${viewport.name}: office roster, floors and board menu`, async () => {
+  await check(`${viewport.name}: office roster, floors and tablet`, async () => {
     await page.getByRole('button', { name: 'Lantai 2', exact: true }).click();
     await page.getByRole('button', { name: 'Lantai 1', exact: true }).click();
     const toggle = page.locator('.vo3d-roster-toggle');
@@ -93,13 +93,11 @@ async function checkOfficePanels(page, viewport) {
     await toggle.click();
     await assertFits(page);
     await toggle.click();
-    await page.getByLabel('Menu papan', { exact: true }).click();
-    const menu = page.locator('nav[aria-label="Papan Mission Control"]');
-    await menu.waitFor({ state: 'visible' });
-    const bounds = await menu.boundingBox();
-    assert(bounds && bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= viewport.width + 1 && bounds.y + bounds.height <= viewport.height + 1, 'board menu stays within viewport');
-    await page.screenshot({ path: resolve(output, `${viewport.name}-board-menu.png`) });
-    await page.getByLabel('Menu papan', { exact: true }).click();
+    await page.getByRole('button', { name: 'Buka tablet Mission Control' }).click();
+    assert.equal(await page.locator('nav[aria-label="Semua modul"] a').count(), 15);
+    await assertFits(page, true);
+    await page.screenshot({ path: resolve(output, `${viewport.name}-tablet.png`) });
+    await page.getByRole('button', { name: 'Tutup tablet dan kembali ke kantor' }).click();
     await toggle.click();
     await page.locator('#office-roster button').first().click();
   });
@@ -111,7 +109,7 @@ async function checkOfficePanels(page, viewport) {
     assert(bounds && bounds.x >= -1 && bounds.y >= -1 && bounds.x + bounds.width <= viewport.width + 1 && bounds.y + bounds.height <= viewport.height + 1, 'office detail panel stays within viewport');
     assert(await panel.evaluate(element => element.scrollWidth <= element.clientWidth + 2), 'office panel has no horizontal overflow');
     const disclosure = panel.locator('details').first();
-    if (await disclosure.count() && !(await disclosure.evaluate(element => element.open))) await disclosure.locator('summary').first().click();
+    if (await disclosure.count() && !(await disclosure.evaluate(element => element.open))) await disclosure.evaluate(element => { element.open = true; });
     await page.screenshot({ path: resolve(output, `${viewport.name}-panel-${label.toLowerCase()}.png`) });
   });
   await page.getByRole('button', { name: 'Tutup panel', exact: true }).click();
@@ -119,10 +117,13 @@ async function checkOfficePanels(page, viewport) {
 
 async function checkOperationsTabs(page, viewport) {
   for (const tab of ['Klien & progres', 'Invoice', 'Jadwal pemilik', 'WhatsApp', 'Google Calendar', 'Laporan tim', 'Bid browser']) await check(`${viewport.name}: operations ${tab}`, async () => {
-    await page.getByRole('combobox', { name: /Bagian operasional/ }).selectOption(tab);
+    await page.locator('.vo3d-sheet-body').evaluate((element, label) => {
+      element.scrollTo({ top: 0 });
+      [...element.querySelectorAll('[role="tab"]')].find(tab => tab.textContent === label)?.click();
+    }, tab);
     await waitForCard(page);
     const disclosure = page.locator('.vo3d-sheet-body details').first();
-    if (await disclosure.count() && !(await disclosure.evaluate(element => element.open))) await disclosure.locator('summary').first().click();
+    if (await disclosure.count() && !(await disclosure.evaluate(element => element.open))) await disclosure.evaluate(element => { element.open = true; });
     await assertFits(page, true);
     await page.locator('.vo3d-sheet-body').evaluate(element => element.scrollTo({ top: 0 }));
     await page.screenshot({ path: resolve(output, `${viewport.name}-operations-${tab.toLowerCase().replace(/[^a-z]+/g, '-')}.png`) });
@@ -174,18 +175,13 @@ try {
       await page.waitForFunction(() => document.querySelector('[aria-label="Status kantor"]')?.textContent?.includes('Koneksi pembaruan aplikasi terhubung'), undefined, { timeout: 15_000 });
     });
     if (!targeted) await checkOfficePanels(page, viewport);
-    await page.getByLabel('Menu papan', { exact: true }).click();
-    await page.locator('nav[aria-label="Papan Mission Control"] a[href="/overview"]').click();
+    await page.getByRole('button', { name: 'Buka tablet Mission Control' }).click();
     for (const path of routes) {
       await check(`${viewport.name}: ${path}`, async () => {
         if (new URL(page.url()).pathname !== path) {
-          const menu = page.locator('.sheet-navigation');
-          if (!(await menu.getAttribute('open')) && await menu.getAttribute('open') !== '') await menu.locator('summary').click();
-          await menu.locator(`a[href="${path}"]`).click();
+          await page.locator(`.vo3d-tablet-nav a[href="${path}"]`).click();
         }
         await waitForCard(page);
-        const menu = page.locator('.sheet-navigation');
-        if (await menu.evaluate(element => element.open)) await menu.locator('summary').click();
         assert.equal(new URL(page.url()).pathname, path, 'card navigation reaches requested route');
         await assertFits(page, true);
         await page.locator('.vo3d-sheet-body').evaluate(element => element.scrollTo({ top: 0 }));
@@ -240,7 +236,7 @@ try {
   await check('fixture: failed refresh hides cached pipeline', async () => {
     phase = 'error';
     await fixture.evaluate(() => window.emitCardFixtureEvent());
-    await fixture.getByText('Pipeline belum dapat dimuat.', { exact: true }).waitFor({ timeout: 10_000 });
+    await fixture.getByText('Pipeline belum dapat dimuat.', { exact: false }).waitFor({ timeout: 10_000 });
     assert.equal(await fixture.getByRole('heading', { name: 'E2E updated through SSE' }).count(), 0, 'cached data cannot remain presented as live');
     await fixture.screenshot({ path: resolve(output, 'fixture-pipeline-unavailable.png') });
   });

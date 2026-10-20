@@ -4,6 +4,12 @@ import type { LiveTopic } from '@fvh/domain';
 
 export type LiveState = 'connecting' | 'live' | 'reconnecting';
 
+export const LIVE_STATE_LABELS: Record<LiveState, string> = {
+  connecting: 'Menghubungkan pembaruan otomatis',
+  live: 'Pembaruan otomatis terhubung',
+  reconnecting: 'Realtime terputus, pembaruan berkala tetap aktif',
+};
+
 /** Server topic -> root query keys that read that data. invalidateQueries matches by prefix and refetches only mounted queries. */
 export const TOPIC_QUERY_KEYS: Record<LiveTopic, string[]> = {
   activity: ['activity', 'agenda', 'insights', 'autopilot'],

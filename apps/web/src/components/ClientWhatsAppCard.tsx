@@ -56,7 +56,7 @@ export default function ClientWhatsAppCard({ projects, clients, refresh }: { pro
         </div>
       </>}
       <label className="form-field"><span>Nomor WhatsApp klien</span><input name="phone" type="tel" inputMode="tel" autoComplete="off" required maxLength={30} value={phone} onChange={e => setPhone(e.target.value)}/></label>
-      <label className="operations-check"><input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)}/>Aktifkan pesan otomatis untuk proyek ini</label>
+      <label className="operations-check"><input type="checkbox" checked={enabled} onChange={e => { if (e.target.checked && !enabled && !window.confirm('Aktifkan pesan WhatsApp otomatis untuk proyek ini? Pesan dapat dikirim ke klien sesuai jenis yang dipilih.')) return; setEnabled(e.target.checked); }}/>Aktifkan pesan otomatis untuk proyek ini</label>
       <fieldset><legend>Jenis pesan yang diizinkan</legend>
       <label className="operations-check"><input type="checkbox" checked={progress} onChange={e => setProgress(e.target.checked)}/>Kirim catatan progres baru</label>
       <label className="operations-check"><input type="checkbox" checked={payments} onChange={e => setPayments(e.target.checked)}/>Konfirmasi pembayaran yang dicatat diterima</label>
