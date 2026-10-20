@@ -120,10 +120,10 @@
     "semantic_hash": "a9455ca13954d653ac3e2124de06f202"
   },
   "apps/server/src/controllers/projects.ts": {
-    "mtime": 1792434425.6995792,
-    "seen": 1792488322.7874024,
-    "ast_hash": "056a249e2af1fe87d0efec86fe4a314b",
-    "semantic_hash": "056a249e2af1fe87d0efec86fe4a314b"
+    "mtime": 1792512011.8419352,
+    "seen": 1792512625.7859194,
+    "ast_hash": "b1f03f8506e13b92ae889e63f05dab35",
+    "semantic_hash": ""
   },
   "apps/server/src/controllers/settings.ts": {
     "mtime": 1792434487.3092496,
@@ -390,10 +390,10 @@
     "semantic_hash": "5c26aa4b05600c7c5f07baa0c527b099"
   },
   "apps/server/src/services/autopilot.ts": {
-    "mtime": 1792442905.7712994,
-    "seen": 1792488322.7874787,
-    "ast_hash": "9fed579b8342e0315afe5a3e77c7ecb0",
-    "semantic_hash": "9fed579b8342e0315afe5a3e77c7ecb0"
+    "mtime": 1792511986.5977962,
+    "seen": 1792512625.7860324,
+    "ast_hash": "1b88318525547329bddf09c270b72656",
+    "semantic_hash": ""
   },
   "apps/server/src/services/browser-bidding.test.ts": {
     "mtime": 1792443022.2624595,
@@ -480,10 +480,10 @@
     "semantic_hash": "ec59eefff9271b9f385a07d818314705"
   },
   "apps/server/src/services/portfolio.test.ts": {
-    "mtime": 1792156192.3365047,
-    "seen": 1792488322.7875042,
-    "ast_hash": "621cfdd33d16487b4a5e4d5319720dbe",
-    "semantic_hash": "621cfdd33d16487b4a5e4d5319720dbe"
+    "mtime": 1792512235.1369462,
+    "seen": 1792512625.7860723,
+    "ast_hash": "db953c669b7de904b8a35adbb8b90137",
+    "semantic_hash": ""
   },
   "apps/server/src/services/portfolio.ts": {
     "mtime": 1792156157.0580342,
@@ -708,9 +708,9 @@
     "semantic_hash": "89efe558826bc24bdbbcd7aa93516e39"
   },
   "apps/web/src/office/OfficeShell.tsx": {
-    "mtime": 1792511572.0161455,
-    "seen": 1792511735.938858,
-    "ast_hash": "110e446911cbe250fd8b1573d968f54d",
+    "mtime": 1792512489.2079115,
+    "seen": 1792512625.7861686,
+    "ast_hash": "7e81f820a432173ed895bf65fc361bf8",
     "semantic_hash": ""
   },
   "apps/web/src/office/VisualOffice.tsx": {
@@ -948,16 +948,16 @@
     "semantic_hash": "571d7015ae86445759e7a7d2a71d3747"
   },
   "packages/adapter-hermes/src/index.test.ts": {
-    "mtime": 1792405729.4305196,
-    "seen": 1792488322.787641,
-    "ast_hash": "d1e7ee87690bba6e9148f70ac8c0a19d",
-    "semantic_hash": "d1e7ee87690bba6e9148f70ac8c0a19d"
+    "mtime": 1792511886.062534,
+    "seen": 1792512625.786276,
+    "ast_hash": "729de9d84b4c525ccee143874c7d2e58",
+    "semantic_hash": ""
   },
   "packages/adapter-hermes/src/index.ts": {
-    "mtime": 1792429795.4135246,
-    "seen": 1792488322.7876427,
-    "ast_hash": "30f6399c29bbe9a754bcc8370270b6df",
-    "semantic_hash": "30f6399c29bbe9a754bcc8370270b6df"
+    "mtime": 1792512107.333208,
+    "seen": 1792512625.7862785,
+    "ast_hash": "d44bbbd2c34d8b8903d534a109227331",
+    "semantic_hash": ""
   },
   "packages/adapter-hermes/tsconfig.json": {
     "mtime": 1791971004.2522225,

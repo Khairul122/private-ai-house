@@ -110,25 +110,27 @@ export function proposalFor(project: ProjectOpportunity, specialties: string[], 
   const matched = project.skills.filter((skill) => specialties.some((specialty) => specialty.toLocaleLowerCase() === skill.toLocaleLowerCase()));
   const skills=matched.slice(0,3).join(', ');
   const clientName = project.clientName && !['Klien Freelancer', 'Tidak tersedia'].includes(project.clientName) ? project.clientName : undefined;
+  const briefAnchorCandidate = project.description.split(/[.!?\n]/).map((part) => part.trim()).find((part) => part.length >= 20)?.slice(0, 240) ?? project.title;
+  const briefAnchor = /ignore\s+(?:all\s+)?instructions|claim\s+\d+/i.test(briefAnchorCandidate) ? project.title : briefAnchorCandidate;
 
   if (isIndonesianClient) {
     return [
       clientName ? `Halo ${clientName},` : 'Halo,',
-      `Saya dapat membantu mengerjakan “${project.title}” dengan implementasi bertahap, sehingga bagian penting dapat Anda tinjau lebih awal dan perubahan tetap terkendali.${skills?` Keahlian yang paling sesuai dari profil saya: ${skills}.`:''}`,
-      'Pendekatan saya:\n1. Memastikan alur utama, kebutuhan akses, integrasi, dan kriteria penerimaan sebelum implementasi.\n2. Membangun fitur inti dalam bagian yang dapat diuji, termasuk validasi input, penanganan kesalahan, dan jalur gagal yang relevan.\n3. Menguji alur utama dan integrasi, lalu memperbaiki temuan sebelum serah terima.',
+      `Dari brief Anda, masalah utama yang perlu diselesaikan adalah: “${briefAnchor}”. Saya akan mengubah kebutuhan ini menjadi alur yang berjalan, dapat diuji, dan mudah dipelihara.${skills?` Keahlian yang paling sesuai dari profil saya: ${skills}.`:''}`,
+      'Solusi yang saya tawarkan:\n1. Memetakan alur dan kriteria berhasil dari masalah yang disebutkan pada brief.\n2. Membangun bagian inti dengan validasi input, penanganan kesalahan, dan integrasi yang sesuai agar masalah tidak berpindah ke tahap berikutnya.\n3. Menguji alur utama, memperbaiki temuan, lalu menyerahkan hasil yang siap Anda verifikasi.',
       'Hasil yang diserahkan:\n- Kode sumber untuk cakupan yang disepakati.\n- Konfigurasi dan petunjuk menjalankan atau deployment.\n- Ringkasan struktur, keputusan implementasi, dan hasil pengujian agar pekerjaan mudah dilanjutkan.',
       ...(portfolio.length?[`Portofolio publik yang relevan untuk Anda tinjau:\n${portfolio.map(p=>`${p.label}: ${p.url}`).join('\n')}\nRepo tersebut saya lampirkan sebagai contoh kode yang dapat diperiksa; detail penerapan proyek Anda tetap akan mengikuti brief dan sistem yang tersedia.`]:[]),
-      `Penawaran saya ${project.currency} ${price} dengan estimasi ${durationDays} hari untuk cakupan yang disepakati. Sebelum mulai, bagian mana yang paling kritis untuk diprioritaskan, dan apakah ada sistem atau API yang harus dipertahankan kompatibilitasnya?`,
+      `Saya siap mulai dari masalah utama tersebut dan menjaga progres tetap terlihat melalui hasil yang dapat diuji. Penawaran saya ${project.currency} ${price} dengan estimasi ${durationDays} hari. Kirimkan alur atau contoh error paling penting; saya akan jadikan itu prioritas implementasi pertama.`, 
     ].join('\n\n').slice(0, 4_000);
   }
 
   return [
     clientName ? `Hello ${clientName},` : 'Hello,',
-    `I can help deliver “${project.title}” through staged implementation, so you can review critical behavior early while changes remain controlled.${skills?` The strongest matching skills from my profile are ${skills}.`:''}`,
-    'How I would approach it:\n1. Confirm the primary workflow, access requirements, integrations, and acceptance criteria before implementation.\n2. Build the core scope in testable parts, including input validation, error handling, and relevant failure paths.\n3. Run focused workflow and integration checks, then resolve findings before handover.',
+    `From your brief, the main problem to solve is: “${briefAnchor}”. I will turn that requirement into a working, testable flow that is easier to operate and maintain.${skills?` The strongest matching skills from my profile are ${skills}.`:''}`,
+    'My solution:\n1. Map the requested workflow and success criteria to the implementation.\n2. Build the core scope with input validation, error handling, and the integrations needed to prevent the stated problem from recurring.\n3. Test the main flow, fix findings, and hand over a result you can verify immediately.',
     'Deliverables:\n- Source code for the agreed scope.\n- Configuration plus setup or deployment instructions.\n- A concise implementation summary and test results so the work can be maintained after handover.',
     ...(portfolio.length?[`Relevant public work you can review:\n${portfolio.map(p=>`${p.label}: ${p.url}`).join('\n')}\nI am sharing these repositories as inspectable code examples; your implementation will still be adapted to the supplied brief and existing system.`]:[]),
-    `My bid is ${project.currency} ${price}, with an estimated delivery time of ${durationDays} days for the agreed scope. Which workflow is most critical, and are there existing systems or APIs that must remain compatible?`,
+    `I am ready to start with that priority and keep progress visible through verifiable results. My bid is ${project.currency} ${price}, with an estimated delivery time of ${durationDays} days. Share the most important workflow or error example, and I will use it as the first implementation checkpoint.`, 
   ].join('\n\n').slice(0, 4_000);
 }
 

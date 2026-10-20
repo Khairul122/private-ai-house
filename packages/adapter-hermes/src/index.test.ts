@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { readFile } from 'node:fs/promises';
-import { HermesCliDraftingAdapter, type ProcessRunner } from './index.js';
+import { detectProposalLanguage, HermesCliDraftingAdapter, type ProcessRunner } from './index.js';
 
 const input = {
   project: {
@@ -28,6 +28,11 @@ function resultEvent(value: unknown) {
 }
 
 describe('HermesCliDraftingAdapter', () => {
+  it('detects proposal language from project description', () => {
+    expect(detectProposalLanguage('Saya membutuhkan aplikasi untuk mengelola data dan laporan proyek ini.')).toBe('Bahasa Indonesia');
+    expect(detectProposalLanguage('We need an application to manage project data and reports.')).toBe('English');
+  });
+
   it('requests Indonesian proposals for projects.co.id regardless of client country', async () => {
     const runner: ProcessRunner = async (_command, args) => {
       const prompt = await readFile(args[args.indexOf('--query-file') + 1]!, 'utf8');
