@@ -530,7 +530,7 @@ export default function OfficeShell() {
     </figure>}
 
     <nav className="vo3d-float vo3d-dock" aria-label="Navigasi ruangan">
-      {ZONES.map((zone) => { const count = [...spots.values()].filter((spot) => zoneOf(spot) === zone.id).length; return <button key={zone.id} type="button" aria-label={`${zone.label}, ${count} agen`} onClick={() => fly({ kind: 'zone', id: zone.id })}>
+      {ZONES.map((zone) => { const count = [...spots.values()].filter((spot) => zoneOf(spot) === zone.id).length; return <button key={zone.id} type="button" aria-label={`${zone.label}, ${count} agen`} aria-pressed={command.kind === 'zone' && command.id === zone.id} onClick={() => fly({ kind: 'zone', id: zone.id })}>
         {zone.label}<span className="vo3d-dock-count" aria-hidden="true">{count}</span>
       </button>; })}
       <button className="vo3d-dock-panel" type="button" aria-pressed={panel === 'activity'} onClick={() => setPanel(panel === 'activity' ? null : 'activity')}>Aktivitas</button>

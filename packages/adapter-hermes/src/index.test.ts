@@ -37,6 +37,17 @@ describe('HermesCliDraftingAdapter', () => {
     const adapter = new HermesCliDraftingAdapter({ executable: 'hermes.exe', profile: 'private-ai-house', workspaceRoot: 'D:/private-ai-house', runner });
     await adapter.draftBid({ ...input, project: { ...input.project, source: 'projects_co_id', clientCountry: 'US' } });
   });
+  it('requires a verified portfolio link in Freelancer proposals when one is available', async () => {
+    const publicPortfolio = [{ label: 'owner/repo', url: 'https://github.com/owner/repo' }];
+    const missing: ProcessRunner = async () => ({ stdout: resultEvent(output), stderr: '', exitCode: 0 });
+    const adapter = new HermesCliDraftingAdapter({ executable: 'hermes.exe', profile: 'private-ai-house', workspaceRoot: 'D:/private-ai-house', runner: missing });
+    await expect(adapter.draftBid({ ...input, project: { ...input.project, source: 'freelancer' }, publicPortfolio })).rejects.toMatchObject({ code: 'missing_verified_portfolio' });
+
+    const included: ProcessRunner = async () => ({ stdout: resultEvent({ ...output, proposal: `${output.proposal} Relevant work: https://github.com/owner/repo` }), stderr: '', exitCode: 0 });
+    await expect(new HermesCliDraftingAdapter({ executable: 'hermes.exe', profile: 'private-ai-house', workspaceRoot: 'D:/private-ai-house', runner: included }).draftBid({ ...input, project: { ...input.project, source: 'freelancer' }, publicPortfolio })).resolves.toMatchObject({ proposal: expect.stringContaining(publicPortfolio[0]!.url) });
+    await expect(adapter.draftBid({ ...input, project: { ...input.project, source: 'projects_co_id' }, publicPortfolio })).resolves.toEqual(output);
+  });
+
   it('rejects invented or private portfolio links and keeps manager reviews tool-free',async()=>{
     const bad:ProcessRunner=async()=>({stdout:resultEvent({...output,proposal:`${output.proposal} Portfolio https://example.com/invented`}),stderr:'',exitCode:0});
     const adapter=new HermesCliDraftingAdapter({executable:'hermes.exe',profile:'private-ai-house',workspaceRoot:'D:/private-ai-house',runner:bad});

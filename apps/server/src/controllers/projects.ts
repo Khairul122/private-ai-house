@@ -55,11 +55,11 @@ export function projectsController({ options, repository, now, drafting, draftin
       // Lets the office show the Hermes lead as working only while a draft request is actually running.
       state.draftsInProgress += 1;
       try {
-        const evidence=(await repository.searchKnowledge(`${project.title} ${project.skills.join(' ')}`,4)).map(item=>({label:item.path,source:item.url,content:item.content}));
+        const candidates=(await repository.searchKnowledge(`${project.title} ${project.skills.join(' ')}`,12)).map(item=>({label:item.path,source:item.url,content:item.content}));
         generated = await drafting.draftBid({
           project,
           profileFacts: profile.facts,
-          evidence,publicPortfolio:await options.publicPortfolio?.(evidence).catch(()=>[]) ?? [],
+          evidence:candidates.slice(0,4),publicPortfolio:await options.publicPortfolio?.(candidates).catch(()=>[]) ?? [],
           profileRate: { min: profile.minPrice, max: profile.maxPrice },
           score,
         });

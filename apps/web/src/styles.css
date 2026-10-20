@@ -549,13 +549,13 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .vo3d-search kbd { padding: 1px 6px; border: 1px solid var(--vo-line); border-radius: 5px; font-size: 11px; white-space: nowrap; }
 .vo3d-icon { display: grid; width: 44px; height: 44px; flex: none; place-items: center; border: 1px solid var(--vo-line); border-radius: 12px; background: var(--vo-card); box-shadow: 0 6px 24px rgba(15, 23, 42, .12); }
 .vo3d-icon[aria-pressed='true'], .vo3d-seg button[aria-pressed='true'] { border-color: var(--vo-accent); background: var(--vo-accent); color: #fff; }
-.vo3d-dock { bottom: 16px; left: 50%; display: flex; max-width: calc(100% - 520px); gap: 3px; overflow-x: auto; padding: 5px; transform: translateX(-50%); border-color: #294237; background: #294237; box-shadow: 0 6px 22px #0d241a55; backdrop-filter: none; scrollbar-width: none; }
-.vo3d-dock button { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 11px; border: 0; border-radius: 5px; background: none; color: #fff; font-size: 14px; font-weight: 600; white-space: nowrap; }
-.vo3d-dock button:hover, .vo3d-dock button[aria-pressed='true'] { background: #42604f; color: #fff; }
+.vo3d-dock { bottom: 16px; left: 50%; display: flex; max-width: calc(100% - 520px); gap: 3px; overflow-x: auto; padding: 5px; transform: translateX(-50%); border-color: var(--vo-line); background: #fff; box-shadow: 0 6px 22px #0d241a33; backdrop-filter: none; scrollbar-width: none; }
+.vo3d-dock button { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 11px; border: 0; border-radius: 5px; background: none; color: #294237; font-size: 14px; font-weight: 600; white-space: nowrap; }
+.vo3d-dock button:hover { background: #e7eee8; color: #173c2b; }
+.vo3d-dock button[aria-pressed='true'], .vo3d-dock button:active { background: #294237; color: #fff; }
 .vo3d-dock button:focus-visible { outline: 2px solid var(--vo-focus); outline-offset: -2px; }
 .vo3d-dock-count { display: grid; min-width: 23px; height: 23px; padding: 0 4px; place-items: center; border-radius: 4px; background: #dce9de; color: #173c2b; font-size: 12px; font-variant-numeric: tabular-nums; font-weight: 700; }
-.vo3d-dock button.vo3d-dock-panel { color: #e3ece5; }
-.vo3d-dock button.vo3d-dock-panel:nth-last-child(2) { border-left: 1px solid #667c6d; border-radius: 0 5px 5px 0; margin-left: 4px; padding-left: 15px; }
+.vo3d-dock button.vo3d-dock-panel:nth-last-child(2) { border-left: 1px solid var(--vo-line); border-radius: 0 5px 5px 0; margin-left: 4px; padding-left: 15px; }
 .vo3d-seg { right: 16px; bottom: 16px; display: flex; gap: 4px; padding: 6px; }
 .vo3d-seg button { display: flex; align-items: center; gap: 6px; min-height: 44px; min-width: 44px; justify-content: center; padding: 0 10px; border: 1px solid transparent; border-radius: 10px; background: none; color: var(--vo-muted); font-size: 13px; font-weight: 600; }
 .vo3d-seg button:hover { color: var(--vo-ink); background: rgba(31, 41, 51, .06); }

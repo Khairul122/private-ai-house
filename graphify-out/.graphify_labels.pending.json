@@ -1,0 +1,16 @@
+{
+  "2": "OfficeShell.tsx",
+  "26": "persistence/src/index.ts",
+  "27": "api",
+  "32": "WorkPage.tsx",
+  "35": "adapter-freelancer/src/index.ts",
+  "39": "vitest",
+  "41": "services/browser-bidding.ts",
+  "46": "database.ts",
+  "47": "api.ts",
+  "51": "repository.ts",
+  "53": "office-state.ts",
+  "54": "App.tsx",
+  "55": "DpapiIntegrationVault",
+  "73": "application/src/index.ts"
+}

@@ -114,19 +114,21 @@ export function proposalFor(project: ProjectOpportunity, specialties: string[], 
   if (isIndonesianClient) {
     return [
       clientName ? `Halo ${clientName},` : 'Halo,',
-      `Untuk “${project.title}”, saya mengusulkan implementasi bertahap agar hasilnya bisa Anda tinjau sebelum serah terima.${skills?` Keahlian profil yang sesuai: ${skills}.`:''}`,
-      'Rencana pengerjaan:\n1. Konfirmasi alur utama, akses, dan kriteria penerimaan.\n2. Implementasikan ruang lingkup yang disepakati, lalu periksa alur utama dan penanganan kesalahan.\n3. Serahkan kode, petunjuk menjalankan, dan ringkasan hasil pemeriksaan.',
-      ...(portfolio.length?[`Contoh kode publik yang relevan untuk ditinjau:\n${portfolio.map(p=>`${p.label}: ${p.url}`).join('\n')}`]:[]),
-      `Penawaran ${project.currency} ${price} dengan estimasi ${durationDays} hari untuk cakupan yang disepakati. Alur atau hasil mana yang paling penting untuk Anda prioritaskan?`,
+      `Saya dapat membantu mengerjakan “${project.title}” dengan implementasi bertahap, sehingga bagian penting dapat Anda tinjau lebih awal dan perubahan tetap terkendali.${skills?` Keahlian yang paling sesuai dari profil saya: ${skills}.`:''}`,
+      'Pendekatan saya:\n1. Memastikan alur utama, kebutuhan akses, integrasi, dan kriteria penerimaan sebelum implementasi.\n2. Membangun fitur inti dalam bagian yang dapat diuji, termasuk validasi input, penanganan kesalahan, dan jalur gagal yang relevan.\n3. Menguji alur utama dan integrasi, lalu memperbaiki temuan sebelum serah terima.',
+      'Hasil yang diserahkan:\n- Kode sumber untuk cakupan yang disepakati.\n- Konfigurasi dan petunjuk menjalankan atau deployment.\n- Ringkasan struktur, keputusan implementasi, dan hasil pengujian agar pekerjaan mudah dilanjutkan.',
+      ...(portfolio.length?[`Portofolio publik yang relevan untuk Anda tinjau:\n${portfolio.map(p=>`${p.label}: ${p.url}`).join('\n')}\nRepo tersebut saya lampirkan sebagai contoh kode yang dapat diperiksa; detail penerapan proyek Anda tetap akan mengikuti brief dan sistem yang tersedia.`]:[]),
+      `Penawaran saya ${project.currency} ${price} dengan estimasi ${durationDays} hari untuk cakupan yang disepakati. Sebelum mulai, bagian mana yang paling kritis untuk diprioritaskan, dan apakah ada sistem atau API yang harus dipertahankan kompatibilitasnya?`,
     ].join('\n\n').slice(0, 4_000);
   }
 
   return [
     clientName ? `Hello ${clientName},` : 'Hello,',
-    `For “${project.title}”, I propose a staged implementation so you can review the result before handover.${skills?` Relevant skills from my profile: ${skills}.`:''}`,
-    'My plan:\n1. Confirm the main workflow, required access, and acceptance criteria.\n2. Implement the agreed scope, then check the main paths and error handling.\n3. Deliver the code, setup instructions, and a summary of the checks performed.',
-    ...(portfolio.length?[`Relevant public code for your review:\n${portfolio.map(p=>`${p.label}: ${p.url}`).join('\n')}`]:[]),
-    `My bid is ${project.currency} ${price}, with an estimated delivery time of ${durationDays} days for the agreed scope. Which workflow or outcome should I prioritize for you?`,
+    `I can help deliver “${project.title}” through staged implementation, so you can review critical behavior early while changes remain controlled.${skills?` The strongest matching skills from my profile are ${skills}.`:''}`,
+    'How I would approach it:\n1. Confirm the primary workflow, access requirements, integrations, and acceptance criteria before implementation.\n2. Build the core scope in testable parts, including input validation, error handling, and relevant failure paths.\n3. Run focused workflow and integration checks, then resolve findings before handover.',
+    'Deliverables:\n- Source code for the agreed scope.\n- Configuration plus setup or deployment instructions.\n- A concise implementation summary and test results so the work can be maintained after handover.',
+    ...(portfolio.length?[`Relevant public work you can review:\n${portfolio.map(p=>`${p.label}: ${p.url}`).join('\n')}\nI am sharing these repositories as inspectable code examples; your implementation will still be adapted to the supplied brief and existing system.`]:[]),
+    `My bid is ${project.currency} ${price}, with an estimated delivery time of ${durationDays} days for the agreed scope. Which workflow is most critical, and are there existing systems or APIs that must remain compatible?`,
   ].join('\n\n').slice(0, 4_000);
 }
 
@@ -277,8 +279,9 @@ export class FreelancerAutopilot {
 
   private async writeProposal(project: ProjectOpportunity, policy: AutonomyPolicy, bid: { amount: number; period: number }, score: number) {
     const { draftProposal, repository } = this.dependencies;
-    const evidence=(await repository.searchKnowledge(`${project.title} ${project.skills.join(' ')}`,4)).map(item=>({label:item.path,source:item.url,content:item.content}));
-    const publicPortfolio=await this.dependencies.publicPortfolio?.(evidence).catch(()=>[]) ?? [];
+    const candidates=(await repository.searchKnowledge(`${project.title} ${project.skills.join(' ')}`,12)).map(item=>({label:item.path,source:item.url,content:item.content}));
+    const evidence=candidates.slice(0,4);
+    const publicPortfolio=await this.dependencies.publicPortfolio?.(candidates).catch(()=>[]) ?? [];
     const template = {
       proposal: proposalFor(project, policy.specializations, bid.amount, bid.period,publicPortfolio),
       evidence: [{ label: 'Ringkasan publik Freelancer', source: 'Profil Freelancer akun sendiri' },...publicPortfolio.map(p=>({label:p.label,source:p.url}))],
