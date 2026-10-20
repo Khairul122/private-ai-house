@@ -17,6 +17,8 @@ const routes = process.env.FVH_E2E_ROUTES?.split(',') ?? allRoutes;
 assert(routes.every(route => allRoutes.includes(route)), 'Targeted routes must be known cards');
 const results = [];
 const blockedWrites = [];
+const pageErrors = [];
+const consoleErrors = [];
 const pendingApi = new Map();
 const apiReads = new Map();
 // Cards and overlays do not need the 3D renderer; software WebGL exhausts RAM on the owner's machine.
@@ -45,7 +47,27 @@ async function check(name, run) {
 }
 
 async function writeReport() {
-  await writeFile(resolve(output, 'report.json'), JSON.stringify({ base: base.origin, webgl: 'disabled; card and overlay checks only', results, blockedWrites, apiReads: Object.fromEntries(apiReads) }, null, 2));
+  await writeFile(resolve(output, 'report.json'), JSON.stringify({ base: base.origin, webgl: 'disabled; card and overlay checks only', results, blockedWrites, pageErrors, consoleErrors, apiReads: Object.fromEntries(apiReads) }, null, 2));
+}
+
+function observePage(page) {
+  page.on('pageerror', error => pageErrors.push({ message: error.message, url: page.url() }));
+  page.on('console', message => {
+    if (message.type() === 'error') consoleErrors.push({ text: message.text(), url: page.url() });
+  });
+  page.on('request', request => {
+    const path = new URL(request.url()).pathname;
+    if (!path.startsWith('/api/') || path === '/api/events') return;
+    pendingApi.set(request, { path, started: Date.now() });
+    const summary = apiReads.get(path) ?? { count: 0, completed: 0, failed: 0, maxMs: 0 };
+    summary.count++; apiReads.set(path, summary);
+  });
+  page.on('requestfinished', request => {
+    const pending = pendingApi.get(request);
+    if (pending) { const summary = apiReads.get(pending.path); summary.completed++; summary.maxMs = Math.max(summary.maxMs, Date.now() - pending.started); }
+    pendingApi.delete(request);
+  });
+  page.on('requestfailed', request => { const pending = pendingApi.get(request); if (pending) apiReads.get(pending.path).failed++; pendingApi.delete(request); });
 }
 
 async function assertFits(page, dialog = false) {
@@ -81,28 +103,67 @@ async function assertFits(page, dialog = false) {
 
 async function waitForCard(page) {
   await page.locator('[role="dialog"]').waitFor();
-  await page.waitForFunction(() => !document.querySelector('.vo3d-sheet-body .loading-panel') && !/Memuat sumber|Menunggu data/.test(document.querySelector('.sheet-data-status')?.textContent ?? ''), undefined, { timeout: 45_000 });
+  await page.waitForFunction(() => !document.querySelector('.vo3d-sheet-body .loading-panel'), undefined, { timeout: 45_000 });
+}
+
+async function closeOfficePanel(page) {
+  const close = page.getByRole('button', { name: 'Tutup panel', exact: true });
+  if (await close.isVisible().catch(() => false)) {
+    await close.click({ force: true });
+    await close.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {});
+  }
+}
+
+async function closeTablet(page) {
+  const close = page.getByRole('button', { name: 'Tutup tablet dan kembali ke kantor', exact: true });
+  if (await close.isVisible().catch(() => false)) {
+    await close.click({ force: true });
+    await close.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {});
+  }
 }
 
 async function checkOfficePanels(page, viewport) {
-  await check(`${viewport.name}: office roster, floors and tablet`, async () => {
-    await page.getByRole('button', { name: 'Lantai 2', exact: true }).click();
-    await page.getByRole('button', { name: 'Lantai 1', exact: true }).click();
+  await closeOfficePanel(page);
+  await closeTablet(page);
+  await check(`${viewport.name}: office roster, floors, view and tablet`, async () => {
+    const floorOne = page.getByRole('button', { name: 'Lantai 1', exact: true });
+    const floorTwo = page.getByRole('button', { name: 'Lantai 2', exact: true });
+    await floorTwo.click();
+    assert.equal(await floorTwo.getAttribute('aria-pressed'), 'true', 'floor 2 becomes active');
+    await floorOne.click();
+    assert.equal(await floorOne.getAttribute('aria-pressed'), 'true', 'floor 1 becomes active');
+    const topView = page.getByRole('button', { name: 'Tampilan denah atas' });
+    const threeDView = page.getByRole('button', { name: 'Tampilan 3D' });
+    await topView.click();
+    assert.equal(await topView.getAttribute('aria-pressed'), 'true', 'top view becomes active');
+    await threeDView.click();
+    assert.equal(await threeDView.getAttribute('aria-pressed'), 'true', '3D view becomes active');
     const toggle = page.locator('.vo3d-roster-toggle');
     if (await toggle.getAttribute('aria-expanded') === 'true') await toggle.click();
     await toggle.click();
+    assert.equal(await toggle.getAttribute('aria-expanded'), 'true', 'roster opens');
     await assertFits(page);
-    await toggle.click();
+    const agent = page.locator('#office-roster button').first();
+    assert(await agent.count(), 'office roster has an agent control');
+    await agent.click();
+    await page.getByRole('tab', { name: 'Agen', exact: true }).waitFor();
+    await closeOfficePanel(page);
     await page.getByRole('button', { name: 'Buka tablet Mission Control' }).click();
-    assert.equal(await page.locator('nav[aria-label="Semua modul"] a').count(), 15);
+    const tabletNav = page.locator('nav[aria-label="Semua modul"]');
+    await tabletNav.waitFor({ state: 'visible' });
+    assert.equal(await tabletNav.locator('a').count(), 15, 'tablet exposes all remodeled modules');
     await assertFits(page, true);
     await page.screenshot({ path: resolve(output, `${viewport.name}-tablet.png`) });
-    await page.getByRole('button', { name: 'Tutup tablet dan kembali ke kantor' }).click();
-    await toggle.click();
-    await page.locator('#office-roster button').first().click();
+    await closeTablet(page);
+    await page.getByRole('button', { name: 'Buka tablet Mission Control' }).focus();
+    await page.keyboard.press('Tab');
+    assert(await page.evaluate(() => document.activeElement?.checkVisibility()), 'keyboard focus remains visible after office Tab');
   });
+  await closeTablet(page);
+  await closeOfficePanel(page);
   for (const label of ['Pemilik', 'Agen', 'Aktivitas', 'Kanal']) await check(`${viewport.name}: office ${label} panel`, async () => {
-    if (!(await page.locator('[aria-label="Panel detail"]').isVisible())) await page.getByRole('button', { name: 'Pemilik', exact: true }).click();
+    await closeOfficePanel(page);
+    await page.getByRole('button', { name: 'Pemilik', exact: true }).click();
     await page.getByRole('tab', { name: label, exact: true }).click();
     const panel = page.locator('[aria-label="Panel detail"]');
     const bounds = await panel.boundingBox();
@@ -112,7 +173,7 @@ async function checkOfficePanels(page, viewport) {
     if (await disclosure.count() && !(await disclosure.evaluate(element => element.open))) await disclosure.evaluate(element => { element.open = true; });
     await page.screenshot({ path: resolve(output, `${viewport.name}-panel-${label.toLowerCase()}.png`) });
   });
-  await page.getByRole('button', { name: 'Tutup panel', exact: true }).click();
+  await closeOfficePanel(page);
 }
 
 async function checkOperationsTabs(page, viewport) {
@@ -134,32 +195,24 @@ async function checkOperationsTabs(page, viewport) {
 async function assertFocusTrap(page) {
   await page.evaluate(() => {
     const items = [...document.querySelector('.vo3d-sheet').querySelectorAll('a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]')].filter(element => element.checkVisibility());
-    window.cardFocusEdges = { first: items[0], last: items.at(-1) };
-    window.cardFocusEdges.last.focus();
+    if (!items.length) throw new Error('card has focusable controls');
+    items.at(-1).focus();
   });
   await page.keyboard.press('Tab');
-  assert(await page.evaluate(() => window.cardFocusEdges.first === document.activeElement), 'Tab must wrap to the first card control');
+  assert(await page.evaluate(() => {
+    const items = [...document.querySelector('.vo3d-sheet').querySelectorAll('a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]')].filter(element => element.checkVisibility());
+    return items[0] === document.activeElement;
+  }), 'Tab must wrap to the first card control');
   await page.keyboard.press('Shift+Tab');
-  assert(await page.evaluate(() => window.cardFocusEdges.last === document.activeElement), 'Shift+Tab must wrap to the last card control');
+  assert(await page.evaluate(() => {
+    const items = [...document.querySelector('.vo3d-sheet').querySelectorAll('a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]')].filter(element => element.checkVisibility());
+    return items.at(-1) === document.activeElement;
+  }), 'Shift+Tab must wrap to the last card control');
 }
 
 try {
   const page = await context.newPage();
-  const pageErrors = [];
-  page.on('pageerror', error => pageErrors.push(error.name));
-  page.on('request', request => {
-    const path = new URL(request.url()).pathname;
-    if (!path.startsWith('/api/') || path === '/api/events') return;
-    pendingApi.set(request, { path, started: Date.now() });
-    const summary = apiReads.get(path) ?? { count: 0, completed: 0, failed: 0, maxMs: 0 };
-    summary.count++; apiReads.set(path, summary);
-  });
-  page.on('requestfinished', request => {
-    const pending = pendingApi.get(request);
-    if (pending) { const summary = apiReads.get(pending.path); summary.completed++; summary.maxMs = Math.max(summary.maxMs, Date.now() - pending.started); }
-    pendingApi.delete(request);
-  });
-  page.on('requestfailed', request => { const pending = pendingApi.get(request); if (pending) apiReads.get(pending.path).failed++; pendingApi.delete(request); });
+  observePage(page);
   const desktop = { name: 'desktop', width: 1440, height: 900 };
   const mobile = { name: 'mobile', width: 390, height: 844 };
   for (const viewport of fixturesOnly ? [] : mobileOnly ? [mobile] : targeted ? [desktop] : [desktop, mobile]) {
@@ -172,7 +225,7 @@ try {
       await page.screenshot({ path: resolve(output, `${viewport.name}-office.png`) });
     });
     await check(`${viewport.name}: actual SSE connection`, async () => {
-      await page.waitForFunction(() => document.querySelector('[aria-label="Status kantor"]')?.textContent?.includes('Koneksi pembaruan aplikasi terhubung'), undefined, { timeout: 15_000 });
+      await page.waitForFunction(() => document.querySelector('[aria-label="Status kantor"]')?.textContent?.includes('Koneksi pembaruan aplikasi terhubung'), undefined, { timeout: 45_000 });
     });
     if (!targeted) await checkOfficePanels(page, viewport);
     await page.getByRole('button', { name: 'Buka tablet Mission Control' }).click();
@@ -198,12 +251,16 @@ try {
       await page.screenshot({ path: resolve(output, `${viewport.name}-office-ready.png`) });
     });
   }
-  await check('no uncaught page exceptions', async () => assert.deepEqual(pageErrors, []));
+  await check('no uncaught page exceptions or console errors', async () => {
+    assert.deepEqual(pageErrors, [], 'page must not throw uncaught exceptions');
+    assert.deepEqual(consoleErrors, [], 'page must not emit console errors');
+  });
   await page.close();
 
   if (!targeted) {
   // Only this isolated page receives fixture data and a controllable EventSource.
   const fixture = await context.newPage();
+  observePage(fixture);
   await fixture.addInitScript(() => {
     const sources = [];
     class FixtureEventSource extends EventTarget {

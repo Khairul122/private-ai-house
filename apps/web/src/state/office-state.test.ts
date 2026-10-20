@@ -53,6 +53,14 @@ describe('office state', () => {
     expect(agent(deriveOfficeAgents(autopilot({ state: 'paused' }), []), 'market-scout')).toMatchObject({ state: 'offline', room: null, reason: 'Autopilot dijeda melalui kill switch.' });
   });
 
+  it('does not fabricate idle work, routes, or activity without matching signals', () => {
+    const agents = deriveOfficeAgents(autopilot(), [event('unrelated')]);
+    for (const id of ['market-scout', 'bid-strategist', 'compliance-auditor', 'profile-editor']) {
+      expect(agent(agents, id)).toMatchObject({ state: 'idle', room: 'lounge', task: null, recentActivity: [] });
+    }
+    expect(agent(agents, 'market-scout').reason).toContain('tidak sedang menjalankan siklus');
+  });
+
   it('routes activity to matching agents', () => {
     const agents = deriveOfficeAgents(autopilot(), [event('bid.created'), event('policy.checked'), event('knowledge.synced'), event('autopilot.policy_bootstrapped'), event('marketplace.projects_synced'), event('unrelated')]);
     expect(agent(agents, 'bid-strategist').recentActivity.map((item) => item.type)).toEqual(['bid.created']);
@@ -97,6 +105,18 @@ describe('office state', () => {
     const agents = deriveOfficeAgents(autopilot({ cycleInProgress: true }), []);
     expect(summarize(agents)).toEqual({ working: 3, idle: 4, offline: 0, unknown: 14 });
     expect(summarize(deriveOfficeAgents(undefined, []))).toEqual({ working: 0, idle: 0, offline: 0, unknown: 21 });
+  });
+
+  it('keeps every owner-visible agent state in a safe room', () => {
+    const agents = deriveOfficeAgents(autopilot({ state: 'paused' }), undefined);
+    for (const item of agents) {
+      if (item.state === 'offline') expect(item.room).toBeNull();
+      else if (item.state === 'unknown') expect(item.room).toBe('lobby');
+      else if (item.state === 'idle') expect(item.room).toBe('lounge');
+      else if (item.state === 'collaborating') expect(item.room).toBe('meeting');
+      else expect(item.room).toBe('workspace');
+      expect(item.recentActivity.length).toBeLessThanOrEqual(3);
+    }
   });
   it('shows dedicated floor staff only from actual operation signals',()=>{
     const operations={runtime:{running:true,jobs:{'delivery-manager':{busy:true,lastRunAt:null,error:null,reason:'Mengirim laporan ke Lead'},'lead-operations':{busy:true,lastRunAt:null,error:null,reason:'Meninjau'}}},whatsapp:{state:'disconnected',reason:'Belum terhubung',provider:'Baileys'},google:{connected:false,configured:false,reason:'Belum terhubung',redirectUri:''}};

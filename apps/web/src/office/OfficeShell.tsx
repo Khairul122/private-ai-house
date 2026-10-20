@@ -40,7 +40,6 @@ function OfficeIcon({ name }: { name: OfficeIconName }) {
 
 const initials = (name: string) => name.split(' ').map((word) => word[0]).join('').slice(0, 2).toUpperCase();
 const zoneOf = (spot: Spot | undefined) => spot && ZONES.find((zone) => Math.abs(spot.x - zone.x) <= zone.w / 2 && Math.abs(spot.z - zone.z) <= zone.d / 2)?.id;
-const wideScreen = () => window.matchMedia('(min-width: 900px)').matches;
 
 type StateChange = { key: string; at: string; name: string; from: AgentState; to: AgentState };
 
@@ -144,7 +143,7 @@ export default function OfficeShell() {
   const [refreshingSheet, setRefreshingSheet] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [panel, setPanel] = useState<'owner' | 'agent' | 'activity' | 'channels' | null>(null);
-  const [rosterOpen, setRosterOpen] = useState(wideScreen);
+  const [rosterOpen, setRosterOpen] = useState(false);
   const [command, setCommand] = useState<CameraCommand>({ kind: 'overview', n: 0 });
   const [followId, setFollowId] = useState<string | null>(null);
   const [ownerInput] = useState(createOwnerInput);

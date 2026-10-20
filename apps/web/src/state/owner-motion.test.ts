@@ -55,6 +55,30 @@ describe('Owner movement', () => {
     expect(state.swing).toBe(0); expect(state.bob).toBe(0);
   });
 
+  it('keeps reduced motion deterministic and removes gait animation', () => {
+    const normal = { ...createOwnerMotion(), x: 1.5, z: 5 };
+    const reduced = { ...normal };
+    stepOwnerMotion(normal, { ...idle, up: true }, [1, 0], 0.1);
+    stepOwnerMotion(reduced, { ...idle, up: true }, [1, 0], 0.1, true);
+    expect([reduced.x, reduced.z]).toEqual([normal.x, normal.z]);
+    expect(reduced.swing).toBe(0);
+    expect(reduced.bob).toBe(0);
+    expect(reduced.heading).toBe(reduced.facing);
+  });
+
+  it('clamps invalid and delayed frame times without leaving the floor', () => {
+    const delayed = createOwnerMotion([1.5, 5]);
+    const bounded = createOwnerMotion([1.5, 5]);
+    stepOwnerMotion(delayed, { ...idle, up: true }, [1, 0], 20);
+    stepOwnerMotion(bounded, { ...idle, up: true }, [1, 0], 0.1);
+    expect([delayed.x, delayed.z]).toEqual([bounded.x, bounded.z]);
+    expect(ownerCanStand(delayed.x, delayed.z)).toBe(true);
+    const nan = createOwnerMotion([1.5, 5]);
+    stepOwnerMotion(nan, { ...idle, up: true }, [1, 0], Number.NaN);
+    expect([nan.x, nan.z]).toEqual([1.5, 5]);
+    expect(nan.moving).toBe(false);
+  });
+
   it('routes to every placed employee around the actual furniture through doorways', () => {
     const cases = [pilot(true), pilot(false), undefined].map((data) => deriveOfficeAgents(data, []));
     for (const room of ['workspace', 'meeting', 'lounge', 'lobby'] as const) cases.push(deriveOfficeAgents(pilot(true), []).map((agent) => ({ ...agent, room })));

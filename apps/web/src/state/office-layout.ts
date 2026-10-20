@@ -69,17 +69,38 @@ function podSeat(id: string): Spot {
 }
 
 /** Destination spot of every agent that is placed on the floor (offline agents are not placed). */
+const rosterOrder = new Map(ROSTER.map((entry, index) => [entry.id, index]));
+
+/**
+ * Assign shared-room seats from stable roster order, not input order or current
+ * room population. This keeps unrelated agents from jumping when one changes
+ * state. Linear probing only handles more agents than preferred seat indexes.
+ */
+function stableRoomSpots(agents: OfficeAgent[], room: Exclude<RoomKey, 'workspace'>, seats: Spot[]): Map<string, Spot> {
+  const placed = new Map<string, Spot>();
+  for (const floor of [1, 2] as const) {
+    const used = new Set<number>();
+    const candidates = agents
+      .filter((agent) => (agent.floor ?? 1) === floor && agent.room === room)
+      .sort((a, b) => (rosterOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rosterOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id));
+    candidates.forEach((agent) => {
+      const preferred = (rosterOrder.get(agent.id) ?? 0) % seats.length;
+      let index = preferred;
+      while (used.has(index) && used.size < seats.length) index = (index + 1) % seats.length;
+      used.add(index);
+      placed.set(agent.id, seats[index % seats.length]!);
+    });
+  }
+  return placed;
+}
+
 export function spotsFor(agents: OfficeAgent[]): Map<string, Spot> {
   const spots = new Map<string, Spot>();
-  const ranks: Record<number,Record<RoomKey,number>>={1:{workspace:0,meeting:0,lounge:0,lobby:0},2:{workspace:0,meeting:0,lounge:0,lobby:0}};
   for (const agent of agents) {
-    if (!agent.room) continue;
-    const n = ranks[agent.floor ?? 1]![agent.room]++;
-    const spot = agent.room === 'workspace' ? podSeat(agent.id)
-      : agent.room === 'meeting' ? MEETING_SEATS[n % MEETING_SEATS.length]
-        : agent.room === 'lounge' ? BREAK_SLOTS[n % BREAK_SLOTS.length]
-          : LOBBY_SLOTS[n % LOBBY_SLOTS.length];
-    if (spot) spots.set(agent.id, spot);
+    if (agent.room === 'workspace') spots.set(agent.id, podSeat(agent.id));
+  }
+  for (const [room, seats] of [['meeting', MEETING_SEATS], ['lounge', BREAK_SLOTS], ['lobby', LOBBY_SLOTS] ] as const) {
+    for (const [id, spot] of stableRoomSpots(agents, room, seats)) spots.set(id, spot);
   }
   return spots;
 }

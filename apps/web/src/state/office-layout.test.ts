@@ -27,6 +27,25 @@ describe('office layout', () => {
     const working=spotsFor(agents.map(a=>a.id==='browser-bid-operator'?{...a,state:'working' as const,room:'workspace' as const}:a));
     expect(Number.isFinite(working.get('browser-bid-operator')?.x)).toBe(true);
   });
+
+  it('keeps shared-room seats stable when agents enter or leave room', () => {
+    const make = (ids: string[]) => ROSTER.filter((entry) => ids.includes(entry.id)).map((entry) => ({
+      ...entry, state: 'idle' as const, room: 'lounge' as const, reason: 'Fixture', task: null, recentActivity: [],
+    }));
+    const marketOnly = spotsFor(make(['market-scout'])).get('market-scout');
+    const marketWithOthers = spotsFor(make(['market-scout', 'bid-strategist', 'client-relations'])).get('market-scout');
+    expect(marketWithOthers).toEqual(marketOnly);
+    expect(spotsFor(make(['client-relations', 'bid-strategist', 'market-scout'])).get('market-scout')).toEqual(marketOnly);
+  });
+
+  it('keeps dedicated desks separate from each other', () => {
+    const agents = ROSTER.filter((entry) => (entry.floor ?? 1) === 1).map((entry) => ({
+      ...entry, state: 'working' as const, room: 'workspace' as const, reason: 'Fixture', task: null, recentActivity: [],
+    }));
+    const spots = spotsFor(agents);
+    const keys = agents.map((agent) => `${spots.get(agent.id)?.x},${spots.get(agent.id)?.z}`);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
   it('routes between rooms through the corridor spine', () => {
     const working = spotsFor(deriveOfficeAgents(autopilot(true), [])).get('market-scout')!;
     const idle = spotsFor(deriveOfficeAgents(autopilot(false), [])).get('market-scout')!;
