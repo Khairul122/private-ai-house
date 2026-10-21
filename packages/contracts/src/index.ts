@@ -1,4 +1,5 @@
 import { z } from 'zod';
+export const officeLearningEnabledSchema = z.object({ enabled: z.boolean() }).strict();
 import { normalizeKeywords, PROJECTS_CO_ID_FIELDS, validPolicyTimezone } from '@fvh/domain';
 
 const timezone = z.string().trim().min(3).max(80).refine(validPolicyTimezone, 'Zona waktu IANA tidak valid, misalnya Asia/Jakarta.');

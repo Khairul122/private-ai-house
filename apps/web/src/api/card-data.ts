@@ -2,7 +2,7 @@ import type { Query } from '@tanstack/react-query';
 
 const CARD_QUERIES: Record<string, string[]> = {
   '/overview': ['dashboard', 'projects', 'autopilot', 'inbox', 'work'],
-  '/agents': ['dashboard', 'autopilot', 'profile', 'capabilities', 'business-sync', 'inbox', 'work', 'activity', 'operations', 'knowledge-sync', 'browser-bidding', 'projects-co-id', 'hermes-kanban'],
+  '/agents': ['dashboard', 'autopilot', 'profile', 'capabilities', 'business-sync', 'inbox', 'work', 'activity', 'operations', 'knowledge-sync', 'browser-bidding', 'projects-co-id', 'hermes-kanban', 'office-learning'],
   '/tasks': ['pipeline', 'hermes-kanban'],
   '/calendar': ['operations', 'autopilot', 'agenda', 'projects', 'policy', 'dashboard', 'work'],
   '/opportunities': ['projects', 'draft', 'autopilot'],

@@ -11,7 +11,7 @@ import type { BrowserBiddingStatus } from '../api/browser-bidding-api.js';
 import type { OperationsData } from '../api/operations-api.js';
 import { OPERATIONS_ROSTER } from '@fvh/domain';
 import { formatMoney, formatDate, activityTitle } from '../components/format.js';
-import { kanbanQuery } from '../api/queries.js';
+import { kanbanQuery, officeLearningQuery } from '../api/queries.js';
 import { useLiveUpdates } from '../api/live.js';
 import { StateLabel, useClock } from '../components/ui.js';
 import { CardDataStatus } from '../components/CardDataStatus.js';
@@ -126,6 +126,7 @@ export default function OfficeShell() {
   const poll = (ms: number) => live === 'live' ? Math.max(ms, 30_000) : ms;
   const projectsCoId = useQuery({ queryKey: ['projects-co-id'], queryFn: () => api<ProjectsCoIdStatus | null>('/projects-co-id'), refetchInterval: poll(3000) });
   const kanban = useQuery(kanbanQuery);
+  const learning = useQuery(officeLearningQuery);
   const operations=useQuery({queryKey:['operations'],queryFn:()=>api<OperationsData>('/operations'),refetchInterval:poll(3000)});
   const [floor,setFloor]=useState<1|2>(1);
   const [arrival,setArrival]=useState<{floor:1|2;at:P2}|null>(null);
@@ -190,7 +191,7 @@ export default function OfficeShell() {
   const hermes = fresh(capabilities)?.hermes;
   const knowledgeJob = fresh(knowledgeSync)?.job;
   const operationsData=fresh(operations);
-  const allAgents = useMemo(() => deriveOfficeAgents(autopilotData, activityData, { projectsCoId: projectsCoId.isError ? undefined : projectsCoId.data, kanban: fresh(kanban), sync: syncData, inboxWaiting, dueSoon, hermes, knowledge: knowledgeJob,operations:operationsData,browserBidding:browserBidding.isError?undefined:browserBidding.data }), [projectsCoId.isError, projectsCoId.data, kanban.isError, kanban.data, browserBidding.isError,browserBidding.data,autopilotData, activityData, syncData, inboxWaiting, dueSoon, hermes, knowledgeJob,operationsData]);
+  const allAgents = useMemo(() => deriveOfficeAgents(autopilotData, activityData, { learning: fresh(learning), projectsCoId: projectsCoId.isError ? undefined : projectsCoId.data, kanban: fresh(kanban), sync: syncData, inboxWaiting, dueSoon, hermes, knowledge: knowledgeJob,operations:operationsData,browserBidding:browserBidding.isError?undefined:browserBidding.data }), [learning.isError, learning.data, projectsCoId.isError, projectsCoId.data, kanban.isError, kanban.data, browserBidding.isError,browserBidding.data,autopilotData, activityData, syncData, inboxWaiting, dueSoon, hermes, knowledgeJob,operationsData]);
   const agents=useMemo(()=>allAgents.filter(a=>(a.floor ?? 1)===floor),[allAgents,floor]);
   const spots = useMemo(() => spotsFor(agents), [agents]);
   const ownerTarget = selectedId ? spots.get(selectedId) ?? null : null;
@@ -382,7 +383,7 @@ export default function OfficeShell() {
     <div className="vo3d-office-layer" inert={sheetOpen}>
     <div ref={officeSurface} className="vo3d-canvas" role="img" tabIndex={0} aria-label={`Kantor 3D Mission Control. ${summary}. Tekan Tab untuk membuka tablet. Gunakan tablet dan daftar agen untuk navigasi dengan keyboard.`}>
       {webgl ? <Suspense fallback={<div className="vo3d-fallback">Memuat kantor visual...</div>}>
-        <VisualOffice key={floor} floor={floor} ownerStart={arrival?.floor===floor?arrival.at:[OWNER_SPOT.x,OWNER_SPOT.z]} onLift={()=>goToFloor(floor===1?2:1,true)} agents={agents} ready={!autopilot.isPending} selectedId={selectedId} ownerSelected={panel === 'owner'} ownerInput={ownerInput} ownerTarget={ownerTarget} ownerVisitVersion={ownerVisitVersion} onOwnerMoving={setOwnerMoving} followId={followId} onSelect={selectAgent} onOwnerSelect={openOwner} onCameraInteract={() => { setFollowId(null); setTour(false); }} command={command} view={view} tour={tour} phase={phase} reducedMotion={reducedMotion} boards={boards} onOpenBoard={openBoard} />
+        <VisualOffice key={floor} floor={floor} ownerStart={arrival?.floor===floor?arrival.at:[OWNER_SPOT.x,OWNER_SPOT.z]} onLift={()=>goToFloor(floor===1?2:1,true)} agents={agents} learning={fresh(learning)} ready={!autopilot.isPending} selectedId={selectedId} ownerSelected={panel === 'owner'} ownerInput={ownerInput} ownerTarget={ownerTarget} ownerVisitVersion={ownerVisitVersion} onOwnerMoving={setOwnerMoving} followId={followId} onSelect={selectAgent} onOwnerSelect={openOwner} onCameraInteract={() => { setFollowId(null); setTour(false); }} command={command} view={view} tour={tour} phase={phase} reducedMotion={reducedMotion} boards={boards} onOpenBoard={openBoard} />
       </Suspense> : <div className="vo3d-fallback">WebGL tidak tersedia di browser ini. Gunakan tablet untuk membuka setiap kartu.</div>}
     </div>
 

@@ -2,10 +2,18 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { type P2, type Spot } from '../state/office-layout.js';
-import { IDLE_ACTIVITY_LABELS, planOfficeRoute, updateOfficeLife, type OfficeLife } from '../state/office-life.js';
+import { planOfficeRoute, updateOfficeLife, type OfficeLife } from '../state/office-life.js';
+import { ownerCanStand } from '../state/owner-motion.js';
 import { STATE_COLORS, type OfficeAgent as AgentData } from '../state/office-state.js';
 
 type V3 = [number, number, number];
+
+export function spokenOfficeTurn(learning: { available: boolean; busy: boolean; activeSpeakerId?: string | null; sessions: Array<{ state: string; turns: Array<{ employeeId: string; message: string }> }> } | null | undefined, agentId: string): string | undefined {
+  if (!learning?.available || !learning.busy) return undefined;
+  const session = learning.sessions.find(item => item.state === 'running');
+  const last = session?.turns.at(-1);
+  return last?.employeeId === agentId ? `${last.message.slice(0, 42)}${last.message.length > 42 ? '…' : ''}` : undefined;
+}
 type Props = {
   agent: AgentData;
   index: number;
@@ -18,22 +26,27 @@ type Props = {
   positions: Map<string, THREE.Vector3>;
   life: OfficeLife;
   agents?: AgentData[];
+  spokenMessage?: string | undefined;
 };
 
 function Box({ p, s, color, shadow = true }: { p: V3; s: V3; color: string; shadow?: boolean }) {
   return <mesh position={p} castShadow={shadow} receiveShadow><boxGeometry args={s} /><meshStandardMaterial color={color} roughness={0.78} /></mesh>;
 }
 
-function Label({ text, dot, p }: { text: string; dot?: string; p: V3 }) {
+function Label({ text, dot, p, bubble = false }: { text: string; dot?: string; p: V3; bubble?: boolean }) {
   const { texture, aspect } = useMemo(() => {
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d')!;
-    context.font = '600 52px "Segoe UI", Arial, sans-serif';
+    context.font = `${bubble ? 36 : 52}px "Segoe UI", Arial, sans-serif`;
     canvas.width = Math.ceil(context.measureText(text).width + (dot ? 130 : 80));
-    canvas.height = 112;
-    context.font = '600 52px "Segoe UI", Arial, sans-serif';
-    context.fillStyle = '#ffffff';
+    canvas.height = bubble ? 128 : 112;
+    context.font = `${bubble ? 36 : 52}px "Segoe UI", Arial, sans-serif`;
+    context.fillStyle = bubble ? '#fffdf7' : '#ffffff';
     context.beginPath(); context.roundRect(4, 4, canvas.width - 8, 100, 50); context.fill();
+    if (bubble) {
+      context.beginPath(); context.moveTo(42, 98); context.lineTo(58, 98); context.lineTo(48, 116); context.closePath(); context.fill();
+      context.strokeStyle = '#d9cdbb'; context.lineWidth = 3; context.stroke();
+    }
     if (dot) { context.fillStyle = dot; context.beginPath(); context.arc(45, 54, 14, 0, Math.PI * 2); context.fill(); }
     context.fillStyle = '#1f2933';
     context.textBaseline = 'middle';
@@ -72,7 +85,7 @@ export function nearbyIdlePeer(id: string, agents: AgentData[], positions: Map<s
   return closest;
 }
 
-export function OfficeAgent({ agent, index, spot, selected, hovered, onSelect, onHover, reducedMotion, positions, life, agents = [] }: Props) {
+export function OfficeAgent({ agent, index, spot, selected, hovered, onSelect, onHover, reducedMotion, positions, life, agents = [], spokenMessage }: Props) {
   const root = useRef<THREE.Group>(null);
   const legL = useRef<THREE.Group>(null);
   const legR = useRef<THREE.Group>(null);
@@ -83,7 +96,8 @@ export function OfficeAgent({ agent, index, spot, selected, hovered, onSelect, o
   const marker = useRef<THREE.Mesh>(null);
   const cup = useRef<THREE.Group>(null);
   const book = useRef<THREE.Group>(null);
-  const sim = useRef({ x: spot.x, z: spot.z, rot: spot.facing, seat: spot.seated ? 1 : 0, path: [] as P2[], spot, initialized: false, reducedMotion });
+  const conversation = useRef<THREE.Group>(null);
+  const sim = useRef({ x: spot.x, z: spot.z, rot: spot.facing, seat: spot.seated ? 1 : 0, path: [] as P2[], spot, origin: spot, initialized: false, reducedMotion });
   const livePosition = useMemo(() => new THREE.Vector3(spot.x, 0, spot.z), []);
 
   useEffect(() => {
@@ -100,9 +114,10 @@ export function OfficeAgent({ agent, index, spot, selected, hovered, onSelect, o
     const destination = routine?.spot ?? spot;
     if (!state.initialized || (state.reducedMotion !== reducedMotion && reducedMotion)) {
       state.x = destination.x; state.z = destination.z; state.path = []; state.seat = destination.seated ? 1 : 0;
-      state.spot = destination; state.initialized = true;
+      state.spot = destination; state.origin = destination; state.initialized = true;
     } else if (state.spot.x !== destination.x || state.spot.z !== destination.z) {
-      state.path = reducedMotion ? [] : planOfficeRoute([state.x, state.z], state.spot, destination);
+      if (ownerCanStand(state.x, state.z)) state.origin = state.spot;
+      state.path = reducedMotion ? [] : planOfficeRoute([state.x, state.z], state.origin, destination);
       if (reducedMotion) { state.x = destination.x; state.z = destination.z; }
       state.spot = destination;
     }
@@ -121,9 +136,11 @@ export function OfficeAgent({ agent, index, spot, selected, hovered, onSelect, o
       walking = state.seat <= 0.05;
       if (dist > 0.01) heading = Math.atan2(dx, dz);
     } else {
-      state.seat += ((state.spot.seated ? 1 : 0) - state.seat) * Math.min(1, dt * 6);
+      const atDestination = Math.hypot(state.x - state.spot.x, state.z - state.spot.z) < 0.03;
+      if (atDestination) state.origin = state.spot;
+      state.seat += ((atDestination && state.spot.seated ? 1 : 0) - state.seat) * Math.min(1, dt * 6);
     }
-    const arrived = !walking && state.path.length === 0;
+    const arrived = !walking && state.path.length === 0 && Math.hypot(state.x - state.spot.x, state.z - state.spot.z) < 0.03;
     const active = arrived && (agent.state === 'working' || agent.state === 'reviewing');
     const collaborating = arrived && agent.state === 'collaborating';
     const idle = arrived && agent.state === 'idle';
@@ -161,6 +178,7 @@ export function OfficeAgent({ agent, index, spot, selected, hovered, onSelect, o
     }
     if (cup.current) cup.current.visible = !!sipping && !reducedMotion;
     if (book.current) book.current.visible = !!reading && !reducedMotion;
+    if (conversation.current) conversation.current.visible = Boolean(!spokenMessage && social && !walking && !reducedMotion && phase < 12);
     if (marker.current) { marker.current.rotation.y = reducedMotion ? 0 : t * 2; marker.current.position.y = reducedMotion ? 2.45 : 2.45 + Math.sin(t * 3) * 0.08; }
   });
 
@@ -192,8 +210,10 @@ export function OfficeAgent({ agent, index, spot, selected, hovered, onSelect, o
     <mesh position={[0, 2.25, 0]}><sphereGeometry args={[0.09, 10, 8]} /><meshBasicMaterial color={dot} /></mesh>
     {selected && <mesh ref={marker} position={[0, 2.45, 0]}><octahedronGeometry args={[0.2, 0]} /><meshBasicMaterial color="#f2b632" /></mesh>}
     {agent.state === 'unknown' && !selected && <Label text="?" p={[0, 2.45, 0]} />}
+    <group ref={conversation} visible={false}><Label text="•••" p={[0, 2.75, 0]} bubble /></group>
+    {spokenMessage && <Label text={spokenMessage} p={[0, 2.9, 0]} bubble />}
     {(selected || hovered) && <Label text={agent.name} dot={dot} p={[0, selected ? 2.75 : 2.45, 0]} />}
-    {(selected || hovered) && agent.state === 'idle' && !reducedMotion && life.routines.get(agent.id) && <Label text={`${IDLE_ACTIVITY_LABELS[life.routines.get(agent.id)!.activity]} · animasi`} p={[0, 2.05, 0]} />}
+    {(selected || hovered) && agent.state === 'idle' && !reducedMotion && <Label text="Gerak santai · animasi" p={[0, 2.05, 0]} />}
     <mesh position={[0, 1.1, 0]} visible={false}><boxGeometry args={[0.9, 2.3, 0.9]} /><meshBasicMaterial /></mesh>
   </group>;
 }

@@ -1256,3 +1256,23 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 @media (prefers-reduced-motion: reduce) {
   .vo3d-tablet.vo3d-sheet { animation: none; }
 }
+/* The journal gives conversation the wider column; memories remain easy to scan. */
+.office-learning { margin-block: 1.5rem; padding-block: 1.25rem; border-block: 1px solid var(--border); }
+.office-learning header, .office-learning-actions { display: flex; flex-wrap: wrap; align-items: start; gap: .75rem; justify-content: space-between; }
+.office-learning h2, .office-learning h3 { margin: 0 0 .75rem; }
+.office-learning p { overflow-wrap: anywhere; }
+.office-learning-actions button { min-height: 44px; }
+.office-learning-filter { display: grid; gap: .5rem; max-width: 24rem; margin-block: 1rem 1.5rem; }
+.office-learning-filter select { min-height: 44px; width: 100%; }
+.office-learning-columns { display: grid; gap: 1.5rem; }
+.office-learning-columns > * { min-width: 0; }
+.office-conversation { border-top: 1px solid var(--border); padding-block: .75rem; }
+.office-conversation summary { cursor: pointer; min-height: 44px; font-weight: 600; overflow-wrap: anywhere; }
+.office-conversation summary small { display: block; margin-top: .35rem; font-weight: 400; }
+.office-conversation ol { padding-left: 1.25rem; }
+.office-conversation li { padding-block: .5rem; }
+.office-conversation li p { white-space: pre-wrap; margin-top: .4rem; }
+.office-memories { list-style: none; padding: 0; margin: 0; }
+.office-memories li { padding-block: 1rem; border-top: 1px solid var(--border); }
+.office-memories p { margin-block: .5rem; }
+@media (min-width: 740px) { .office-learning-columns { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); } }

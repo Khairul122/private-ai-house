@@ -3,18 +3,15 @@ import { ownerCanStand, planOwnerPath } from './owner-motion.js';
 import type { OfficeAgent } from './office-state.js';
 
 export type IdleActivity = 'rest' | 'read' | 'coffee' | 'stretch' | 'social';
-export const IDLE_ACTIVITY_LABELS: Record<IdleActivity, string> = {
-  rest: 'Istirahat', read: 'Membaca', coffee: 'Minum kopi', stretch: 'Peregangan', social: 'Menyapa rekan',
-};
-
 // These are ambient poses, never evidence of a Hermes task or conversation.
-export const IDLE_SPOTS: Array<Spot & { activity: IdleActivity }> = [
+const idleLocations: Array<[number, number, IdleActivity]> = [
   [7.4, -2.4, 'social'], [7.4, -0.9, 'social'], [7.4, 1.8, 'read'], [7.4, 3.9, 'stretch'],
   [10.1, -1.5, 'read'], [10.1, 0.8, 'rest'], [11.6, -0.1, 'social'], [11.6, 1.2, 'social'],
   [9, 6.3, 'coffee'], [11, 6.3, 'coffee'], [9, 7.8, 'social'], [11, 7.8, 'social'],
   [9, 10.8, 'coffee'], [11, 10.8, 'coffee'], [9, 12, 'stretch'], [11, 12, 'rest'],
   [15, -2, 'read'], [15, 0, 'stretch'], [15, 2, 'rest'], [15, 7, 'social'], [15, 9, 'social'], [15, 11, 'read'],
-].map(([x, z, activity]) => ({ x: Number(x), z: Number(z), activity: activity as IdleActivity, y: 0, facing: Math.PI / 2, seated: false, via: [] }));
+];
+export const IDLE_SPOTS: Array<Spot & { activity: IdleActivity }> = idleLocations.map(([x, z, activity]) => ({ x, z, activity, y: 0, facing: Math.PI / 2, seated: false, via: [] }));
 
 export type IdleRoutine = { slot: number; spot: Spot; activity: IdleActivity; nextMoveAt: number; visits: number; floor: 1 | 2 };
 export type OfficeLife = { routines: Map<string, IdleRoutine>; updatedAt: number; signature: string; reducedMotion: boolean };

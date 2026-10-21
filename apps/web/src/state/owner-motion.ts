@@ -1,4 +1,4 @@
-import { FLOOR, BROWSER_DESK, PROJECTS_CO_ID_DESK, LEAD_DESK, LIFT, MANAGER_DESK, OWNER_SPOT, PODS, POD_SIZE, type P2, type Spot } from './office-layout.js';
+import { FLOOR, BROWSER_DESK, PROJECTS_CO_ID_DESK, LEAD_DESK, LIFT, MANAGER_DESK, OWNER_SPOT, PODS, type P2, type Spot } from './office-layout.js';
 import type { OwnerMoveInput } from './owner-input.js';
 
 const RADIUS = 0.38;
@@ -13,17 +13,17 @@ const obstacles: Obstacle[] = [
   box(PROJECTS_CO_ID_DESK.x,PROJECTS_CO_ID_DESK.z,2.8,1),box(PROJECTS_CO_ID_DESK.x,PROJECTS_CO_ID_DESK.z-0.95,0.6,0.6),
   box(MANAGER_DESK.x,MANAGER_DESK.z,2.8,1),box(MANAGER_DESK.x,MANAGER_DESK.z-0.95,0.6,0.6),
   ...PODS.flatMap(({ x, z }) => [
-    box(x, z - POD_SIZE / 2, POD_SIZE, 0.12), box(x - POD_SIZE / 2, z, 0.12, POD_SIZE), box(x + POD_SIZE / 2, z, 0.12, POD_SIZE),
-    box(x - 0.9, z + POD_SIZE / 2, 3.2, 0.12), box(x, z + 0.1, 2.2, 0.9), box(x, z - 0.95, 0.6, 0.6),
-    box(x - 1.95, z - 1.95, 0.8, 0.8), box(x - 1.35, z + 1.45, 1.1, 1.1),
+    box(x + 0.5, z - 2.34, 3.05, 0.18), box(x, z + 0.1, 2.45, 1.05), box(x, z - 0.95, 0.6, 0.6),
+    box(x - 1.95, z - 1.95, 0.8, 0.8), box(x - 1.85, z + 0.3, 0.66, 0.8),
   ]),
-  box(8.5, -12.5, 10, 0.12), box(13.5, -9, 0.12, 7), box(3.5, -9.9, 0.12, 5.2), box(8.5, -5.5, 10, 0.12),
+  box(13.4, -9, 0.38, 3.1),
   box(9, -9, 6, 1.8), ...[6.75, 8.25, 9.75, 11.25].flatMap((x) => [box(x, -10.45, 0.6, 0.6), box(x, -7.55, 0.6, 0.6)]),
   box(4.3, -11.7, 0.9, 0.9),
-  box(5.7, 0, 1.1, 4.05), box(9, -2.9, 0.9, 0.9), box(9, 3.4, 0.9, 0.9), box(8.6, 0.2, 1.2, 1.8),
+  box(5.98, 0, 1.38, 4.06), box(9, -2.9, 1.02, 1.06), box(9, 3.4, 1.02, 1.06), box(8.6, 0.2, 1.36, 2.04),
   box(10.8, 2.4, 1.1, 1.1), box(11.6, -2.2, 1.1, 1.1), box(13.25, 0.25, 0.5, 2.8),
   box(4.3, -3.3, 0.9, 0.9), box(12.9, 3.9, 0.9, 0.9), box(12.9, -3.4, 0.8, 0.8),
-  box(12.9, 9, 1.05, 4.7), box(13, 12.2, 0.9, 0.9), box(7, 9.5, 1.4, 1.4),
+  box(12.9, 9, 1.12, 4.8), box(13, 12.2, 0.9, 0.9), box(7, 9.5, 1.64, 1.64),
+  box(16.8, 0.3, 0.88, 3.3),
   ...[[6.1, 9.5], [7.9, 9.5], [7, 10.4]].map(([x, z]) => box(x!, z!, 0.48, 0.48)), box(4.3, 12, 0.9, 0.9),
   box(LEAD_DESK.x, LEAD_DESK.z, 2.8, 1), box(LEAD_DESK.x, LEAD_DESK.z - 0.95, 0.6, 0.6), box(LEAD_DESK.x + 1.9, LEAD_DESK.z - 0.6, 0.9, 0.9),
   box(-13.5, 12.1, 3.8, 0.8), box(-18.6, 10.3, 0.8, 2.6), box(-9, 12.2, 0.9, 0.9), box(-18.7, 12.3, 0.8, 0.8),

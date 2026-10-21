@@ -4,6 +4,7 @@ import { parseEnv } from 'node:util';
 import fastifyStatic from '@fastify/static';
 import { FreelancerProductionWriteAdapter, FreelancerReadAdapter, FreelancerReadError, FreelancerSandboxWriteAdapter } from '@fvh/adapter-freelancer';
 import { HermesCliDraftingAdapter } from '@fvh/adapter-hermes';
+import { OFFICE_ROSTER } from '@fvh/domain';
 import { createDatabase, WorkspaceRepository } from '@fvh/persistence';
 import { deleteLinkedInAccessToken, getFreelancerAccessToken, getLinkedInAccessToken, getLinkedInClientCredentials, readCredentialStatus, storeLinkedInAccessToken } from './lib/credential-store.js';
 import { LinkedInOAuthService } from './services/linkedin-oauth.js';
@@ -24,6 +25,7 @@ import { PublicPortfolioResolver } from './services/portfolio.js';
 import { BrowserBiddingService, SharedChromeSession } from './services/browser-bidding.js';
 import { ProjectsCoIdService } from './services/projects-co-id.js';
 import { HermesKanban, hermesKanbanRunner } from './services/hermes-kanban.js';
+import { OfficeLearningService } from './services/office-learning.js';
 import { announceWrites, LiveEvents } from './lib/live-events.js';
 
 function findProjectRoot(start: string): string {
@@ -125,6 +127,22 @@ const googleCalendar = new GoogleCalendarService(integrationVault,new Operations
 const operations = new OperationsService({repository,messenger:whatsapp,calendar:googleCalendar,...(drafting?{review:(facts:string[])=>drafting.reviewOperations(facts)}:{})});
 const hasWebBuild = existsSync(webBuild);
 const hermesKanban = hermesEnabled ? new HermesKanban(hermesKanbanRunner(draftingConfig.executable)) : undefined;
+const officeLearning = drafting ? new OfficeLearningService({
+  repository, employees: OFFICE_ROSTER,
+  discuss: input => drafting.discussOffice(input),
+  available: () => hermesEnabled,
+  busy: () => {
+    const board = hermesKanban?.peek();
+    if (!board || Date.now() - Date.parse(board.checkedAt) > 60_000) {
+      void hermesKanban?.status();
+      return true;
+    }
+    return drafting.workInProgress > 0 || autopilot.liveState().busy || projectsCoId.busy || browserBidding.status().busy
+      || businessSync.getStatus().step !== null || Object.values(operations.status().jobs).some(job => job.busy)
+      || !board.available || board.tasks.some(task => task.status === 'running');
+  },
+}) : undefined;
+if (officeLearning) live.watch(['office-learning'], () => officeLearning.peek());
 live.watch(['autopilot', 'capabilities'], () => autopilot.liveState());
 live.watch(['business-sync'], () => businessSync.getStatus());
 live.watch(['browser-bidding'], () => browserBidding.status());
@@ -138,6 +156,7 @@ const app = await createApp({
   operations,whatsapp,googleCalendar,browserBidding,projectsCoId,
   // Cards carry stored app data to the Hermes team, so they follow the same consent as drafting.
   ...(hermesKanban ? { hermesKanban } : {}),
+  ...(officeLearning ? { officeLearning } : {}),
   repository,
   getGitHubToken: () => readGitHubEnvironment(projectRoot).token ?? undefined,
   getCredentialStatus: () => {
@@ -238,4 +257,5 @@ void (async () => {
   await startupStep('whatsapp', () => whatsapp.restore());
   await startupStep('operations', () => operations.start());
   void autopilot.start();
+  await startupStep('office-learning', () => officeLearning?.start());
 })();

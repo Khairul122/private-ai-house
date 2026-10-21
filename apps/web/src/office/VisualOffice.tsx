@@ -4,11 +4,13 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { BOARD_SIZE, BOARDS, FLOOR, FLOOR_TWO_PODS, BROWSER_DESK, PROJECTS_CO_ID_DESK, LEAD_DESK, LIFT, liftDoorReached, LEAD_ID, MANAGER_DESK, OWNER_SPOT, PODS, POD_SIZE, spotsFor, ZONES, type BoardId, type BoardSlot, type dayPhase, type P2, type Spot } from '../state/office-layout.js';
 import type { OfficeAgent } from '../state/office-state.js';
+import type { OfficeLearningStatus } from '../../../server/src/models/office-learning-types.js';
 import type { OwnerInput } from '../state/owner-input.js';
 import { createOwnerMotion, setOwnerDestination, stepOwnerMotion, stopOwnerMotion } from '../state/owner-motion.js';
-import { OfficeAgent as OfficeAgentCharacter } from './OfficeAgent.js';
+import { OfficeAgent as OfficeAgentCharacter, spokenOfficeTurn } from './OfficeAgent.js';
 import { OfficeEnvironment } from './OfficeEnvironment.js';
 import OfficeObjects from './OfficeObjects.js';
+import { createOfficeLife } from '../state/office-life.js';
 
 export type CameraCommand = { kind: 'overview' | 'zone' | 'agent' | 'board' | 'owner'; id?: string; n: number };
 /** Live summary drawn on a wall board; lines come from real API data. */
@@ -21,6 +23,7 @@ export type VisualOfficeProps = {
   ownerStart: P2;
   onLift: () => void;
   agents: OfficeAgent[];
+  learning?: OfficeLearningStatus | null | undefined;
   ready: boolean;
   selectedId: string | null;
   ownerSelected: boolean;
@@ -39,6 +42,7 @@ export type VisualOfficeProps = {
   reducedMotion: boolean;
   boards: BoardContent[];
   onOpenBoard: (id: BoardId) => void;
+  onOpenCommunity?: (() => void) | undefined;
 };
 
 const GLASS = '#dff1f7';
@@ -180,39 +184,49 @@ function MeetingRoom({ active }: { active: boolean }) {
 
 function Lounge() {
   return <group>
-    <mesh position={[8.6, 0.02, 0.2]} receiveShadow><cylinderGeometry args={[3.4, 3.4, 0.04, 32]} /><meshStandardMaterial roughness={0.9} color="#d4c4ad" /></mesh>
-    <mesh position={[8.6, 0.045, 0.2]} receiveShadow><cylinderGeometry args={[3.15, 3.15, 0.025, 32]} /><meshStandardMaterial roughness={0.98} color="#a8644f" /></mesh>
-    <mesh position={[8.6, 0.062, 0.2]} receiveShadow><cylinderGeometry args={[2.85, 2.85, 0.018, 32]} /><meshStandardMaterial roughness={0.98} color="#d9c9ad" /></mesh>
-    <pointLight position={[8.6, 3.1, 0.2]} color="#ffdca0" intensity={1} distance={9} decay={2} />
-    <B p={[5.75, 0.3, 0]} s={[0.9, 0.6, 3.6]} c="#d98f7b" />
-    <B p={[5.4, 0.75, 0]} s={[0.25, 0.9, 3.6]} c="#c9806c" />
-    {[-1.9, 1.9].map((z) => <B key={z} p={[5.75, 0.55, z]} s={[0.9, 0.5, 0.25]} c="#c9806c" />)}
-    <B p={[9, 0.28, -2.9]} s={[0.9, 0.55, 0.9]} c="#8db6c9" />
-    <B p={[9, 0.28, 3.4]} s={[0.9, 0.55, 0.9]} c="#8db6c9" />
-    <B p={[8.6, 0.32, 0.2]} s={[1.2, 0.08, 1.8]} c="#755139" roughness={0.46} />
-    <B p={[8.6, 0.15, 0.2]} s={[0.2, 0.3, 0.2]} c="#2f3737" metalness={0.42} />
-    <B p={[8.6, 0.39, 0.2]} s={[0.55, 0.05, 0.36]} c="#355c4b" roughness={0.82} />
-    <Beanbag p={[10.8, 0.3, 2.4]} c="#e6c46a" />
-    <Beanbag p={[11.6, 0.3, -2.2]} c="#b8a6e3" />
-    <B p={[13.25, 0.4, 0.25]} s={[0.5, 0.8, 2.8]} c="#e9e6dd" />
-    <B p={[13.3, 1.65, 0.25]} s={[0.1, 1.2, 2.2]} c="#1d2228" />
-    <B p={[13.24, 1.65, 0.25]} s={[0.02, 1.0, 2.0]} c="#31556b" />
+    <Rug p={[8.6, 0.055, 0.25]} s={[8.1, 7.5]} c="#c7ac87" edge="#ece0ca" />
+    <B p={[5.92, 0.19, 0]} s={[1.26, 0.24, 3.9]} c="#704d37" />
+    <B p={[5.43, 0.69, 0]} s={[0.3, 0.95, 3.9]} c="#a3634b" roughness={0.98} />
+    {[-1.2, 0, 1.2].map((z) => <group key={z}>
+      <B p={[6.04, 0.42, z]} s={[1.05, 0.23, 1.12]} c="#bb7c60" roughness={1} />
+      <B p={[5.62, 0.83, z]} s={[0.28, 0.62, 1.1]} c="#b67659" roughness={1} />
+    </group>)}
+    {[-1.94, 1.94].map((z) => <B key={z} p={[5.98, 0.57, z]} s={[1.38, 0.5, 0.18]} c="#a3634b" />)}
+    {[-2.9, 3.4].map((z) => <group key={z} position={[9, 0, z]} rotation={[0, z < 0 ? 0 : Math.PI, 0]}>
+      <B p={[0, 0.22, 0]} s={[0.86, 0.35, 0.86]} c="#765a3d" />
+      <B p={[0, 0.46, 0]} s={[0.98, 0.18, 0.95]} c="#d5c4a3" roughness={1} />
+      <B p={[0, 0.75, -0.44]} s={[1.02, 0.76, 0.18]} c="#bca786" roughness={1} />
+    </group>)}
+    <mesh position={[8.6, 0.36, 0.2]} scale={[0.8, 1, 1.2]} castShadow receiveShadow><cylinderGeometry args={[0.85, 0.85, 0.14, 32]} /><meshStandardMaterial color="#78583d" roughness={0.6} /></mesh>
+    <B p={[8.6, 0.17, 0.2]} s={[0.52, 0.34, 0.65]} c="#554432" />
+    <Beanbag p={[10.8, 0.3, 2.4]} c="#6c7b62" />
+    <Beanbag p={[11.6, 0.3, -2.2]} c="#c8b492" />
+    <B p={[13.25, 0.4, 0.25]} s={[0.5, 0.8, 2.8]} c="#a5825a" />
+    <B p={[13.3, 1.65, 0.25]} s={[0.1, 1.2, 2.2]} c="#805c40" />
+    <B p={[13.24, 1.65, 0.25]} s={[0.02, 1.0, 2.0]} c="#e5dfcc" />
     <Plant p={[4.3, 0, -3.3]} /><Plant p={[12.9, 0, 3.9]} /><Plant p={[12.9, 0, -3.4]} scale={0.8} />
   </group>;
 }
 
 function Pantry() {
   return <group>
-    <mesh position={[8.5, 0.02, 9.25]} receiveShadow><boxGeometry args={[9.8, 0.04, 6.3]} /><meshStandardMaterial roughness={0.76} color="#f1ead9" /></mesh>
-    <B p={[12.9, 0.5, 9]} s={[1, 1, 4.6]} c="#ece9e2" />
-    <B p={[12.9, 1.02, 9]} s={[1.05, 0.06, 4.7]} c="#a8875c" />
-    <B p={[13, 1.35, 8]} s={[0.5, 0.6, 0.45]} c="#2f3540" />
-    <B p={[12.75, 1.18, 8]} s={[0.12, 0.12, 0.12]} c="#f5f5f5" />
-    <B p={[13, 1.1, 10.5]} s={[0.4, 0.12, 0.6]} c="#dcdcdc" />
-    <B p={[13, 1.2, 12.2]} s={[0.9, 2.4, 0.9]} c="#dfe7ea" />
-    <mesh position={[7, 0.72, 9.5]} castShadow><cylinderGeometry args={[0.7, 0.7, 0.06, 16]} /><meshStandardMaterial roughness={0.76} color="#f3f1ea" /></mesh>
-    <B p={[7, 0.36, 9.5]} s={[0.1, 0.72, 0.1]} c="#3d4148" />
-    {[[6.1, 9.5], [7.9, 9.5], [7, 10.4]].map(([x, z]) => <mesh key={`${x}${z}`} position={[x!, 0.25, z!]} castShadow><cylinderGeometry args={[0.24, 0.24, 0.5, 10]} /><meshStandardMaterial roughness={0.76} color="#e6c46a" /></mesh>)}
+    <Rug p={[8.5, 0.04, 9.25]} s={[9.8, 6.3]} c="#ded7c8" edge="#a99b80" />
+    <B p={[12.9, 0.5, 9]} s={[1, 1, 4.6]} c="#355748" />
+    <B p={[12.9, 1.02, 9]} s={[1.12, 0.1, 4.8]} c="#e8dfca" />
+    {[7.3, 8.45, 9.6, 10.75].map((z) => <group key={z}>
+      <B p={[12.385, 0.55, z]} s={[0.035, 0.74, 1.02]} c="#486652" />
+      <B p={[12.35, 0.8, z]} s={[0.04, 0.045, 0.35]} c="#bf9e69" metalness={0.4} />
+    </group>)}
+    <B p={[13, 1.1, 10.5]} s={[0.4, 0.06, 0.65]} c="#737d75" metalness={0.35} />
+    <B p={[13.15, 1.28, 10.65]} s={[0.05, 0.35, 0.05]} c="#737d75" metalness={0.55} />
+    <B p={[13, 1.2, 12.2]} s={[0.9, 2.4, 0.9]} c="#d9d5c8" />
+    <B p={[12.53, 1.45, 12.2]} s={[0.04, 0.64, 0.055]} c="#626b5e" metalness={0.35} />
+    <mesh position={[7, 0.72, 9.5]} castShadow><cylinderGeometry args={[0.82, 0.82, 0.1, 24]} /><meshStandardMaterial roughness={0.8} color="#ab8157" /></mesh>
+    <mesh position={[7, 0.35, 9.5]}><cylinderGeometry args={[0.12, 0.35, 0.7, 12]} /><meshStandardMaterial color="#405546" /></mesh>
+    {[[6.1, 9.5], [7.9, 9.5], [7, 10.4]].map(([x, z]) => <group key={`${x}${z}`} position={[x!, 0, z!]}>
+      <mesh position={[0, 0.48, 0]} castShadow><cylinderGeometry args={[0.28, 0.28, 0.12, 16]} /><meshStandardMaterial color="#b68b60" /></mesh>
+      <B p={[0, 0.23, 0]} s={[0.2, 0.46, 0.2]} c="#486652" />
+    </group>)}
     <Plant p={[4.3, 0, 12]} />
   </group>;
 }
@@ -235,9 +249,10 @@ function LeadDesk({ active }: { active: boolean }) {
 function Lobby() {
   return <group>
     <mesh position={[-13.5, 0.02, 10.25]} receiveShadow><boxGeometry args={[11, 0.04, 5]} /><meshStandardMaterial roughness={0.76} color="#ece5d6" /></mesh>
-    <B p={[-13.5, 0.55, 12.1]} s={[3.6, 1.1, 0.7]} c="#f3f1ea" />
-    <B p={[-13.5, 1.12, 12.1]} s={[3.8, 0.06, 0.8]} c="#a8875c" />
-    <B p={[-18.6, 0.3, 10.3]} s={[0.8, 0.6, 2.6]} c="#8db6c9" />
+    <B p={[-13.5, 0.55, 12.1]} s={[3.6, 1.1, 0.7]} c="#47624f" />
+    <B p={[-13.5, 1.12, 12.1]} s={[3.8, 0.09, 0.8]} c="#b99268" />
+    <B p={[-13.5, 0.63, 12.47]} s={[2.8, 0.48, 0.025]} c="#d8c9ab" />
+    <B p={[-18.6, 0.3, 10.3]} s={[0.8, 0.6, 2.6]} c="#a97c5e" />
     <Plant p={[-9, 0, 12.2]} /><Plant p={[-18.7, 0, 12.3]} scale={0.9} />
   </group>;
 }
@@ -257,6 +272,15 @@ function LampPost({ p, night }: { p: V3; night: boolean }) {
   </group>;
 }
 
+function WallPanel({ p, rotY = 0, color = '#52695c' }: { p: V3; rotY?: number; color?: string }) {
+  return <group position={p} rotation={[0, rotY, 0]}>
+    <B p={[0, 0, 0]} s={[2.2, 1.6, 0.08]} c="#b5845d" />
+    <B p={[0, 0, 0.02]} s={[1.98, 1.38, 0.035]} c={color} roughness={0.98} />
+    <B p={[-0.7, 0, 0.045]} s={[0.08, 1.22, 0.04]} c="#d4b27e" shadow={false} />
+    <B p={[0.7, 0, 0.045]} s={[0.08, 1.22, 0.04]} c="#d4b27e" shadow={false} />
+  </group>;
+}
+
 function Building({ agents, phase, floor }: { agents: OfficeAgent[]; phase: Phase; floor:1|2 }) {
   const { minX, maxX, minZ, maxZ } = FLOOR;
   const w = maxX - minX;
@@ -267,7 +291,7 @@ function Building({ agents, phase, floor }: { agents: OfficeAgent[]; phase: Phas
   return <group>
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, -0.05, cz]} receiveShadow><planeGeometry args={[140, 140]} /><meshStandardMaterial roughness={0.94} color={phase.grass} /></mesh>
     <mesh position={[cx, -0.02, cz]} receiveShadow><boxGeometry args={[w, 0.06, d]} /><meshStandardMaterial roughness={0.9} color={phase.night ? '#aaa393' : '#d8d0bf'} /></mesh>
-    <mesh position={[1.5, 0.015, 0]} receiveShadow><boxGeometry args={[1.6, 0.02, d - 0.4]} /><meshStandardMaterial roughness={0.82} color="#eee8da" /></mesh>
+    <mesh position={[1.5, 0.026, 0]} receiveShadow><boxGeometry args={[1.6, 0.02, d - 0.4]} /><meshStandardMaterial roughness={0.82} color="#eee8da" /></mesh>
     <B p={[1.5, 0.034, 0]} s={[0.12, 0.02, d - 1]} c="#b8734f" shadow={false} metalness={0.15} />
     <B p={[cx, 2.15, minZ]} s={[w, 4.3, 0.25]} c="#e8e2d6" roughness={0.88} />
     <B p={[minX, 2.15, cz]} s={[0.25, 4.3, d]} c="#e8e2d6" roughness={0.88} />
@@ -279,6 +303,8 @@ function Building({ agents, phase, floor }: { agents: OfficeAgent[]; phase: Phas
     <B p={[maxX, 0.2, cz]} s={[0.2, 0.4, d]} c="#f4f2ec" />
     {(floor===1?PODS:FLOOR_TWO_PODS).map((pod) => <Pod key={pod.id} x={pod.x} z={pod.z} color={pod.color} screenOn={working.has(pod.id)} night={phase.night} />)}
     <MeetingRoom active={agents.some((agent) => agent.room === 'meeting')} />
+    <WallPanel p={[3.8, 2.05, minZ + 0.35]} color="#496354" />
+    <WallPanel p={[maxX - 0.35, 2.05, -5.2]} rotY={Math.PI / 2} color="#6c806f" />
     <Lounge /><Pantry /><Lobby />
     <LeadDesk active={agents.some((agent) => agent.id === (floor===1?LEAD_ID:'delivery-manager') && agent.room === 'workspace')} />
     <group position={[BROWSER_DESK.x,0,BROWSER_DESK.z]}><B p={[0,0.75,0]} s={[2.8,0.12,1]} c="#67523f"/><B p={[0,0.36,0]} s={[0.15,0.72,0.8]} c="#343a40"/><Chair p={[0,0,-0.95]}/></group>
@@ -513,30 +539,35 @@ function CameraRig({ command, view, tour, spots, reducedMotion, followId, positi
 function Lights({ phase }: { phase: Phase }) {
   return <>
     <color attach="background" args={[phase.sky]} />
-    <hemisphereLight args={[phase.sky, phase.grass, phase.ambient * 0.6]} />
-    <ambientLight intensity={phase.ambient * 0.34} />
-    <directionalLight position={[-14, 26, 18]} intensity={phase.sun * 1.08} color={phase.sunColor} castShadow
-      shadow-mapSize={[2048, 2048]} shadow-camera-left={-30} shadow-camera-right={30} shadow-camera-top={26} shadow-camera-bottom={-26} shadow-camera-far={80} shadow-bias={-0.0004} />
+    <hemisphereLight args={['#f5eddb', '#65715c', phase.ambient * 0.7]} />
+    <ambientLight intensity={phase.ambient * 0.22} />
+    <directionalLight position={[-12, 20, 12]} intensity={phase.sun * 1.1} color={phase.sunColor} castShadow
+      shadow-mapSize={[2048, 2048]} shadow-camera-left={-30} shadow-camera-right={30} shadow-camera-top={26} shadow-camera-bottom={-26} shadow-camera-far={80} shadow-bias={-0.0002} shadow-normalBias={0.04} />
+    <directionalLight position={[16, 9, -5]} intensity={phase.night ? 0.65 : 0.35} color={phase.night ? '#e6cba1' : '#f7edd7'} />
+    <pointLight position={[-10, 3.1, 2]} intensity={phase.night ? 1.2 : 0.28} distance={12} color="#ffd79a" castShadow />
+    <pointLight position={[8, 3.1, -7]} intensity={phase.night ? 1.1 : 0.22} distance={11} color="#c7dcff" />
+    <pointLight position={[11, 3.1, 9]} intensity={phase.night ? 0.9 : 0.2} distance={10} color="#ffe3b0" />
   </>;
 }
 
-export default function VisualOffice({ floor, ownerStart, onLift, agents, ready, selectedId, ownerSelected, ownerInput, ownerTarget, ownerVisitVersion, onOwnerMoving, followId, onSelect, onOwnerSelect, onCameraInteract, command, view, tour, phase, reducedMotion, boards, onOpenBoard }: VisualOfficeProps) {
+export default function VisualOffice({ floor, ownerStart, onLift, agents, learning, ready, selectedId, ownerSelected, ownerInput, ownerTarget, ownerVisitVersion, onOwnerMoving, followId, onSelect, onOwnerSelect, onCameraInteract, command, view, tour, phase, reducedMotion, boards, onOpenBoard, onOpenCommunity }: VisualOfficeProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [hoveredBoard, setHoveredBoard] = useState<BoardId | null>(null);
   const spots = useMemo(() => spotsFor(agents), [agents]);
   const positions = useMemo(() => new Map<string, THREE.Vector3>(), []);
+  const life = useMemo(() => createOfficeLife(), []);
   useEffect(() => { document.body.style.cursor = hoveredId || hoveredBoard ? 'pointer' : ''; return () => { document.body.style.cursor = ''; }; }, [hoveredId, hoveredBoard]);
   return <Canvas shadows dpr={[1, 2]} camera={{ position: [20, 28, 38], fov: 38, near: 0.5, far: 400 }} onPointerMissed={() => onSelect(null)}>
     <Lights phase={phase} />
     <Building agents={agents} phase={phase} floor={floor} />
     <OfficeEnvironment agents={agents} phase={phase} selectedId={selectedId} floor={floor} />
-    <OfficeObjects floor={floor} onOpenBoard={onOpenBoard} onHover={setHoveredId} />
+    <OfficeObjects floor={floor} onOpenBoard={onOpenBoard} onHover={setHoveredId} onOpenCommunity={onOpenCommunity} />
     <Lift floor={floor} onUse={onLift} />
     {BOARDS.filter(slot=>(slot.floor ?? 1)===floor).map((slot) => { const content = boards.find((board) => board.id === slot.id); return content ? <Board key={slot.id} slot={slot} content={content} hovered={hoveredBoard === slot.id} onHover={setHoveredBoard} onOpen={onOpenBoard} /> : null; })}
     {ready && agents.map((agent, index) => {
       const spot = spots.get(agent.id);
       return spot ? <OfficeAgentCharacter key={agent.id} agent={agent} agents={agents} index={index} spot={spot} selected={agent.id === selectedId} hovered={agent.id === hoveredId}
-        onSelect={onSelect} onHover={setHoveredId} reducedMotion={reducedMotion} positions={positions} /> : null;
+        onSelect={onSelect} onHover={setHoveredId} reducedMotion={reducedMotion} positions={positions} life={life} spokenMessage={spokenOfficeTurn(learning, agent.id)} /> : null;
     })}
     <OwnerCharacter start={ownerStart} onLift={onLift} destination={ownerTarget} request={ownerVisitVersion} selected={ownerSelected} hovered={hoveredId === 'owner'} input={ownerInput} onMoving={onOwnerMoving} onSelect={onOwnerSelect} onHover={setHoveredId} reducedMotion={reducedMotion} positions={positions} />
     <CameraRig command={command} view={view} tour={tour} spots={spots} reducedMotion={reducedMotion} followId={followId} positions={positions} onInteract={onCameraInteract} />

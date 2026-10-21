@@ -1,9 +1,10 @@
 import type { AuditEvent, Autopilot, BusinessSyncStatus } from '../api/api.js';
-import { OPERATIONS_ROSTER } from '@fvh/domain';
+import { OPERATIONS_ROSTER, OFFICE_ROSTER as ROSTER } from '@fvh/domain';
 import type { OperationsData } from '../api/operations-api.js';
 import type { BrowserBiddingStatus } from '../api/browser-bidding-api.js';
 import type { ProjectsCoIdStatus } from '../api/projects-co-id-api.js';
 import type { HermesKanbanStatus } from '../../../server/src/models/hermes-kanban-types.js';
+import type { OfficeLearningStatus } from '../../../server/src/models/office-learning-types.js';
 
 export type AgentState = 'working' | 'reviewing' | 'collaborating' | 'idle' | 'offline' | 'unknown';
 // Lobby is the neutral spot for agents whose state cannot be determined.
@@ -27,23 +28,7 @@ export type OfficeAgent = {
   recentActivity: AuditEvent[];
 };
 
-type RosterEntry = Pick<OfficeAgent, 'id' | 'name' | 'role' | 'color' | 'floor'>;
-
-export const ROSTER: RosterEntry[] = [
-  { id: 'chief-of-staff', name: 'Chief of Staff', role: 'Orchestrator Ruang Kerja', color: '#e76f51' },
-  { id: 'market-scout', name: 'Market Scout', role: 'Pencari & Penilai Pasar', color: '#2a9d8f' },
-  { id: 'bid-strategist', name: 'Bid Strategist', role: 'Perumus Proposal & Harga', color: '#e9c46a' },
-  { id: 'profile-editor', name: 'Profile Editor', role: 'Kurator Profil & Bukti', color: '#f4a261' },
-  { id: 'client-relations', name: 'Client Relations', role: 'Manajer Komunikasi Klien', color: '#457b9d' },
-  { id: 'operations-analyst', name: 'Operations Analyst', role: 'Analis Pipeline & Jadwal', color: '#6a4c93' },
-  { id: 'knowledge-curator', name: 'Knowledge Curator', role: 'Kurator Pengetahuan & Kode', color: '#8ab17d' },
-  { id: 'compliance-auditor', name: 'Compliance Auditor', role: 'Auditor Kebijakan & Keamanan', color: '#d62828' },
-  { id: 'qa-engineer', name: 'QA Engineer', role: 'Verifikator Kontrak & Smoke', color: '#277da1' },
-  { id: 'lead-agent', name: 'Lead Agent', role: 'Koordinator Tim AI (Hermes)', color: '#343a40' },
-  { id: 'browser-bid-operator', name: 'Operator Browser Bid', role: 'Pengiriman bid melalui Chrome', color: '#476b68', floor: 1 },
-  { id: 'projects-co-id-scout', name: 'Scout projects.co.id', role: 'Cari proyek & siapkan draf projects.co.id', color: '#476b68', floor: 1 },
-  ...OPERATIONS_ROSTER,
-];
+export { OFFICE_ROSTER as ROSTER } from '@fvh/domain';
 
 const WORK_REASON = 'Siklus autopilot sedang berjalan.';
 const IDLE_REASON = 'Autopilot siap, tetapi tidak sedang menjalankan siklus.';
@@ -94,6 +79,7 @@ function activityFor(id: string, activity: AuditEvent[]): AuditEvent[] {
 
 /** Extra real signals beyond the autopilot. `undefined` means the source could not be loaded. */
 export type OfficeContext = {
+  learning?: Pick<OfficeLearningStatus, 'available' | 'phase' | 'participantIds' | 'activeSpeakerId'> | null | undefined;
   projectsCoId?: ProjectsCoIdStatus | null | undefined;
   /** Hermes kanban board `fvh-house`; each employee is the profile `fvh-<id>`. */
   kanban?: Pick<HermesKanbanStatus, 'available' | 'team' | 'tasks'> | null | undefined;
@@ -166,6 +152,10 @@ export function deriveOfficeAgents(autopilot: Autopilot | undefined, activity: A
     else if (context.kanban?.team.includes(`fvh-${entry.id}`)) derived = { state: 'idle', reason: 'Siap mengerjakan kartu kanban Hermes.' };
     else if (context.kanban === undefined || (context.kanban && !context.kanban.available)) derived = { state: 'unknown', reason: context.kanban ? 'Kanban Hermes tidak dapat dibaca.' : 'Status kanban Hermes belum tersedia.' };
     else derived = { state: 'offline', reason: 'Tidak ada komponen runtime; tes dijalankan di luar aplikasi.' };
+    const learning = context.learning;
+    if (learning?.available && ['learning', 'discussing'].includes(learning.phase) && learning.participantIds.includes(entry.id) && !['working', 'reviewing', 'collaborating'].includes(derived.state)) {
+      derived = { state: 'collaborating', reason: 'Mengikuti sesi belajar internal Hermes.', task: learning.activeSpeakerId === entry.id ? 'Menyusun tanggapan dan catatan belajar.' : 'Mendengarkan diskusi rekan.' };
+    }
     const { state, reason } = derived;
     const task = derived.task !== undefined ? derived.task : (state === 'working' || state === 'collaborating') ? autopilot?.lastMessage ?? null : null;
     return { ...entry, state, room: roomFor(state), reason, task, recentActivity: activityFor(entry.id, events) };

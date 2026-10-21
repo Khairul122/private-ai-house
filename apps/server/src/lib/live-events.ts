@@ -94,6 +94,7 @@ export const TABLE_TOPICS: Record<string, LiveTopic[]> = {
   knowledge_sources: ['knowledge', 'capabilities'],
   knowledge_chunks: ['knowledge'],
   operation_documents: ['operations'],
+  office_learning_state: ['office-learning'],
   operation_outbox: ['operations'],
 };
 
@@ -147,6 +148,7 @@ const ROUTE_TOPICS: Array<[prefix: string, topics: LiveTopic[]]> = [
   ['/api/browser-bidding', ['browser-bidding', 'autopilot']],
   ['/api/operations', ['operations', 'work']],
   ['/api/hermes-kanban', ['hermes-kanban']],
+  ['/api/office-learning', ['office-learning']],
 ];
 const READ_ONLY_POSTS = new Set(['/api/knowledge/search']);
 

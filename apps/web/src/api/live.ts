@@ -27,6 +27,7 @@ export const TOPIC_QUERY_KEYS: Record<LiveTopic, string[]> = {
   'browser-bidding': ['browser-bidding'],
   operations: ['operations', 'operations-qr'],
   'hermes-kanban': ['hermes-kanban'],
+  'office-learning': ['office-learning'],
 };
 
 export function queryKeysFor(topics: unknown): string[] {

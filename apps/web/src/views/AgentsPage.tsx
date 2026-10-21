@@ -6,7 +6,8 @@ import type { ProjectsCoIdStatus } from '../api/projects-co-id-api.js';
 import type { BrowserBiddingStatus } from '../api/browser-bidding-api.js';
 import type { OperationsData } from '../api/operations-api.js';
 import { OPERATIONS_ROSTER } from '@fvh/domain';
-import { kanbanQuery } from '../api/queries.js';
+import { kanbanQuery, officeLearningQuery } from '../api/queries.js';
+import { OfficeLearningCard } from '../components/OfficeLearningCard.js';
 import { ErrorNotice, LoadingPanel, PageIntro, Metric } from '../components/ui.js';
 import { formatDate } from '../components/format.js';
 
@@ -16,6 +17,7 @@ export default function AgentsPage() {
   const queryClient = useQueryClient();
   const projectsCoId = useQuery({ queryKey: ['projects-co-id'], queryFn: () => api<ProjectsCoIdStatus | null>('/projects-co-id'), refetchInterval: 3000 });
   const kanban = useQuery(kanbanQuery);
+  const learning = useQuery(officeLearningQuery);
   const operations = useQuery({ queryKey: ['operations'], queryFn: () => api<OperationsData>('/operations'), refetchInterval: 5000 });
   const knowledgeSync = useQuery({ queryKey: ['knowledge-sync'], queryFn: () => api<{ job: { state: string; provider: string; current: string | null } | null }>('/knowledge/sync-status'), refetchInterval: 3_000 });
   const dashboard = useQuery({ queryKey: ['dashboard'], queryFn: () => api<{
@@ -36,6 +38,7 @@ export default function AgentsPage() {
   const inboxWaiting = inbox.isError ? undefined : inbox.data?.needsReply.length;
 
   const derived = deriveOfficeAgents(autopilot.isError ? undefined : autopilot.data, activity, {
+    learning: learning.isError ? undefined : learning.data,
     projectsCoId: projectsCoId.isError ? undefined : projectsCoId.data, kanban: kanban.isError ? undefined : kanban.data,
     sync: sync.isError ? undefined : sync.data, inboxWaiting, dueSoon: work.isError ? undefined : work.data?.dueSoon,
     hermes: capabilities.isError ? undefined : capabilities.data?.hermes, knowledge: knowledgeSync.isError ? undefined : knowledgeSync.data?.job,
@@ -155,6 +158,7 @@ export default function AgentsPage() {
 
   return <>
     <PageIntro eyebrow="Organisasi virtual" title="Tim AI" description="Status diambil dari proses aplikasi dan kartu Hermes yang nyata. Buka detail peran untuk tugas dan batas aksesnya." />
+    <OfficeLearningCard />
     <section className="card-summary-grid" aria-labelledby="crew-title" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 12rem), 1fr))' }}>
       <h2 id="crew-title" className="sr-only">Ringkasan status kru</h2>      <Metric label="Sedang bertugas" value={summary.working} note="Proses nyata atau kartu Hermes aktif" tone="primary" />
       <Metric label="Idle" value={summary.idle} note="Tidak ada pekerjaan aktif saat ini" />

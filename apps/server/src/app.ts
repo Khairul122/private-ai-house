@@ -16,6 +16,8 @@ import type { WhatsAppService } from './services/whatsapp.js';
 import type { GoogleCalendarService } from './services/google-calendar.js';
 import type { BrowserBiddingService } from './services/browser-bidding.js';
 import type { HermesKanban } from './services/hermes-kanban.js';
+import type { OfficeLearningService } from './services/office-learning.js';
+import { registerOfficeLearningRoutes } from './routes/office-learning.js';
 import type { ProjectsCoIdService } from './services/projects-co-id.js';
 import { readProductionWriteChecks } from './controllers/freelancer.js';
 import { allowedDevOrigins, type AppContext } from './controllers/shared.js';
@@ -42,6 +44,7 @@ import { LiveEvents, routeTopics } from './lib/live-events.js';
 export type AppOptions = {
   projectsCoId?: ProjectsCoIdService;
   hermesKanban?: HermesKanban;
+  officeLearning?: OfficeLearningService;
   browserBidding?: BrowserBiddingService;
   operations?: OperationsService;
   whatsapp?: WhatsAppService;
@@ -138,6 +141,7 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
   registerBrowserBiddingRoutes(app,options.browserBidding,repository);
   registerProjectsCoIdRoutes(app, options.projectsCoId);
   registerHermesKanbanRoutes(app, options.hermesKanban, now);
+  registerOfficeLearningRoutes(app, options.officeLearning);
   registerInboxRoutes(app, ctx);
   registerWorkRoutes(app, ctx);
   registerCapabilitiesRoutes(app, ctx);
@@ -161,6 +165,7 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
     return reply.code(404).send({ error: 'Endpoint tidak ditemukan.' });
   });
   app.addHook('onClose', async () => {
+    await options.officeLearning?.close();
     live.close();
     options.autopilot?.stop();
     options.linkedinOAuth?.close();

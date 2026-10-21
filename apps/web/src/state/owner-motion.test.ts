@@ -9,7 +9,7 @@ const target = (x: number, z: number): Spot => ({ x, z, y: 0, facing: 0, seated:
 const pilot = (cycleInProgress: boolean): Autopilot => ({ state: 'running', cycleInProgress, lastRunAt: null, nextRunAt: null, lastMessage: '', lastImported: 0, lastSubmitted: 0, specializations: [] });
 
 describe('Owner movement', () => {
-  it('starts clear of the lobby bench and cannot walk through a desk or partition', () => {
+  it('starts clear of the lobby bench and cannot walk through a desk', () => {
     expect(ownerCanStand(OWNER_SPOT.x, OWNER_SPOT.z)).toBe(true);
     expect(ownerCanStand(-18.2, 9.2)).toBe(false);
     const pod = PODS[0]!;
@@ -19,7 +19,17 @@ describe('Owner movement', () => {
     expect(ownerCanStand(state.x, state.z)).toBe(true);
     const outside = { ...createOwnerMotion(), x: pod.x + 3.25, z: pod.z };
     for (let i = 0; i < 100; i++) stepOwnerMotion(outside, { ...idle, left: true }, [1, 0], 1 / 60);
-    expect(outside.x).toBeGreaterThan(pod.x + 2.8);
+    expect(outside.x).toBeGreaterThan(pod.x + 1.6);
+    expect(outside.x).toBeLessThan(pod.x + 2.5);
+  });
+
+  it('opens former glass partition aisles while keeping the library and acoustic panels solid', () => {
+    const pod = PODS[0]!;
+    expect(ownerCanWalk([pod.x + 3.25, pod.z + 1.5], [pod.x, pod.z + 1.5])).toBe(true);
+    expect(ownerCanWalk([3, -6], [6, -6])).toBe(true);
+    expect(ownerCanStand(pod.x + 0.5, pod.z - 2.34)).toBe(false);
+    expect(ownerCanStand(16.8, 0.3)).toBe(false);
+    expect(ownerCanWalk([15, -2], [15, 2])).toBe(true);
   });
 
   it('keeps diagonal speed equal to straight movement and follows camera orientation', () => {

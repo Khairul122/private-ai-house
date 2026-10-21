@@ -11,6 +11,17 @@ const event = (type: string, id = type): AuditEvent => ({ id, type, resourceId: 
 const agent = (agents: ReturnType<typeof deriveOfficeAgents>, id: string) => agents.find((item) => item.id === id)!;
 
 describe('office state', () => {
+  it('shows actual learning participants and preserves active business work', () => {
+    const learning = { available: true, phase: 'discussing' as const, participantIds: ['market-scout', 'profile-editor'], activeSpeakerId: 'profile-editor' };
+    const idle = deriveOfficeAgents(autopilot(), [], { learning });
+    expect(agent(idle, 'market-scout')).toMatchObject({ state: 'collaborating', room: 'meeting', task: 'Mendengarkan diskusi rekan.' });
+    expect(agent(idle, 'profile-editor').task).toBe('Menyusun tanggapan dan catatan belajar.');
+    expect(agent(idle, 'knowledge-curator').state).toBe('idle');
+    expect(agent(deriveOfficeAgents(autopilot({ cycleInProgress: true }), [], { learning }), 'market-scout').state).toBe('working');
+    expect(agent(deriveOfficeAgents(autopilot(), [], { learning: { ...learning, available: false } }), 'market-scout').state).toBe('idle');
+    expect(agent(deriveOfficeAgents(autopilot(), [], { learning: { ...learning, phase: 'error' } }), 'profile-editor').state).toBe('idle');
+    expect(agent(deriveOfficeAgents(autopilot(), [], { learning: undefined }), 'profile-editor').state).toBe('idle');
+  });
   it('derives the projects.co.id scout only from its current worker signal', () => {
     const worker: ProjectsCoIdStatus = { mode: 'scan-only', state: 'ready', busy: false, reason: 'Fixture', username: 'KhairulHuda06', remaining: null, checkedAt: null, pageStatus: 200, lastScanAt: null, lastResult: null, lastSearchTerms: [], searchTerms: [], autoAvailable: false, draftsInProgress: 0, projectCount: 4, readyDrafts: 2, blockedWrites: 0, draftUsage: { today: 1, week: 1, dailyLimit: 4, weeklyLimit: 12 } };
     const scout = (changes: Partial<ProjectsCoIdStatus> = {}) => agent(deriveOfficeAgents(autopilot(), [event('projects_co_id.scan_completed'), event('marketplace.production.submit_bid')], { projectsCoId: { ...worker, ...changes } }), 'projects-co-id-scout');
@@ -51,6 +62,21 @@ describe('office state', () => {
   it('maps running idle to lounge and paused to offline', () => {
     expect(agent(deriveOfficeAgents(autopilot(), []), 'market-scout')).toMatchObject({ state: 'idle', room: 'lounge' });
     expect(agent(deriveOfficeAgents(autopilot({ state: 'paused' }), []), 'market-scout')).toMatchObject({ state: 'offline', room: null, reason: 'Autopilot dijeda melalui kill switch.' });
+  });
+
+  it('collaborates only when a live collaboration signal exists', () => {
+    const idle = deriveOfficeAgents(autopilot(), [event('unrelated')]);
+    expect(agent(idle, 'bid-strategist')).toMatchObject({ state: 'idle', room: 'lounge', task: null });
+    expect(agent(idle, 'compliance-auditor')).toMatchObject({ state: 'idle', room: 'lounge', task: null });
+
+    const cycle = deriveOfficeAgents(autopilot({ cycleInProgress: true }), []);
+    expect(agent(cycle, 'bid-strategist').state).toBe('collaborating');
+    expect(agent(cycle, 'compliance-auditor').state).toBe('collaborating');
+
+    const noLongerRunning = deriveOfficeAgents(autopilot(), [], {
+      learning: { available: true, phase: 'discussing', participantIds: ['bid-strategist'], activeSpeakerId: 'bid-strategist' },
+    });
+    expect(agent(noLongerRunning, 'bid-strategist')).toMatchObject({ state: 'collaborating', room: 'meeting' });
   });
 
   it('does not fabricate idle work, routes, or activity without matching signals', () => {

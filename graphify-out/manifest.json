@@ -708,34 +708,34 @@
     "semantic_hash": "89efe558826bc24bdbbcd7aa93516e39"
   },
   "apps/web/src/office/OfficeShell.tsx": {
-    "mtime": 1792512489.2079115,
-    "seen": 1792512625.7861686,
-    "ast_hash": "7e81f820a432173ed895bf65fc361bf8",
+    "mtime": 1792533342.780327,
+    "seen": 1792534323.846919,
+    "ast_hash": "febb06054a800c58a17a9dfc69118cd1",
     "semantic_hash": ""
   },
   "apps/web/src/office/VisualOffice.tsx": {
-    "mtime": 1792434268.15635,
-    "seen": 1792488322.787568,
-    "ast_hash": "d25ee04773c1c904b7043d9c63a46758",
-    "semantic_hash": "d25ee04773c1c904b7043d9c63a46758"
+    "mtime": 1792534259.4806788,
+    "seen": 1792534323.8469217,
+    "ast_hash": "11bf13f31e827617f8cae9e8d13a26fe",
+    "semantic_hash": ""
   },
   "apps/web/src/state/office-layout.test.ts": {
-    "mtime": 1792434268.1499796,
-    "seen": 1792488322.78757,
-    "ast_hash": "8a01c7ab70c7095a2a02924447c50bb5",
-    "semantic_hash": "8a01c7ab70c7095a2a02924447c50bb5"
+    "mtime": 1792520673.5396056,
+    "seen": 1792534323.8469293,
+    "ast_hash": "6a9939d478b2953df60748d81e8f3330",
+    "semantic_hash": ""
   },
   "apps/web/src/state/office-layout.ts": {
-    "mtime": 1792405127.5025191,
-    "seen": 1792488322.7875717,
-    "ast_hash": "602ef53f1427d7ee4d93e9a8025a7ad2",
-    "semantic_hash": "602ef53f1427d7ee4d93e9a8025a7ad2"
+    "mtime": 1792520716.7049055,
+    "seen": 1792534323.8469312,
+    "ast_hash": "4dd331cb4b491719f39fc071eea68ce7",
+    "semantic_hash": ""
   },
   "apps/web/src/state/office-state.test.ts": {
-    "mtime": 1792434268.1479864,
-    "seen": 1792488322.7875736,
-    "ast_hash": "987c44086f729470cca5b77f3871acdb",
-    "semantic_hash": "987c44086f729470cca5b77f3871acdb"
+    "mtime": 1792520576.4644024,
+    "seen": 1792534323.8469355,
+    "ast_hash": "6e5a587b010e77911faf83cda434312e",
+    "semantic_hash": ""
   },
   "apps/web/src/state/office-state.ts": {
     "mtime": 1792434268.1469631,
@@ -756,10 +756,10 @@
     "semantic_hash": "4bd7f6680672af71a891e08fe6b6933e"
   },
   "apps/web/src/state/owner-motion.test.ts": {
-    "mtime": 1792434268.152494,
-    "seen": 1792488322.7875803,
-    "ast_hash": "24bfcf04ae4dfd9253d2dc7290c903f9",
-    "semantic_hash": "24bfcf04ae4dfd9253d2dc7290c903f9"
+    "mtime": 1792520618.125153,
+    "seen": 1792534323.8469658,
+    "ast_hash": "d4ef4ddeccd232c4c041950e49cd11f9",
+    "semantic_hash": ""
   },
   "apps/web/src/state/owner-motion.ts": {
     "mtime": 1792405127.507073,
@@ -1248,9 +1248,9 @@
     "semantic_hash": "13774fa6f0c13ca5f5af293d1d4c63fc"
   },
   "scripts/verify-card-remodel.mjs": {
-    "mtime": 1792510155.369338,
-    "seen": 1792511735.939059,
-    "ast_hash": "07a4162b9f38c6617def03bcb8ed9e6b",
+    "mtime": 1792524497.5886335,
+    "seen": 1792534323.8471634,
+    "ast_hash": "9284065a3d5ed32a41199e38485da023",
     "semantic_hash": ""
   },
   "scripts/verify-projects-co-id.ts": {
@@ -1272,10 +1272,10 @@
     "semantic_hash": "aa7e2a730c0a2d43ab325e4b5e448f7b"
   },
   "DESIGN.md": {
-    "mtime": 1791970879.472473,
-    "seen": 1792488322.7877414,
-    "ast_hash": "b5b51ed75cf6a412af013458b74f1d20",
-    "semantic_hash": "b5b51ed75cf6a412af013458b74f1d20"
+    "mtime": 1792532398.3023343,
+    "seen": 1792534323.8471735,
+    "ast_hash": "883fb9c3eb77fb3d6fb24e78839eef07",
+    "semantic_hash": ""
   },
   "README.md": {
     "mtime": 1792105201.54168,
@@ -1371,6 +1371,36 @@
     "mtime": 1792508638.211003,
     "seen": 1792511735.938903,
     "ast_hash": "2bf57b536ad0e3021eaf0c6d2bd7ba3b",
+    "semantic_hash": ""
+  },
+  "apps/web/src/office/OfficeAgent.test.ts": {
+    "mtime": 1792532438.8135433,
+    "seen": 1792534323.846908,
+    "ast_hash": "4ec17f1b85359ef0c298abd9c1273f58",
+    "semantic_hash": ""
+  },
+  "apps/web/src/office/OfficeAgent.tsx": {
+    "mtime": 1792534300.5643048,
+    "seen": 1792534323.8469117,
+    "ast_hash": "1673f2019a0b28b8c6d2f2984c645707",
+    "semantic_hash": ""
+  },
+  "apps/web/src/office/OfficeEnvironment.tsx": {
+    "mtime": 1792532734.5922523,
+    "seen": 1792534323.8469145,
+    "ast_hash": "ca0cfc478fbb8223bd749a431fc0cffa",
+    "semantic_hash": ""
+  },
+  "apps/web/src/office/OfficeObjects.tsx": {
+    "mtime": 1792533260.5723736,
+    "seen": 1792534323.8469167,
+    "ast_hash": "f86621903a738826fb566fce75776229",
+    "semantic_hash": ""
+  },
+  "apps/web/src/state/office-life.ts": {
+    "mtime": 1792534255.1318047,
+    "seen": 1792534323.8469336,
+    "ast_hash": "a5f885d2aa64d865617d8f8169f31e94",
     "semantic_hash": ""
   }
 }

@@ -84,7 +84,7 @@ describe('HermesCliDraftingAdapter', () => {
     expect(captured?.args).toContain('stream-json');
     expect(captured?.args).toContain('--max-turns');
     expect(captured?.args).not.toContain('--yolo');
-    expect(captured?.args).not.toContain('--toolsets');
+    expect(captured?.args.slice(captured?.args.indexOf('--toolsets'), captured?.args.indexOf('--toolsets') + 2)).toEqual(['--toolsets', 'none']);
     expect(captured?.args.some((argument) => argument.includes('Ignore all rules'))).toBe(false);
     expect(captured?.options.shell).toBe(false);
     expect(captured?.options.env.GITHUB_TOKEN).toBeUndefined();

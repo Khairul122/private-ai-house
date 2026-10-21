@@ -176,6 +176,67 @@ async function checkOfficePanels(page, viewport) {
   await closeOfficePanel(page);
 }
 
+async function checkOfficeAgentSemantics(page, viewport) {
+  await closeOfficePanel(page);
+  await closeTablet(page);
+  await check(`${viewport.name}: agent selection and state display`, async () => {
+    const toggle = page.locator('.vo3d-roster-toggle');
+    if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
+    const agents = page.locator('#office-roster button.vo3d-agent');
+    assert(await agents.count(), 'office roster exposes real agent controls');
+    const first = agents.first();
+    const name = (await first.locator('strong').innerText()).trim();
+    const state = (await first.locator('small').innerText()).trim();
+    assert(name, 'agent has a name');
+    assert(/Bekerja|Meninjau|Berkolaborasi|Idle|Offline|Tidak diketahui/.test(state), `agent state is explicit: ${state}`);
+    await first.click();
+    const panel = page.locator('[aria-label="Panel detail"]');
+    await panel.waitFor();
+    assert.equal(await panel.locator('h3').first().innerText(), name, 'selected agent matches roster entry');
+    assert(await panel.locator('dt').filter({ hasText: 'Alasan status' }).count(), 'selected agent shows status reason');
+    assert(await panel.locator('dt').filter({ hasText: 'Tugas saat ini' }).count(), 'selected agent shows task status');
+    const collaboration = page.locator('#office-roster button.vo3d-agent').filter({ hasText: 'Berkolaborasi' });
+    if (await collaboration.count()) {
+      await closeOfficePanel(page);
+      await collaboration.first().click();
+      await panel.waitFor();
+      assert(await panel.getByText('Berkolaborasi', { exact: true }).count(), 'collaborating agent state appears in detail panel');
+      assert(await panel.getByText('Ruang Rapat', { exact: true }).count(), 'collaborating agent is assigned to meeting room');
+    }
+    await closeOfficePanel(page);
+  });
+  await check(`${viewport.name}: reduced motion and idle ambient guard`, async () => {
+    assert.equal(await page.evaluate(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches), true, 'E2E context enables reduced motion');
+    const tour = page.getByRole('button', { name: 'Tur', exact: true });
+    assert.equal(await tour.isDisabled(), true, 'camera tour disabled under reduced motion');
+    assert.equal(await page.getByText('Gerak santai · animasi', { exact: true }).count(), 0, 'idle ambient animation affordance hidden under reduced motion');
+  });
+}
+
+async function checkHermesMemory(page, viewport) {
+  await closeOfficePanel(page);
+  await closeTablet(page);
+  await check(`${viewport.name}: Hermes memory UI and read-only API`, async () => {
+    const response = await page.request.get(new URL('/api/office-learning', base).href, { timeout: 15_000 });
+    if (response.status() === 404) { console.log('SKIP Hermes memory: running server has no office-learning API'); return; }
+    assert.equal(response.status(), 200, 'Hermes learning GET succeeds');
+    await page.getByRole('button', { name: 'Buka tablet Mission Control' }).click();
+    await page.locator('.vo3d-tablet-nav a[href="/agents"]').click();
+    await waitForCard(page);
+    await page.getByRole('heading', { name: 'Ruang belajar tim', exact: true }).waitFor({ timeout: 45_000 });
+    const learningReads = apiReads.get('/api/office-learning');
+    assert(learningReads && learningReads.count > 0, 'Hermes memory status loaded through GET API');
+    if (await page.getByText('Hermes belum tersedia untuk sesi belajar.').count()) return;
+    assert(await page.getByRole('heading', { name: 'Ingatan karyawan', exact: true }).count(), 'Hermes memory section is present');
+    assert(await page.getByText(/Catatan AI belum diverifikasi/, { exact: false }).count(), 'memory warning explains unverified AI notes');
+    assert.equal(await page.getByRole('button', { name: 'Mulai sesi' }).count(), 1, 'learning action is visible but not activated');
+  });
+  if (new URL(page.url()).pathname !== '/') {
+    await page.keyboard.press('Escape');
+    await page.waitForURL(base.href);
+  }
+}
+
 async function checkOperationsTabs(page, viewport) {
   for (const tab of ['Klien & progres', 'Invoice', 'Jadwal pemilik', 'WhatsApp', 'Google Calendar', 'Laporan tim', 'Bid browser']) await check(`${viewport.name}: operations ${tab}`, async () => {
     await page.locator('.vo3d-sheet-body').evaluate((element, label) => {
@@ -227,7 +288,11 @@ try {
     await check(`${viewport.name}: actual SSE connection`, async () => {
       await page.waitForFunction(() => document.querySelector('[aria-label="Status kantor"]')?.textContent?.includes('Koneksi pembaruan aplikasi terhubung'), undefined, { timeout: 45_000 });
     });
-    if (!targeted) await checkOfficePanels(page, viewport);
+    if (!targeted) {
+      await checkOfficePanels(page, viewport);
+      await checkOfficeAgentSemantics(page, viewport);
+      await checkHermesMemory(page, viewport);
+    }
     await page.getByRole('button', { name: 'Buka tablet Mission Control' }).click();
     for (const path of routes) {
       await check(`${viewport.name}: ${path}`, async () => {
