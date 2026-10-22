@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FixtureDraftingAdapter } from '@fvh/application';
-import { FreelancerReadError, FreelancerSandboxWriteError, FreelancerWriteError } from '@fvh/adapter-freelancer';
+import { FreelancerReadError, FreelancerSandboxWriteError } from '@fvh/adapter-freelancer';
 import { WorkspaceRepository } from '@fvh/persistence';
 import { createApp } from './app.js';
 import { insertTestOpportunity, testOpportunity } from './test-fixtures.js';
@@ -244,77 +244,11 @@ describe('local API', () => {
     await sandboxApp.close();
   });
 
-  it('records production HTTP 200 only after an explicitly confirmed live operation', async () => {
-    const runWrite = vi.fn(async (input: { operation: string }) => ({ statusCode: 200, resultId: input.operation === 'edit_profile' ? undefined : '9001', resultStatus: input.operation === 'edit_profile' ? 'success' : undefined }));
-    const productionApp = await createApp({
-      credentialStatus: { freelancerAccessTokenConfigured: true, linkedinClientConfigured: false, linkedinAccessTokenConfigured: false, linkedinAccessTokenExpiresAt: null },
-      runFreelancerProductionWrite: runWrite,
-    });
-    const cases = [
-      { operation: 'submit_bid', projectId: 71, amount: 200, period: 5, milestonePercentage: 100, description: 'Reviewed live proposal.', confirmLive: true },
-      { operation: 'edit_profile', jobIds: [17, 23], confirmLive: true },
-      { operation: 'send_message', threadId: 81, message: 'Reviewed live message.', confirmLive: true },
-    ] as const;
-
-    for (const input of cases) {
-      const response = await productionApp.inject({ method: 'POST', url: '/api/freelancer/production-write', payload: input });
-      expect(response.statusCode).toBe(200);
-      expect(response.json()).toMatchObject({ operation: input.operation, statusCode: 200, environment: 'production' });
-    }
-    const capabilities = await productionApp.inject({ method: 'GET', url: '/api/capabilities' });
-    const writeRows = capabilities.json().marketplace.filter((item: { operation: string }) => ['submit_bid', 'edit_profile', 'send_message'].includes(item.operation));
-
-    expect(runWrite).toHaveBeenCalledTimes(3);
-    expect(writeRows.every((item: { status: string; productionVerification?: { statusCode: number } }) => item.status === 'supported' && item.productionVerification?.statusCode === 200)).toBe(true);
-    expect(capabilities.json().freelancerCredentials.productionWriteConfigured).toBe(true);
+  it('removes generic production writes', async () => {
+    const productionApp = await createApp({ credentialStatus: { freelancerAccessTokenConfigured: true, linkedinClientConfigured: false, linkedinAccessTokenConfigured: false, linkedinAccessTokenExpiresAt: null } });
+    const response = await productionApp.inject({ method: 'POST', url: '/api/freelancer/production-write', payload: { operation: 'send_message', threadId: 81, message: 'Blocked.', confirmLive: true } });
+    expect(response.statusCode).toBe(404);
     await productionApp.close();
-  });
-
-  it('requires a production token and explicit live confirmation, and preserves provider failures', async () => {
-    const runWrite = vi.fn(async () => { throw new FreelancerWriteError(403, 'denied'); });
-    const input = { operation: 'send_message', threadId: 81, message: 'Live message.' };
-    const noTokenApp = await createApp({ runFreelancerProductionWrite: runWrite });
-    const deniedConfig = await noTokenApp.inject({ method: 'POST', url: '/api/freelancer/production-write', payload: { ...input, confirmLive: true } });
-    expect(deniedConfig.statusCode).toBe(409);
-    expect(runWrite).not.toHaveBeenCalled();
-    await noTokenApp.close();
-
-    const productionApp = await createApp({
-      credentialStatus: { freelancerAccessTokenConfigured: true, linkedinClientConfigured: false, linkedinAccessTokenConfigured: false, linkedinAccessTokenExpiresAt: null },
-      runFreelancerProductionWrite: runWrite,
-    });
-    const unconfirmed = await productionApp.inject({ method: 'POST', url: '/api/freelancer/production-write', payload: input });
-    expect(unconfirmed.statusCode).toBe(400);
-    expect(runWrite).not.toHaveBeenCalled();
-    const failed = await productionApp.inject({ method: 'POST', url: '/api/freelancer/production-write', payload: { ...input, confirmLive: true } });
-    const capabilities = await productionApp.inject({ method: 'GET', url: '/api/capabilities' });
-    const messageCapability = capabilities.json().marketplace.find((item: { operation: string }) => item.operation === 'send_message');
-
-    expect(failed.statusCode).toBe(502);
-    expect(failed.json()).toMatchObject({ providerStatusCode: 403 });
-    expect(messageCapability).toMatchObject({ status: 'unknown', productionVerification: { statusCode: 403 } });
-    await productionApp.close();
-  });
-
-  it('restores the latest production write status from the local audit after a server restart', async () => {
-    const durableRepository = await WorkspaceRepository.open();
-    const credentialStatus = { freelancerAccessTokenConfigured: true, linkedinClientConfigured: false, linkedinAccessTokenConfigured: false, linkedinAccessTokenExpiresAt: null };
-    const firstApp = await createApp({
-      repository: durableRepository,
-      credentialStatus,
-      runFreelancerProductionWrite: async () => ({ statusCode: 200, resultId: '9001' }),
-    });
-    await firstApp.ready();
-    const submitted = await firstApp.inject({ method: 'POST', url: '/api/freelancer/production-write', payload: { operation: 'submit_bid', projectId: 71, amount: 200, period: 5, milestonePercentage: 100, description: 'Reviewed live proposal.', confirmLive: true } });
-    expect(submitted.statusCode).toBe(200);
-    await firstApp.close();
-
-    const restartedApp = await createApp({ repository: durableRepository, credentialStatus });
-    const capabilities = await restartedApp.inject({ method: 'GET', url: '/api/capabilities' });
-    const bidCapability = capabilities.json().marketplace.find((item: { operation: string }) => item.operation === 'submit_bid');
-    expect(bidCapability).toMatchObject({ status: 'supported', productionVerification: { statusCode: 200, resultId: '9001' } });
-    await restartedApp.close();
-    await durableRepository.close();
   });
 
   it('syncs only provider results and updates read capability after a successful API response', async () => {

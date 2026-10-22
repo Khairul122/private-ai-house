@@ -426,16 +426,19 @@ export class FreelancerAutopilot {
           };
           const result = this.dependencies.guardedSubmitBid ? await this.dependencies.guardedSubmitBid(input, authorize) : await this.dependencies.submitBid(input);
           const success = result.statusCode === 200;
-          await repository.appendAudit({ type: 'marketplace.production.submit_bid', resourceId: project.id, status: success ? 'recorded' : 'failed', reason: `Bid otomatis melalui ${'transport' in result && result.transport==='browser'?'browser':'API'} menghasilkan HTTP ${result.statusCode}.${result.resultId ? ` ID hasil: ${result.resultId}.` : ''} Isi proposal tidak disimpan pada audit.`, policyVersion: activePolicy.version, payloadHash });
-          if (success) {
-            if (result.resultId?.trim()) {
-              await repository.setPipelineStatus(project.id, 'submitted');
-              await repository.recordSubmittedBid({ projectId: project.id, bidId: result.resultId, amount: bid.amount, currency: project.currency, submittedAt: runAt.toISOString() });
-              await repository.appendAudit({ type: 'business.bid_submitted', resourceId: project.id, status: 'recorded', reason: `Bid Freelancer terkonfirmasi dan dicatat pada operasi bisnis lokal. ID hasil: ${result.resultId}.`, policyVersion: policy.version, payloadHash: null, createdAt: runAt.toISOString() });
-            }
+          const resultId = result.resultId?.trim();
+          const confirmed = success && Boolean(resultId);
+          await repository.appendAudit({ type: 'marketplace.production.submit_bid', resourceId: project.id, status: confirmed ? 'recorded' : success ? 'uncertain' : 'failed', reason: `Bid otomatis melalui ${'transport' in result && result.transport==='browser'?'browser':'API'} menghasilkan HTTP ${result.statusCode}.${resultId ? ` ID hasil: ${resultId}.` : ''}${success && !resultId ? ' ID bid tidak diberikan; hasil perlu direkonsiliasi.' : ''} Isi proposal tidak disimpan pada audit.`, policyVersion: activePolicy.version, payloadHash });
+          if (confirmed) {
+            await repository.setPipelineStatus(project.id, 'submitted', { marketplaceConfirmed: true });
+            await repository.recordSubmittedBid({ projectId: project.id, bidId: resultId!, amount: bid.amount, currency: project.currency, submittedAt: runAt.toISOString() });
+            await repository.appendAudit({ type: 'business.bid_submitted', resourceId: project.id, status: 'recorded', reason: `Bid Freelancer terkonfirmasi dan dicatat pada operasi bisnis lokal. ID hasil: ${resultId}.`, policyVersion: policy.version, payloadHash: null, createdAt: runAt.toISOString() });
             submitted += 1;
             dailyUsed += 1;
             weeklyUsed += 1;
+          } else if (success) {
+            await repository.setPipelineStatus(project.id, 'reconciliation_required');
+            count('Freelancer menerima HTTP 200 tanpa ID bid; hasil perlu direkonsiliasi dan tidak dihitung sebagai bid terkonfirmasi');
           } else {
             count(`Bid ditolak Freelancer: HTTP ${result.statusCode}`);
             await repository.setPipelineStatus(project.id, 'error');

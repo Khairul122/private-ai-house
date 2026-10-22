@@ -22,8 +22,7 @@ async function migrate(db: Database) {
 
 function postgres(url: string): Database {
   const local = /@(localhost|127\.0\.0\.1)[:/]/.test(url);
-  // ponytail: Supabase pooler certs are not in Node's CA store, so TLS is encrypted but not verified; pin the Supabase CA via `ssl.ca` to harden.
-  const pool = new pg.Pool({ connectionString: url, max: 5, options: '-c search_path=fvh', ...(local ? {} : { ssl: { rejectUnauthorized: false } }) });
+  const pool = new pg.Pool({ connectionString: url, max: 5, options: '-c search_path=fvh', ...(local ? {} : { ssl: { rejectUnauthorized: true } }) });
   pool.on('error', (error) => console.error('Postgres pool error:', error.message));
   const wrap = (target: pg.Pool | pg.PoolClient): Queryable => ({
     query: async <T = Row>(text: string, params?: unknown[]) => (await target.query(text, params as unknown[])).rows as T[],

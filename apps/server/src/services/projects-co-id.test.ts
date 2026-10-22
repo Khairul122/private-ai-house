@@ -76,6 +76,7 @@ describe('projects.co.id read-only integration', () => {
   it('stores separate platform ids, preserves pipeline on rescan, and persists policy settings with optimistic locking', async () => {
     repo = await WorkspaceRepository.open();
     await repo.syncProjects([project()]);
+    await repo.setPipelineStatus(project().id, 'scored');
     await repo.setPipelineStatus(project().id, 'reconciliation_required');
     await repo.syncProjects([{ ...project(), title: 'Updated title' }]);
     expect((await repo.listProjects())[0]).toMatchObject({ title: 'Updated title', pipelineStatus: 'reconciliation_required' });

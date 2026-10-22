@@ -2,7 +2,7 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import type {} from '@fastify/static';
 import { z } from 'zod';
-import type { FreelancerSandboxWriteInput, FreelancerSandboxWriteResult, FreelancerWriteInput, FreelancerWriteResult } from '@fvh/adapter-freelancer';
+import type { FreelancerSandboxWriteInput, FreelancerSandboxWriteResult } from '@fvh/adapter-freelancer';
 import { UnavailableDraftingAdapter } from '@fvh/application';
 import type { AiDraftingPort } from '@fvh/application';
 import type { ProjectOpportunity } from '@fvh/domain';
@@ -56,7 +56,6 @@ export type AppOptions = {
   getCredentialStatus?: () => CredentialStatus;
   freelancerSandboxTokenConfigured?: boolean;
   verifyFreelancer?: () => Promise<FreelancerVerification>;
-  runFreelancerProductionWrite?: (input: FreelancerWriteInput) => Promise<FreelancerWriteResult>;
   verifyFreelancerSandboxWrite?: (input: FreelancerSandboxWriteInput) => Promise<FreelancerSandboxWriteResult>;
   readFreelancerProjects?: (query: string, limit: number) => Promise<{ projects: ProjectOpportunity[]; skipped: number }>;
   autopilot?: FreelancerAutopilot;

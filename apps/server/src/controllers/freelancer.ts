@@ -1,18 +1,13 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { FreelancerReadError, FreelancerSandboxWriteError, FreelancerWriteError } from '@fvh/adapter-freelancer';
-import type { FreelancerSandboxWriteInput, FreelancerWriteInput, FreelancerWriteOperation } from '@fvh/adapter-freelancer';
+import type { FreelancerSandboxWriteInput, FreelancerWriteOperation } from '@fvh/adapter-freelancer';
 import { hashPayload } from '@fvh/application';
 import type { WorkspaceRepository } from '@fvh/persistence';
 import { parseBody, type AppContext, type FreelancerProductionWriteCheck } from './shared.js';
 
 const freelancerSyncSchema = z.object({ query: z.string().trim().min(2).max(120), limit: z.number().int().min(1).max(50).default(25) });
 const safeFreelancerIdSchema = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
-const freelancerProductionWriteSchema = z.discriminatedUnion('operation', [
-  z.object({ operation: z.literal('submit_bid'), projectId: safeFreelancerIdSchema, amount: z.number().finite().positive(), period: z.number().int().positive(), milestonePercentage: z.number().int().min(1).max(100), description: z.string().trim().min(1).max(4_000), confirmLive: z.literal(true) }),
-  z.object({ operation: z.literal('edit_profile'), jobIds: z.array(safeFreelancerIdSchema).min(1).max(20).refine((ids) => new Set(ids).size === ids.length, 'ID job tidak boleh duplikat.'), confirmLive: z.literal(true) }),
-  z.object({ operation: z.literal('send_message'), threadId: safeFreelancerIdSchema, message: z.string().trim().min(1).max(4_000), confirmLive: z.literal(true) }),
-]);
 const freelancerSandboxWriteSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('submit_bid'), projectId: safeFreelancerIdSchema, amount: z.number().finite().positive(), period: z.number().int().positive(), milestonePercentage: z.number().int().min(1).max(100), description: z.string().trim().min(1).max(4_000) }),
   z.object({ operation: z.literal('edit_profile'), jobIds: z.array(safeFreelancerIdSchema).min(1).max(20).refine((ids) => new Set(ids).size === ids.length, 'ID job tidak boleh duplikat.') }),
@@ -111,62 +106,6 @@ export function freelancerController({ options, repository, now, state, freelanc
         const message = providerStatusCode === null
           ? 'Uji sandbox tidak memperoleh respons yang dapat dipastikan. Periksa thread/proyek sandbox sebelum mengulang.'
           : `Freelancer sandbox merespons HTTP ${providerStatusCode}; status bukan 200.`;
-        return reply.code(502).send({ error: message, providerStatusCode });
-      }
-    },
-
-    productionWrite: async (request: FastifyRequest, reply: FastifyReply) => {
-      const credentialStatus = options.getCredentialStatus?.() ?? options.credentialStatus;
-      if (!credentialStatus?.freelancerAccessTokenConfigured) {
-        return reply.code(409).send({ error: 'Token produksi Freelancer belum dikonfigurasi di .env atau secure store Windows.' });
-      }
-      if (!options.runFreelancerProductionWrite) {
-        return reply.code(503).send({ error: 'Adapter operasi live Freelancer belum tersedia di server ini.' });
-      }
-      const parsed = parseBody(freelancerProductionWriteSchema, request.body);
-      if ('issues' in parsed) return reply.code(400).send({ error: 'Data operasi live tidak valid.', issues: parsed.issues });
-
-      const { confirmLive, ...input } = parsed.value;
-      if (!confirmLive) return reply.code(400).send({ error: 'Konfirmasi operasi live wajib diberikan.' });
-      const liveInput = input as FreelancerWriteInput;
-      try {
-        const result = await options.runFreelancerProductionWrite(liveInput);
-        const checkedAt = now().toISOString();
-        const check = {
-          statusCode: result.statusCode, checkedAt,
-          ...(result.resultId ? { resultId: result.resultId } : {}),
-          ...(result.resultStatus ? { resultStatus: result.resultStatus } : {}),
-        };
-        freelancerProductionWriteChecks.set(liveInput.operation, check);
-        const resultDescription = result.resultId ? `ID hasil: ${result.resultId}.` : result.resultStatus ? `Status hasil: ${result.resultStatus}.` : 'Freelancer tidak memberikan ID hasil.';
-        const success = result.statusCode === 200;
-        await repository.appendAudit({
-          type: `marketplace.production.${liveInput.operation}`, resourceId: result.resultId ?? 'freelancer-production',
-          status: success ? 'recorded' : 'failed',
-          reason: `Operasi live ${liveInput.operation} menghasilkan HTTP ${result.statusCode}. ${resultDescription} Isi payload tidak disimpan.`,
-          policyVersion: (await repository.getPolicy()).version, payloadHash: hashPayload(liveInput),
-        });
-        if (!success) return reply.code(502).send({ error: `Freelancer merespons HTTP ${result.statusCode}; operasi tidak dinyatakan berhasil.`, providerStatusCode: result.statusCode });
-        return {
-          operation: liveInput.operation, statusCode: result.statusCode, environment: 'production', checkedAt,
-          ...(result.resultId ? { resultId: result.resultId } : {}),
-          ...(result.resultStatus ? { resultStatus: result.resultStatus } : {}),
-          message: `Freelancer production menerima ${liveInput.operation} dengan HTTP 200. ${resultDescription}`,
-        };
-      } catch (error) {
-        const checkedAt = now().toISOString();
-        const providerStatusCode = error instanceof FreelancerWriteError ? error.statusCode ?? null : null;
-        freelancerProductionWriteChecks.set(liveInput.operation, { statusCode: providerStatusCode, checkedAt });
-        await repository.appendAudit({
-          type: `marketplace.production.${liveInput.operation}`, resourceId: 'freelancer-production', status: 'failed',
-          reason: providerStatusCode === null
-            ? `Hasil operasi live ${liveInput.operation} tidak dapat dipastikan; periksa akun Freelancer sebelum mengulang.`
-            : `Operasi live ${liveInput.operation} menghasilkan HTTP ${providerStatusCode}.`,
-          policyVersion: (await repository.getPolicy()).version, payloadHash: hashPayload(liveInput),
-        });
-        const message = providerStatusCode === null
-          ? 'Hasil operasi live tidak dapat dipastikan. Periksa akun Freelancer sebelum mencoba lagi agar tidak membuat duplikasi.'
-          : `Freelancer merespons HTTP ${providerStatusCode}; operasi tidak dinyatakan berhasil.`;
         return reply.code(502).send({ error: message, providerStatusCode });
       }
     },

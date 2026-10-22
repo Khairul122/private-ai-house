@@ -123,7 +123,7 @@ export type AuditEvent = {
   id: string;
   type: string;
   resourceId: string;
-  status: 'allowed' | 'blocked' | 'recorded' | 'failed';
+  status: 'allowed' | 'blocked' | 'recorded' | 'failed' | 'uncertain';
   reason: string;
   policyVersion: number | null;
   payloadHash: string | null;

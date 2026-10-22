@@ -171,7 +171,6 @@ const app = await createApp({
   freelancerSandboxTokenConfigured: Boolean(freelancerEnvironment.sandboxToken),
   autopilot,
   businessSync,
-  runFreelancerProductionWrite: async (input) => new FreelancerProductionWriteAdapter({ token: await getFreelancerToken() }).run(input),
   verifyFreelancerSandboxWrite: async (input) => {
     const token = freelancerEnvironment.sandboxToken;
     if (!token) throw new Error('Freelancer sandbox token is not configured.');

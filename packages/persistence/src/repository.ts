@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { transitionPipeline } from '@fvh/domain';
 import type { AuditEvent, AutonomyPolicy, BidDraft, PipelineStatus, ProjectOpportunity } from '@fvh/domain';
 import { chooseProjectsCoIdBid, evaluatePolicy, projectsCoIdDraftPolicy, projectsCoIdSettings } from '@fvh/domain';
 import type { KnowledgeChunk, KnowledgeProvider } from '@fvh/knowledge';
@@ -180,8 +181,14 @@ export class WorkspaceRepository {
     }
   }
 
-  async setPipelineStatus(id: string, status: PipelineStatus) {
-    await this.database.query('UPDATE projects SET pipeline_status = $1 WHERE id = $2', [status, id]);
+  async setPipelineStatus(id: string, status: PipelineStatus, options: { marketplaceConfirmed?: boolean } = {}) {
+    await this.database.transaction(async (tx) => {
+      const [row] = await tx.query<{ pipeline_status: PipelineStatus }>('SELECT pipeline_status FROM projects WHERE id = $1 FOR UPDATE', [id]);
+      if (!row) return;
+      const decision = transitionPipeline(row.pipeline_status, status, options);
+      if (!decision.ok) throw new Error(`Pipeline transition ditolak: ${decision.reason}.`);
+      await tx.query('UPDATE projects SET pipeline_status = $1 WHERE id = $2', [status, id]);
+    });
   }
 
   async createDraft(draft: BidDraft) {

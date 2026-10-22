@@ -22,7 +22,6 @@ describe('MVP smoke flow', () => {
       const project = await app.inject({ method: 'GET', url: '/api/projects?search=inventori' });
       const projectId = encodeURIComponent(testOpportunity.id);
       const draft = await app.inject({ method: 'POST', url: `/api/projects/${projectId}/draft` });
-      await repository.setPipelineStatus(testOpportunity.id, 'scored');
       await app.inject({ method: 'GET', url: '/api/projects' });
       const pipeline = await app.inject({ method: 'GET', url: '/api/pipeline' });
       const activity = await app.inject({ method: 'GET', url: '/api/activity?limit=10' });
