@@ -265,7 +265,7 @@ export class HermesCliDraftingAdapter implements AiDraftingPort {
       ].join('\n\n');
       await writeFile(promptPath, prompt, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
       // Hermes resolves the explicit unknown `none` toolset to an empty allowlist; an empty argument falls back to profile tools.
-      const result = await this.runner(this.options.executable, ['-p', this.options.profile, 'chat', '--query-file', promptPath, '--oneshot', '--quiet', '--format', 'stream-json', '--max-turns', '1', '--toolsets', 'none', '--ignore-rules'], {
+      const result = await this.runner(this.options.executable, ['-p', this.options.profile, 'chat', '--query-file', promptPath, '--oneshot', '--quiet', '--format', 'stream-json', '--max-turns', '1', '--toolsets', 'none', '--ignore-rules', '-m', 'ComboOpenCode'], {
         cwd: directory, env: allowedEnvironment(), shell: false, windowsHide: true,
         timeoutMs: this.timeoutMs, maxOutputBytes: this.maxOutputBytes,
       });
