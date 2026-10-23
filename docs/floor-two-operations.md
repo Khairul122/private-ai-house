@@ -49,5 +49,5 @@ Kuota `BID_LIMIT_EXCEEDED` milik akun Freelancer. Semua pengiriman bid memakai F
 
 - [Baileys](https://github.com/WhiskeySockets/Baileys) dan [auth state](https://github.com/WhiskeySockets/Baileys/blob/master/src/Utils/use-multi-file-auth-state.ts)
 - [Google OAuth web server](https://developers.google.com/identity/protocols/oauth2/web-server), [Calendar events](https://developers.google.com/workspace/calendar/api/v3/reference/events/insert), [private properties](https://developers.google.com/workspace/calendar/api/guides/extended-properties)
-- [Playwright persistent context](https://playwright.dev/docs/api/class-browsertype#browser-type-launch-persistent-context), [Freelancer bidding FAQ](https://www.freelancer.com/faq/topic.php?id=5)
+- [Freelancer bidding FAQ](https://www.freelancer.com/faq/topic.php?id=5)
 - [SIX ISO currency maintenance](https://www.six-group.com/en/products-services/financial-information/market-reference-data/data-standards.html)

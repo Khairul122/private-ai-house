@@ -38,7 +38,7 @@ describe('FreelancerAutopilot', () => {
       readProfile: async () => profile,
       readProjects: async () => ({ projects: [project], skipped: 0 }),
       syncProfileJobs,
-      submitBid,
+      submitBid, bidCapability: () => 'supported',
     });
 
     expect((await autopilot.getStatus()).cycleInProgress).toBe(false);
@@ -93,7 +93,7 @@ describe('FreelancerAutopilot', () => {
     const draft = vi.fn(draftProposal);
     autopilot = new FreelancerAutopilot({
       repository, now: () => now, intervalMs: 60_000, readProfile: async () => profile,
-      readProjects: async () => ({ projects: [project], skipped: 0 }), submitBid, draftProposal: draft,
+      readProjects: async () => ({ projects: [project], skipped: 0 }), submitBid, bidCapability: () => 'supported', draftProposal: draft,
     });
 
     await autopilot.start();
@@ -113,7 +113,7 @@ describe('FreelancerAutopilot', () => {
       now: () => now,
       readProfile: async () => ({ ...profile, description: 'A general freelance profile', jobs: [{ id: 22, name: 'Python' }] }),
       readProjects: async () => ({ projects: [project], skipped: 0 }),
-      submitBid,
+      submitBid, bidCapability: () => 'supported',
     });
 
     await autopilot.start();
@@ -132,7 +132,7 @@ describe('FreelancerAutopilot', () => {
       intervalMs: 60_000,
       readProfile: async () => profile,
       readProjects: async () => ({ projects: [{ ...project, projectType: 'hourly' }], skipped: 0 }),
-      submitBid,
+      submitBid, bidCapability: () => 'supported',
     });
 
     await autopilot.start();
@@ -147,7 +147,7 @@ describe('FreelancerAutopilot', () => {
     let currentTime = new Date('2026-10-15T16:00:00Z');
     await repository.savePolicy({ ...(await repository.getPolicy()), state: 'active', simulationOnly: false, allowedActions: ['bid.submit'], specializations: ['Python'], minimumConfidence: 0.5, activeHours: { start: 8, end: 19 }, allowUnknownDeadline: true });
     const submitBid = vi.fn(async () => ({ statusCode: 200, resultId: '9002' }));
-    autopilot = new FreelancerAutopilot({ repository, now: () => currentTime, readProfile: async () => profile, readProjects: async () => ({ projects: [project], skipped: 0 }), submitBid });
+    autopilot = new FreelancerAutopilot({ repository, now: () => currentTime, readProfile: async () => profile, readProjects: async () => ({ projects: [project], skipped: 0 }), submitBid, bidCapability: () => 'supported' });
     await autopilot.runCycle();
     expect(submitBid).not.toHaveBeenCalled();
     expect((await autopilot.getStatus()).waitingReason).toContain('jadwal');
@@ -162,7 +162,7 @@ describe('FreelancerAutopilot', () => {
     await repository.appendAudit({ type: 'autopilot.policy_bootstrapped', resourceId: 'policy', status: 'recorded', reason: 'test', policyVersion: 1, payloadHash: null });
     const readProjects = vi.fn(async () => ({ projects: [project], skipped: 0 }));
     const submitBid = vi.fn();
-    autopilot = new FreelancerAutopilot({ repository, now: () => now, readProfile: async () => profile, readProjects, submitBid });
+    autopilot = new FreelancerAutopilot({ repository, now: () => now, readProfile: async () => profile, readProjects, submitBid, bidCapability: () => 'supported' });
     await autopilot.start();
     await autopilot.runCycle();
     expect(submitBid).not.toHaveBeenCalled();
@@ -225,7 +225,7 @@ describe('FreelancerAutopilot', () => {
     repository = await WorkspaceRepository.open();
     const submitBid = vi.fn();
     const repo = repository;
-    autopilot = new FreelancerAutopilot({ repository, now: () => now, readProfile: async () => profile, readProjects: async () => ({ projects: [project], skipped: 0 }), submitBid,
+    autopilot = new FreelancerAutopilot({ repository, now: () => now, readProfile: async () => profile, readProjects: async () => ({ projects: [project], skipped: 0 }), submitBid, bidCapability: () => 'supported',
       draftProposal: async () => {
         const policy = await repo.getPolicy();
         await repo.savePolicy({ ...policy, minPrice: 500, version: policy.version + 1 });
@@ -260,7 +260,7 @@ describe('FreelancerAutopilot', () => {
     const draftProposal = vi.fn(async () => ({ proposal: 'I can build and document your Python API for USD 100 in 14 days.', proposedPrice: 100, durationDays: 14, confidence: 0.9, evidence: [], assumptions: [] }));
     const readProjects = vi.fn(async () => ({ projects: [project], skipped: 0 }));
     const submitBid = vi.fn(async () => ({ statusCode: 200, resultId: 'quota-recovered' }));
-    autopilot = new FreelancerAutopilot({ repository, now: () => cycleTime, readProfile: async () => profile, readProjects, draftProposal, submitBid });
+    autopilot = new FreelancerAutopilot({ repository, now: () => cycleTime, readProfile: async () => profile, readProjects, draftProposal, submitBid, bidCapability: () => 'supported' });
     await autopilot.start();
     expect(readProjects).toHaveBeenCalled();
     expect(draftProposal).not.toHaveBeenCalled();
@@ -274,7 +274,7 @@ describe('FreelancerAutopilot', () => {
   it('stops a pending draft before any live claim when the server shuts down', async () => {
     repository = await WorkspaceRepository.open();
     const submitBid = vi.fn();
-    autopilot = new FreelancerAutopilot({ repository, now: () => now, readProfile: async () => profile, readProjects: async () => ({ projects: [project], skipped: 0 }), submitBid,
+    autopilot = new FreelancerAutopilot({ repository, now: () => now, readProfile: async () => profile, readProjects: async () => ({ projects: [project], skipped: 0 }), submitBid, bidCapability: () => 'supported',
       draftProposal: async () => { autopilot!.stop(); return { proposal: 'I will document and build your Python API for USD 100 in 14 days.', proposedPrice: 100, durationDays: 14, confidence: 0.9, evidence: [], assumptions: [] }; },
     });
     await autopilot.start();

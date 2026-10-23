@@ -22,6 +22,8 @@ import { DpapiIntegrationVault } from './lib/integration-vault.js';
 import { WhatsAppService } from './services/whatsapp.js';
 import { GoogleCalendarService } from './services/google-calendar.js';
 import { PublicPortfolioResolver } from './services/portfolio.js';
+import { readProductionWriteChecks } from './controllers/freelancer.js';
+import type { CapabilityStatus } from '@fvh/domain';
 import { ProjectsCoIdService } from './services/projects-co-id.js';
 import { HermesKanban, hermesKanbanRunner } from './services/hermes-kanban.js';
 import { OfficeLearningService } from './services/office-learning.js';
@@ -93,14 +95,21 @@ const drafting = hermesEnabled ? new HermesCliDraftingAdapter({
 }) : undefined;
 const portfolio = new PublicPortfolioResolver();
 const projectsCoId = new ProjectsCoIdService(repository, drafting ? input => drafting.draftBid(input) : undefined);
+const productionWriteChecks = await readProductionWriteChecks(repository);
+const bidCapability = (): CapabilityStatus => productionWriteChecks.get('submit_bid')?.statusCode === 200 ? 'supported' : 'unknown';
 const autopilot = new FreelancerAutopilot({
   publicPortfolio:(evidence)=>portfolio.select(evidence),
+  bidCapability,
   repository,
   readProfile: async () => (await createFreelancerReader()).readOwnProfile(),
   readProjects: async (query, limit) => (await createFreelancerReader()).searchActiveProjects(query, limit),
   readProjectsByJobs: async (jobIds, fromTime, limit) => (await createFreelancerReader()).searchProjectsByJobs(jobIds, fromTime, limit),
   syncProfileJobs: async (jobIds) => new FreelancerProductionWriteAdapter({ token: await getFreelancerToken() }).run({ operation: 'edit_profile', jobIds }),
-  submitBid: async (input) => new FreelancerProductionWriteAdapter({ token: await getFreelancerToken() }).run(input),
+  submitBid: async (input) => {
+    const result = await new FreelancerProductionWriteAdapter({ token: await getFreelancerToken() }).run(input);
+    if (input.operation === 'submit_bid' && result.statusCode === 200) productionWriteChecks.set('submit_bid', { statusCode: 200, checkedAt: new Date().toISOString(), ...(result.resultId ? { resultId: result.resultId } : {}) });
+    return result;
+  },
   ...(drafting ? { draftProposal: (input: Parameters<typeof drafting.draftBid>[0]) => drafting.draftBid(input) } : {}),
 });
 const draftingReason = !draftingConfig.valid
@@ -158,6 +167,7 @@ const app = await createApp({
     };
   },
   freelancerSandboxTokenConfigured: Boolean(freelancerEnvironment.sandboxToken),
+  freelancerBidCapability: bidCapability,
   autopilot,
   businessSync,
   verifyFreelancerSandboxWrite: async (input) => {

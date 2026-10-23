@@ -224,8 +224,7 @@ Satu sumber kebenaran: `deriveOfficeAgents(autopilot, activity, { sync, hermes, 
 | Agen | Sinyal nyata | Aturan |
 |---|---|---|
 | **Lead Agent (Hermes)** | `capabilities.hermes` | nonaktif → Offline (alasan dari server); `draftsInProgress > 0` → Bekerja; aktif → Idle; data gagal → Tidak diketahui |
-| Operator Browser Bid (lantai 1) | `/api/browser-bidding` | submitting → Bekerja; busy lain → Meninjau; ready/quota habis → Idle; perlu login/ditutup/error → Offline; sumber gagal → Tidak diketahui. Meja khusus di `BROWSER_DESK`. |
-| Scout projects.co.id (lantai 1) | `/api/projects-co-id` | scanning/checking → Meninjau; `draftsInProgress > 0` → Bekerja; ready → Idle dengan jumlah draf menunggu; off/jeda/login/challenge/akun beda/ditutup/error → Offline; sumber gagal → Tidak diketahui. Meja `PROJECTS_CO_ID_DESK`, dekat Operator Browser Bid. |
+| Scout projects.co.id (lantai 1) | `/api/projects-co-id` | Pemindaian nonaktif → Offline dengan alasan jelas; data tersimpan tetap dapat dikelola; draf aktif → Bekerja. |
 | Market Scout | autopilot | running + `cycleInProgress` → Bekerja; running → Idle; paused/blocked/error → Offline (alasan spesifik); starting/undefined → Tidak diketahui |
 | Bid Strategist | autopilot + sync | `sync.step === 'outcomes'` → Meninjau; selain itu seperti Market Scout tapi siklus → Berkolaborasi |
 | Compliance Auditor | autopilot | seperti Market Scout, siklus → Berkolaborasi |
@@ -247,7 +246,7 @@ Tambah agen baru: entri `ROSTER` + aturan di `deriveOfficeAgents` + tempat duduk
 - ESLint `@typescript-eslint/no-unused-vars` aktif; **tidak ada plugin `react-hooks`** — jangan tambahkan komentar `eslint-disable react-hooks/...` (aturan tak dikenal = error).
 - Gaya: kode ringkas, komentar hanya untuk "mengapa" yang tidak jelas, nama Inggris di kode, teks UI Bahasa Indonesia.
 - Validasi body API dengan skema di `@fvh/contracts`; tanggal `YYYY-MM-DD`; mata uang 3 huruf.
-- **Line ending campuran:** sebagian file CRLF (mis. `services/browser-bidding.ts` dan tesnya), sebagian besar LF. Saat mengedit lewat skrip, deteksi `\r\n` lalu tulis kembali dengan line ending yang sama.
+- **Line ending campuran:** sebagian file CRLF, sebagian besar LF. Saat mengedit lewat skrip, deteksi `\r\n` lalu tulis kembali dengan line ending yang sama.
 - **Encoding:** file harus UTF-8 valid. Pernah ada byte Windows-1252 (`0x96`) yang membuat file "tidak valid UTF-8".
 - Saat menulis kode lewat shell heredoc, **backslash bisa hilang** (regex `\d` menjadi `d`) dan kutip bisa memecah heredoc. Lebih aman tulis ke file lalu jalankan `node script.cjs`, atau gunakan tool edit.
 
@@ -297,7 +296,6 @@ Tes penting: `office-state.test.ts` (aturan status), `office-layout.test.ts` (ku
 ## 14. Batasan yang diketahui & ide berikutnya
 
 - Sinyal kerja: autopilot, BusinessSync, Hermes, sinkronisasi Knowledge Hub dan worker operasional. Untuk perubahan invoice, WhatsApp QR, Google OAuth/Calendar, antrean pesan atau manajer lantai, baca `docs/floor-two-operations.md` sebelum mengedit. Persona yang tidak mempunyai job aktif tetap idle/on-demand.
-- Worker bid browser: baca `docs/browser-bidding.md`. Pemilik meminta memakai Chrome berprofil yang sudah login; jangan launch profil kosong atau menyalin profil. Sambungkan ke sesi Chrome yang berjalan setelah pemilik memberi izin debugging; worker memakai tab sendiri dan disconnect tidak menutup Chrome pemilik. Guard kebijakan sebelum klik dan sebelum melepas POST; sukses harus memiliki HTTP 200 serta ID bid yang cocok. Jangan mengekspor sesi, memilih upgrade, menandatangani perjanjian, atau retry hasil tidak pasti. Kuota akun habis bukan pemicu fallback.
 - Deteksi menang/kalah belum pernah teramati pada data nyata (belum ada bid diputuskan).
 - Kanal/sesi Hermes (mis. Telegram) tidak dilaporkan → ditampilkan "Tidak tersedia".
 - **Realtime layar:** `GET /api/events` (SSE). Setiap tulis database dan perubahan status worker diumumkan per topik (digabung 250 ms); web memuat ulang query terkait. Polling tetap sebagai cadangan; overlay menampilkan "Realtime aktif/terputus". Lihat `docs/realtime.md`.

@@ -99,7 +99,9 @@ describe('projects.co.id read-only integration', () => {
     const app = await createApp({ repository: repo, projectsCoId: service });
     try {
       const origin = { origin: 'http://127.0.0.1:5174' };
-      expect((await app.inject({ method: 'GET', url: '/api/projects-co-id' })).headers['cache-control']).toBe('no-store');
+      const status = await app.inject({ method: 'GET', url: '/api/projects-co-id' });
+      expect(status.headers['cache-control']).toBe('no-store');
+      expect(status.json()).toMatchObject({ state: 'stopped', readyDrafts: 0 });
       expect((await app.inject({ method: 'POST', url: '/api/projects-co-id/scan', headers: origin })).statusCode).toBe(410);
       expect((await app.inject({ method: 'PUT', url: '/api/projects-co-id/mode', headers: origin, payload: { mode: 'auto' } })).statusCode).toBe(410);
       expect((await app.inject({ method: 'POST', url: '/api/projects-co-id/open', headers: origin, payload: { url: 'https://evil.test' } })).statusCode).toBe(410);

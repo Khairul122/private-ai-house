@@ -22,16 +22,12 @@ describe('office state', () => {
     expect(agent(deriveOfficeAgents(autopilot(), [], { learning: { ...learning, phase: 'error' } }), 'profile-editor').state).toBe('idle');
     expect(agent(deriveOfficeAgents(autopilot(), [], { learning: undefined }), 'profile-editor').state).toBe('idle');
   });
-  it('derives the projects.co.id scout only from its current worker signal', () => {
-    const worker: ProjectsCoIdStatus = { mode: 'scan-only', state: 'ready', busy: false, reason: 'Fixture', username: 'KhairulHuda06', remaining: null, checkedAt: null, pageStatus: 200, lastScanAt: null, lastResult: null, lastSearchTerms: [], searchTerms: [], autoAvailable: false, draftsInProgress: 0, projectCount: 4, readyDrafts: 2, blockedWrites: 0, draftUsage: { today: 1, week: 1, dailyLimit: 4, weeklyLimit: 12 } };
-    const scout = (changes: Partial<ProjectsCoIdStatus> = {}) => agent(deriveOfficeAgents(autopilot(), [event('projects_co_id.scan_completed'), event('marketplace.production.submit_bid')], { projectsCoId: { ...worker, ...changes } }), 'projects-co-id-scout');
-    expect(scout()).toMatchObject({ state: 'idle', room: 'lounge', task: '2 draf menunggu Anda kirim', floor: 1 });
-    expect(scout({ busy: true, state: 'scanning' })).toMatchObject({ state: 'reviewing', room: 'workspace' });
-    expect(scout({ busy: true, state: 'drafting', draftsInProgress: 1 })).toMatchObject({ state: 'working', room: 'workspace' });
-    for (const state of ['stopped', 'paused', 'login_required', 'account_mismatch', 'challenge', 'error'] as const) expect(scout({ state })).toMatchObject({ state: 'offline', room: null });
-    expect(scout({ mode: 'off' }).state).toBe('offline');
+  it('shows projects.co.id scanning as offline while keeping stored drafts available', () => {
+    const worker: ProjectsCoIdStatus = { mode: 'off', state: 'stopped', busy: false, reason: 'Pemindaian dinonaktifkan.', username: null, remaining: null, checkedAt: null, pageStatus: null, lastScanAt: null, lastResult: null, lastSearchTerms: [], searchTerms: [], autoAvailable: false, draftsInProgress: 0, projectCount: 4, readyDrafts: 2, blockedWrites: 0, draftUsage: { today: 0, week: 0, dailyLimit: 4, weeklyLimit: 12 } };
+    const scout = (changes: Partial<ProjectsCoIdStatus> = {}) => agent(deriveOfficeAgents(autopilot(), [], { projectsCoId: { ...worker, ...changes } }), 'projects-co-id-scout');
+    expect(scout()).toMatchObject({ state: 'offline', room: null, reason: 'Pemindaian dinonaktifkan.', floor: 1 });
+    expect(scout({ draftsInProgress: 1 })).toMatchObject({ state: 'working', room: 'workspace', task: 'Menyusun draf projects.co.id.' });
     expect(agent(deriveOfficeAgents(autopilot(), []), 'projects-co-id-scout').state).toBe('unknown');
-    expect(scout().recentActivity.map(e => e.type)).toEqual(['projects_co_id.scan_completed']);
   });
   it('shows Hermes kanban work only from running cards on the team board', () => {
     const task = { id: 't_1', title: 'Analisis bid minggu ini', assignee: 'fvh-market-scout', status: 'running', createdBy: 'mission-control', createdAt: null, startedAt: null, completedAt: null, error: null };
