@@ -72,6 +72,13 @@ describe('durable orchestration graph', () => {
     await service.reconcile();
     expect(fixture.tasks).toHaveLength(4);
   });
+  it('coalesces concurrent retries of the same create request', async () => {
+    const fixture = boardFixture(); const service = new HermesKanban(fixture.run);
+    const input = { title: 'Tugas langsung', body: 'Bandingkan peluang', assignee: 'fvh-market-scout', key: 'same-request' };
+    const results = await Promise.all([service.create(input), service.create(input)]);
+    expect(results[0]?.id).toBe(results[1]?.id);
+    expect(fixture.calls.filter(args => args[0] === 'create')).toHaveLength(1);
+  });
   it('does not create any worker for an invalid, cyclic, oversized, or data-to-code plan', async () => {
     for (const invalid of ['not json', JSON.stringify({ tasks: Array(7).fill({}) }), JSON.stringify({ tasks: [{ title: 'Uji kode', goal: 'Uji aplikasi', assignee: 'fvh-qa-engineer', parents: [] }] })]) {
       const fixture = boardFixture(true); fixture.root.summary = invalid;

@@ -23,7 +23,7 @@ export function hermesKanbanRunner(executable: string): HermesKanbanRunner {
 
 const epoch = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? new Date(value * 1000).toISOString() : null;
 const text = (value: unknown, limit = 2000) => typeof value === 'string' && value.trim() ? value.trim().slice(0, limit) : null;
-const taskRow = z.object({ id: z.string(), title: z.string() }).passthrough();
+const taskRow = z.object({ id: z.string().regex(/^t_[a-f0-9]{6,32}$/), title: z.string() }).passthrough();
 const isLegacyPlan = (task: HermesKanbanTask) => task.createdBy === 'mission-control' && task.assignee === ORCHESTRATOR;
 const isPlan = (task: HermesKanbanTask) => task.createdBy === PLAN_AUTHOR || task.createdBy === DATA_PLAN_AUTHOR || isLegacyPlan(task);
 
@@ -47,8 +47,8 @@ export class HermesKanban {
   constructor(private readonly run: HermesKanbanRunner, private readonly now: () => Date = () => new Date()) {}
 
   /**
-   * Board snapshot. Each read starts two Hermes processes (~10 s), so after the first read the last
-   * snapshot is served at once while a refresh runs; `checkedAt` tells the reader how old it is.
+   * Board reads start CLI processes, so polling and coordination share one in-flight snapshot.
+   * A snapshot older than a minute is never served as live data.
    */
   status(): Promise<HermesKanbanStatus> {
     const at = this.now().getTime();
@@ -150,7 +150,8 @@ export class HermesKanban {
   }
 
   private async reconcilePlan(): Promise<void> {
-    const board = await this.read();
+    void this.status();
+    const board = await this.cached!.value;
     if (!board.available) throw new Error('unavailable');
     const root = board.tasks.find(task => isPlan(task) && task.status === 'done' && !this.errors.has(task.id) && !board.tasks.some(final => final.createdBy === `${FINAL_AUTHOR}${task.id}`));
     if (!root) { this.orchestrationError = null; return; }

@@ -84,10 +84,10 @@
     "semantic_hash": "d7ecce4900ffd3fe084bffad4b1b23ff"
   },
   "apps/server/src/controllers/hermes-kanban.ts": {
-    "mtime": 1792434512.285821,
-    "seen": 1792488322.7873926,
-    "ast_hash": "a25e097bfde946ce6dcd530c3cb02580",
-    "semantic_hash": "a25e097bfde946ce6dcd530c3cb02580"
+    "mtime": 1792748963.6886806,
+    "seen": 1792749691.6014838,
+    "ast_hash": "53cd9fb9d6b87e4460fec4c3e6ba8640",
+    "semantic_hash": ""
   },
   "apps/server/src/controllers/inbox.ts": {
     "mtime": 1792434284.996495,
@@ -144,9 +144,9 @@
     "semantic_hash": "61655d67301af074aac27d1ff6be1f52"
   },
   "apps/server/src/index.ts": {
-    "mtime": 1792732783.1642077,
-    "seen": 1792739371.3521347,
-    "ast_hash": "d129f4c68a5809495fe70bb88b5d1319",
+    "mtime": 1792747208.3073547,
+    "seen": 1792749691.6015365,
+    "ast_hash": "603fba5b28383384d50d90370cd84acd",
     "semantic_hash": ""
   },
   "apps/server/src/lib/credential-store.ps1": {
@@ -210,10 +210,10 @@
     "semantic_hash": ""
   },
   "apps/server/src/models/hermes-kanban-types.ts": {
-    "mtime": 1792430055.2348897,
-    "seen": 1792488322.7874382,
-    "ast_hash": "c54e88225a7dbd939c8060879508cdea",
-    "semantic_hash": "c54e88225a7dbd939c8060879508cdea"
+    "mtime": 1792748737.8721533,
+    "seen": 1792749691.6015813,
+    "ast_hash": "5fe4378dde1a7e3aeba40665b0bf1533",
+    "semantic_hash": ""
   },
   "apps/server/src/models/projects-co-id-types.ts": {
     "mtime": 1792725596.391018,
@@ -264,10 +264,10 @@
     "semantic_hash": "7a54b35638dc6f4c7dc67865e3b2f04e"
   },
   "apps/server/src/routes/hermes-kanban.ts": {
-    "mtime": 1792434515.7204924,
-    "seen": 1792488322.7874575,
-    "ast_hash": "64b539b672a4f72faf95721ec44fe3a2",
-    "semantic_hash": "64b539b672a4f72faf95721ec44fe3a2"
+    "mtime": 1792748968.5681403,
+    "seen": 1792749691.6016214,
+    "ast_hash": "89d83d3affcfba10b17d2e39e0c9551e",
+    "semantic_hash": ""
   },
   "apps/server/src/routes/inbox.ts": {
     "mtime": 1792434538.5134313,
@@ -372,16 +372,16 @@
     "semantic_hash": "4f74ddf955441734b394790d647eb9a4"
   },
   "apps/server/src/services/hermes-kanban.test.ts": {
-    "mtime": 1792439416.1850822,
-    "seen": 1792488322.7874906,
-    "ast_hash": "bedf4a950663c1648eddff474d25df0b",
-    "semantic_hash": "bedf4a950663c1648eddff474d25df0b"
+    "mtime": 1792749466.695251,
+    "seen": 1792749691.6017,
+    "ast_hash": "5a78a78d22c4e7603d2c39551c1ceff9",
+    "semantic_hash": ""
   },
   "apps/server/src/services/hermes-kanban.ts": {
-    "mtime": 1792441849.0432637,
-    "seen": 1792488322.787492,
-    "ast_hash": "48b99763c3b23303ae8fa99aa3326b0c",
-    "semantic_hash": "48b99763c3b23303ae8fa99aa3326b0c"
+    "mtime": 1792749644.9876623,
+    "seen": 1792749691.6017036,
+    "ast_hash": "810ddc3d9b4322ff869d18c5d4a3339e",
+    "semantic_hash": ""
   },
   "apps/server/src/services/linkedin-oauth.test.ts": {
     "mtime": 1792104875.154272,
@@ -588,9 +588,9 @@
     "semantic_hash": "c21c5d6ae42f1d30f4047262d73b814a"
   },
   "apps/web/src/components/HermesKanbanCard.tsx": {
-    "mtime": 1792746661.7642367,
-    "seen": 1792746938.3381374,
-    "ast_hash": "6365fb6b57b589c61fb74a0e3715104e",
+    "mtime": 1792749422.1153684,
+    "seen": 1792749691.6020324,
+    "ast_hash": "dc961627e77157897a071ee52753d309",
     "semantic_hash": ""
   },
   "apps/web/src/components/WhatsAppStatus.tsx": {
@@ -918,9 +918,9 @@
     "semantic_hash": "2123df476535b03090041c4a297bdfeb"
   },
   "packages/contracts/src/index.ts": {
-    "mtime": 1792552301.52586,
-    "seen": 1792582105.058384,
-    "ast_hash": "c742e04014a082bbbd14c79b5f6a1d61",
+    "mtime": 1792748958.8645253,
+    "seen": 1792749691.602289,
+    "ast_hash": "4f30237f5d3d0f164774a4fd5009b8fe",
     "semantic_hash": ""
   },
   "packages/contracts/src/operations.ts": {
@@ -1134,9 +1134,9 @@
     "semantic_hash": "587a1300c6e5826d18c748e7d77562f6"
   },
   "scripts/hermes-team.ts": {
-    "mtime": 1792704215.5908122,
-    "seen": 1792723279.4531186,
-    "ast_hash": "cfaade7cbfff412dc26f1ade358bbadc",
+    "mtime": 1792749424.5125163,
+    "seen": 1792749691.6024327,
+    "ast_hash": "9094da9dd092cb5f09fde0ffdcb84ba7",
     "semantic_hash": ""
   },
   "scripts/migrate-sqlite-to-supabase.mjs": {
@@ -1314,15 +1314,15 @@
     "semantic_hash": ""
   },
   "apps/server/src/services/office-learning.test.ts": {
-    "mtime": 1792732856.7114346,
-    "seen": 1792739371.3522327,
-    "ast_hash": "8e7e9660db79089fcefa24ad3da136a9",
+    "mtime": 1792747300.6396704,
+    "seen": 1792749691.6017842,
+    "ast_hash": "ebcc239a63d8c8e35d7f9923c7c7e25f",
     "semantic_hash": ""
   },
   "apps/server/src/services/office-learning.ts": {
-    "mtime": 1792742258.7672231,
-    "seen": 1792746938.3380606,
-    "ast_hash": "e99dfa9fa08db0b2a86d992d3a3a598c",
+    "mtime": 1792747151.4141252,
+    "seen": 1792749691.601789,
+    "ast_hash": "bb25e6e25e68da346c2190ffc44757ee",
     "semantic_hash": ""
   },
   "apps/web/src/components/OfficeLearningCard.tsx": {
@@ -1401,6 +1401,42 @@
     "mtime": 1792746275.9902904,
     "seen": 1792746938.338393,
     "ast_hash": "a816275aac2da48a48379c876fc50a29",
+    "semantic_hash": ""
+  },
+  "apps/server/src/services/hermes-orchestration.test.ts": {
+    "mtime": 1792749685.5876217,
+    "seen": 1792749691.6017082,
+    "ast_hash": "d27dde48ed5cc5429bb90924873ac08e",
+    "semantic_hash": ""
+  },
+  "apps/server/src/services/hermes-workflow.test.ts": {
+    "mtime": 1792749465.294535,
+    "seen": 1792749691.6017516,
+    "ast_hash": "1e9f134e6d49a7f98549f5d01587b00f",
+    "semantic_hash": ""
+  },
+  "apps/server/src/services/hermes-workflow.ts": {
+    "mtime": 1792748735.4648874,
+    "seen": 1792749691.6017659,
+    "ast_hash": "d9d90dacd2957feec065b48afec9505c",
+    "semantic_hash": ""
+  },
+  "apps/web/src/state/kanban-state.test.ts": {
+    "mtime": 1792749464.3542645,
+    "seen": 1792749691.6020968,
+    "ast_hash": "d12544ceadf06a2a6f50aff3c84ea833",
+    "semantic_hash": ""
+  },
+  "apps/web/src/state/kanban-state.ts": {
+    "mtime": 1792749463.3670826,
+    "seen": 1792749691.602101,
+    "ast_hash": "bd3abb65cd15b3a5ce5555cf84444c6d",
+    "semantic_hash": ""
+  },
+  "docs/orchestration-audit-2026-10-23.md": {
+    "mtime": 1792748368.541468,
+    "seen": 1792749691.6024878,
+    "ast_hash": "04e924a0f615e17479a1cc367be0d1f3",
     "semantic_hash": ""
   }
 }
