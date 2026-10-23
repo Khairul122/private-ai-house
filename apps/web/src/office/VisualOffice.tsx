@@ -486,6 +486,7 @@ function CameraRig({ command, view, tour, spots, reducedMotion, followId, positi
     }
     if (command.kind === 'zone') target.dist *= fit;
     const direction = view === 'top' ? new THREE.Vector3(0, 1, 0.001) : new THREE.Vector3(0.62, 0.72, 1).normalize();
+    if (view === '3d' && command.kind === 'owner') direction.set(1, 1, 1).normalize();
     let goal = { target: new THREE.Vector3(target.x, 0, target.z), position: new THREE.Vector3(target.x, 0, target.z).addScaledVector(direction, target.dist) };
     const board = command.kind === 'board' && view === '3d' ? BOARDS.find((slot) => slot.id === command.id) : undefined;
     if (board) {

@@ -23,7 +23,7 @@ const nextDay = (date: Date) => {
   const jakarta = new Date(date.getTime() + 7 * 60 * 60_000);
   return new Date(Date.UTC(jakarta.getUTCFullYear(), jakarta.getUTCMonth(), jakarta.getUTCDate() + 1) - 7 * 60 * 60_000).toISOString();
 };
-const TOPICS = [
+export const TOPICS = [
   'Menyusun kriteria selesai yang dapat diuji sebelum menerima pekerjaan freelance.',
   'Menyampaikan ketidakpastian dan meminta informasi yang kurang secara ringkas.',
   'Berbagi kebiasaan belajar, fokus, dan istirahat yang membantu kerja tim.',
@@ -31,6 +31,15 @@ const TOPICS = [
   'Membagi pekerjaan dan memberi masukan kepada rekan dengan contoh konkret.',
   'Mengubah pelajaran diskusi sebelumnya menjadi checklist yang bisa diperiksa.',
 ];
+
+/**
+ * Only work on the same Hermes CLI blocks a discussion: drafting/review calls (`hermesWork`) and
+ * running kanban cards. Autopilot scans, BusinessSync and projects.co.id reads are HTTP-only, so
+ * including them starved every session while autopilot ran.
+ */
+export function discussionBlocked(hermesWork: number, runningCards: number): boolean {
+  return hermesWork > 0 || runningCards > 0;
+}
 
 export class OfficeLearningService {
   private readonly store: OfficeLearningRepository;

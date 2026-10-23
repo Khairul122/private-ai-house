@@ -70,7 +70,9 @@ export class ProjectsCoIdService {
     const policy = await this.repo.getPolicy(); const settings = await this.settings(); const [projects, usage] = await Promise.all([
       this.repo.listProjects(), this.repo.bidUsage(new Date(), policy.timezone, 'projects_co_id.draft_created'),
     ]);
-    return this.current = { ...this.current, mode: settings.mode, projectCount: projects.filter(p => p.source === 'projects_co_id').length,
+    // Automatic drafting is removed; a stored `drafts` mode must not claim drafting is available.
+    const mode = settings.mode === 'drafts' ? 'scan-only' : settings.mode;
+    return this.current = { ...this.current, mode, projectCount: projects.filter(p => p.source === 'projects_co_id').length,
       readyDrafts: projects.filter(p => p.source === 'projects_co_id' && p.pipelineStatus === 'draft_ready').length,
       draftUsage: { ...usage, dailyLimit: settings.dailyBidLimit, weeklyLimit: settings.weeklyBidLimit },
       reason: settings.mode === 'off' ? 'Pemindaian projects.co.id dinonaktifkan dalam Kebijakan.' : 'Pemindaian projects.co.id read-only aktif; penawaran dikirim sendiri oleh pemilik di situs.' };

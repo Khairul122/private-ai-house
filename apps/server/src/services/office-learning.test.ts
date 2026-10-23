@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WorkspaceRepository } from '@fvh/persistence';
-import { OfficeLearningService } from './office-learning.js';
+import { OfficeLearningService, discussionBlocked } from './office-learning.js';
 import type { OfficeDiscussionInput, OfficeDiscussionOutput } from '@fvh/adapter-hermes';
 
 describe('OfficeLearningService', () => {
@@ -78,6 +78,12 @@ describe('OfficeLearningService', () => {
     const recovered = await make().run();
     expect(recovered.sessions).toHaveLength(1);
     expect(recovered.sessions[0]).toMatchObject({ state: 'failed', error: 'Server berhenti sebelum diskusi selesai.' });
+  });
+
+  it('blocks a discussion only for work that shares the Hermes CLI', () => {
+    expect(discussionBlocked(0, 0)).toBe(false);
+    expect(discussionBlocked(1, 0)).toBe(true);
+    expect(discussionBlocked(0, 1)).toBe(true);
   });
 
   it('fails closed on malformed output and corrupted persistent state', async () => {

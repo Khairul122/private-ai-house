@@ -1,5 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
+import { rootCertificates } from 'node:tls';
 import pg from 'pg';
+import { SUPABASE_ROOT_CA_2021 } from './supabase-ca.js';
 
 export type Row = Record<string, unknown>;
 
@@ -22,7 +24,8 @@ async function migrate(db: Database) {
 
 function postgres(url: string): Database {
   const local = /@(localhost|127\.0\.0\.1)[:/]/.test(url);
-  const pool = new pg.Pool({ connectionString: url, max: 5, options: '-c search_path=fvh', ...(local ? {} : { ssl: { rejectUnauthorized: true } }) });
+  const ssl = local ? {} : { ca: [...rootCertificates, SUPABASE_ROOT_CA_2021], rejectUnauthorized: true };
+  const pool = new pg.Pool({ connectionString: url, max: 5, options: '-c search_path=fvh', ...(local ? {} : { ssl }) });
   pool.on('error', (error) => console.error('Postgres pool error:', error.message));
   const wrap = (target: pg.Pool | pg.PoolClient): Queryable => ({
     query: async <T = Row>(text: string, params?: unknown[]) => (await target.query(text, params as unknown[])).rows as T[],

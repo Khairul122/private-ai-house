@@ -216,9 +216,9 @@
     "semantic_hash": "c54e88225a7dbd939c8060879508cdea"
   },
   "apps/server/src/models/projects-co-id-types.ts": {
-    "mtime": 1792723859.271651,
-    "seen": 1792724958.47657,
-    "ast_hash": "5ce6da536f9a1faadd5bee5f5594c8b4",
+    "mtime": 1792725596.391018,
+    "seen": 1792730480.5434597,
+    "ast_hash": "03d96d5ff9872edf5db0752013f98911",
     "semantic_hash": ""
   },
   "apps/server/src/routes/activity.ts": {
@@ -312,9 +312,9 @@
     "semantic_hash": "0319b9653917eea86f95fbc696fed167"
   },
   "apps/server/src/routes/projects-co-id.ts": {
-    "mtime": 1792702125.1474066,
-    "seen": 1792723279.4529028,
-    "ast_hash": "ed783f69d767fb0905c2e756d013cdcd",
+    "mtime": 1792725752.572164,
+    "seen": 1792730480.54348,
+    "ast_hash": "0d85022402387c32b1d981821c5fdafa",
     "semantic_hash": ""
   },
   "apps/server/src/routes/projects.ts": {
@@ -432,15 +432,15 @@
     "semantic_hash": "43608b7a8ae7481b62eabae4c73c39fb"
   },
   "apps/server/src/services/projects-co-id.test.ts": {
-    "mtime": 1792723949.9335675,
-    "seen": 1792724958.4766715,
-    "ast_hash": "923680d22786eb08ee4e6810b062ebc8",
+    "mtime": 1792726485.1305885,
+    "seen": 1792730480.5435066,
+    "ast_hash": "831e76c33d3c4d0e2308f953698e693c",
     "semantic_hash": ""
   },
   "apps/server/src/services/projects-co-id.ts": {
-    "mtime": 1792722907.4910638,
-    "seen": 1792723279.452936,
-    "ast_hash": "7f52bf2cb211540ad633ab2f7ca88a08",
+    "mtime": 1792726469.68096,
+    "seen": 1792730480.5435083,
+    "ast_hash": "c25e770d95c503c1ace41f442f9bdb51",
     "semantic_hash": ""
   },
   "apps/server/src/services/whatsapp.test.ts": {
@@ -660,9 +660,9 @@
     "semantic_hash": ""
   },
   "apps/web/src/state/office-state.ts": {
-    "mtime": 1792723930.3014991,
-    "seen": 1792724958.476795,
-    "ast_hash": "4d67a1ec674634836c44e978213c0526",
+    "mtime": 1792726320.4671283,
+    "seen": 1792730480.5435674,
+    "ast_hash": "6b85404fea0c9736a164e768a3befb15",
     "semantic_hash": ""
   },
   "apps/web/src/state/owner-input.test.ts": {
@@ -768,15 +768,15 @@
     "semantic_hash": "f9d4816e283e10fd0437d1cd949b6a47"
   },
   "apps/web/src/views/ProjectsCoIdPage.test.tsx": {
-    "mtime": 1792723777.0015001,
-    "seen": 1792724958.4768455,
-    "ast_hash": "829b2741fdbb7e1bb3bb975956d75556",
+    "mtime": 1792726041.7000895,
+    "seen": 1792730480.543591,
+    "ast_hash": "207fc386767cb955e860ec64051c9ac1",
     "semantic_hash": ""
   },
   "apps/web/src/views/ProjectsCoIdPage.tsx": {
-    "mtime": 1792722923.4208226,
-    "seen": 1792723279.4530292,
-    "ast_hash": "9557ea9431cfa4ea0d163e073dd0bc55",
+    "mtime": 1792726355.8549395,
+    "seen": 1792730480.5435922,
+    "ast_hash": "e5e8ee70e4cd69c02b6cb764b43a5d2b",
     "semantic_hash": ""
   },
   "apps/web/src/views/TaskBoardPage.tsx": {
@@ -1164,9 +1164,9 @@
     "semantic_hash": "f54b580a14670eb57954af1043126cd3"
   },
   "AGENTS.md": {
-    "mtime": 1792723417.032467,
-    "seen": 1792724958.4770267,
-    "ast_hash": "30827cc537cb96a2a2247ae8bdb4b5f5",
+    "mtime": 1792726331.2984936,
+    "seen": 1792730480.543682,
+    "ast_hash": "d30f12267a4d4fe8238bca3989e2d037",
     "semantic_hash": ""
   },
   "DESIGN.md": {
@@ -1188,9 +1188,9 @@
     "semantic_hash": "16d406b51e290164884b5c3763971f54"
   },
   "docs/capability-matrix.md": {
-    "mtime": 1792705033.5370388,
-    "seen": 1792723279.453133,
-    "ast_hash": "cb0bbc62e9ab5bcb4ebd50dbeb065e2a",
+    "mtime": 1792726395.2246244,
+    "seen": 1792730480.5436876,
+    "ast_hash": "a676b77c26fd91474403bcf4366f8ee3",
     "semantic_hash": ""
   },
   "docs/floor-two-operations.md": {
@@ -1224,9 +1224,9 @@
     "semantic_hash": "1447a4c3ad87c47dd8a41ddc63829672"
   },
   "docs/projects-co-id.md": {
-    "mtime": 1792705020.3068824,
-    "seen": 1792723279.453143,
-    "ast_hash": "61fd5994ac9e8fb271a59e4b347d958b",
+    "mtime": 1792726498.6799302,
+    "seen": 1792730480.5436966,
+    "ast_hash": "5d97c1d628a95410b39dae0394b8fa71",
     "semantic_hash": ""
   },
   "docs/realtime.md": {
@@ -1365,6 +1365,12 @@
     "mtime": 1792656295.6589098,
     "seen": 1792662588.722922,
     "ast_hash": "a1e0e748efba646a563af60935d9d7d0",
+    "semantic_hash": ""
+  },
+  "apps/server/src/e2e/projects-co-id.e2e.test.ts": {
+    "mtime": 1792726253.145049,
+    "seen": 1792730480.543441,
+    "ast_hash": "a2be3f634bc21adebe050d2626ba2459",
     "semantic_hash": ""
   }
 }

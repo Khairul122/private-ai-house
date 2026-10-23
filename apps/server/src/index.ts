@@ -26,7 +26,7 @@ import { readProductionWriteChecks } from './controllers/freelancer.js';
 import type { CapabilityStatus } from '@fvh/domain';
 import { ProjectsCoIdService } from './services/projects-co-id.js';
 import { HermesKanban, hermesKanbanRunner } from './services/hermes-kanban.js';
-import { OfficeLearningService } from './services/office-learning.js';
+import { OfficeLearningService, discussionBlocked } from './services/office-learning.js';
 import { announceWrites, LiveEvents } from './lib/live-events.js';
 
 function findProjectRoot(start: string): string {
@@ -132,13 +132,9 @@ const officeLearning = drafting ? new OfficeLearningService({
   available: () => hermesEnabled,
   busy: () => {
     const board = hermesKanban?.peek();
-    if (!board || Date.now() - Date.parse(board.checkedAt) > 60_000) {
-      void hermesKanban?.status();
-      return true;
-    }
-    return drafting.workInProgress > 0 || autopilot.liveState().busy || projectsCoId.busy
-      || businessSync.getStatus().step !== null || Object.values(operations.status().jobs).some(job => job.busy)
-      || !board.available || board.tasks.some(task => task.status === 'running');
+    // A stale or failed board read is unknown, not busy: refresh it without freezing the schedule.
+    if (hermesKanban && (!board || Date.now() - Date.parse(board.checkedAt) > 60_000)) void hermesKanban.status();
+    return discussionBlocked(drafting.workInProgress, board?.available === true ? board.tasks.filter(task => task.status === 'running').length : 0);
   },
 }) : undefined;
 if (officeLearning) live.watch(['office-learning'], () => officeLearning.peek());
