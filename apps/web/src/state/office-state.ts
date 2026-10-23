@@ -118,7 +118,7 @@ export function deriveOfficeAgents(autopilot: Autopilot | undefined, activity: A
       const worker = context.projectsCoId;
       if (!worker) derived = { state: 'unknown', reason: 'Status projects.co.id tidak tersedia.' };
       else if (worker.draftsInProgress > 0) derived = { state: 'working', reason: 'Menyusun draf proyek tersimpan.', task: 'Menyusun draf projects.co.id.' };
-      else if (worker.mode === 'off' || ['paused', 'login_required', 'account_mismatch', 'challenge', 'stopped', 'error'].includes(worker.state)) derived = { state: 'offline', reason: worker.reason };
+      else if (worker.mode === 'off' || ['paused', 'login_required', 'account_mismatch', 'challenge', 'error'].includes(worker.state)) derived = { state: 'offline', reason: worker.reason };
       else if (worker.busy) derived = { state: 'reviewing', reason: worker.reason, task: worker.reason };
       else derived = { state: 'idle', reason: worker.reason, task: `${worker.readyDrafts} draf menunggu Anda kirim` };
     }

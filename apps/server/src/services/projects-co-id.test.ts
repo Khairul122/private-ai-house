@@ -92,6 +92,24 @@ describe('projects.co.id read-only integration', () => {
     expect(await repo.bidUsage(boundary, 'UTC', 'projects_co_id.draft_created')).toEqual({ today: 2, week: 2 });
   });
 
+  it('reads listings through GET only, stores valid projects, and leaves write routes unavailable', async () => {
+    repo = await WorkspaceRepository.open();
+    await repo.savePolicy({ ...await repo.getPolicy(), projectsCoId: { ...PROJECTS_CO_ID_DEFAULTS, mode: 'scan-only' } });
+    const html = `<main id="ds"><section><h2><a href="/public/browse_projects/view/55601d/aplikasi-online">Aplikasi online</a></h2><p>Membangun aplikasi web dan integrasi database sesuai dokumentasi proyek.</p><p>Published Budget: Rp 500,000 - 1,000,000</p><p>Published Date: 19/10/2026 13:34:26 WIB</p><p>Select Deadline: 18/11/2026 13:34:26 WIB</p><p>Project Status: Published</p></section></main>`;
+    const methods: string[] = [];
+    const fetcher = async (_input: URL, init?: RequestInit) => { methods.push(init?.method ?? 'GET'); return new Response(html, { status: 200 }); };
+    service = new ProjectsCoIdService(repo, undefined, fetcher);
+    const app = await createApp({ repository: repo, projectsCoId: service });
+    try {
+      const headers = { origin: 'http://127.0.0.1:5174' };
+      expect((await app.inject({ method: 'POST', url: '/api/projects-co-id/scan', headers, payload: {} })).statusCode).toBe(200);
+      expect(methods.every(method => method === 'GET')).toBe(true);
+      expect((await repo.listProjects()).some(item => item.id === 'projects_co_id:55601d')).toBe(true);
+      expect((await app.inject({ method: 'POST', url: '/api/projects-co-id/submit', headers })).statusCode).toBe(404);
+      expect((await app.inject({ method: 'POST', url: '/api/projects-co-id/open', headers })).statusCode).toBe(410);
+    } finally { await app.close(); }
+  });
+
   it('protects control routes and rejects auto/free payloads while policy settings round-trip through the API', async () => {
     repo = await WorkspaceRepository.open();
     await repo.savePolicy({ ...await repo.getPolicy(), state: 'active', simulationOnly: false });
@@ -102,8 +120,9 @@ describe('projects.co.id read-only integration', () => {
       const status = await app.inject({ method: 'GET', url: '/api/projects-co-id' });
       expect(status.headers['cache-control']).toBe('no-store');
       expect(status.json()).toMatchObject({ state: 'stopped', readyDrafts: 0 });
-      expect((await app.inject({ method: 'POST', url: '/api/projects-co-id/scan', headers: origin })).statusCode).toBe(410);
-      expect((await app.inject({ method: 'PUT', url: '/api/projects-co-id/mode', headers: origin, payload: { mode: 'auto' } })).statusCode).toBe(410);
+      expect((await app.inject({ method: 'POST', url: '/api/projects-co-id/scan', headers: origin })).statusCode).toBe(502);
+      expect((await app.inject({ method: 'PUT', url: '/api/projects-co-id/mode', headers: origin, payload: { mode: 'auto' } })).statusCode).toBe(400);
+      expect((await app.inject({ method: 'PUT', url: '/api/projects-co-id/mode', headers: origin, payload: { mode: 'drafts' } })).statusCode).toBe(409);
       expect((await app.inject({ method: 'POST', url: '/api/projects-co-id/open', headers: origin, payload: { url: 'https://evil.test' } })).statusCode).toBe(410);
       expect((await app.inject({ method: 'POST', url: '/api/projects-co-id/submit', headers: origin })).statusCode).toBe(404);
       const policy = await repo.getPolicy();

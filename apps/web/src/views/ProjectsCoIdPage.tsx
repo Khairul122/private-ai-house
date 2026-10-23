@@ -9,7 +9,7 @@ import type { ProjectsCoIdEntry, ProjectsCoIdStatus } from '../api/projects-co-i
 const rupiah = (amount: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(amount);
 const date = (value: string | null | undefined) => value ? new Date(value).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) : 'Belum pernah';
 const daysUntil = (value: string) => Math.ceil((Date.parse(value) - Date.now()) / 86_400_000);
-const stateLabels: Record<ProjectsCoIdStatus['state'], string> = { stopped: 'Pemindaian dinonaktifkan', opening: 'Pemindaian dinonaktifkan', checking: 'Pemindaian dinonaktifkan', scanning: 'Pemindaian dinonaktifkan', drafting: 'Pemindaian dinonaktifkan', ready: 'Pemindaian dinonaktifkan', paused: 'Pemindaian dinonaktifkan', login_required: 'Pemindaian dinonaktifkan', account_mismatch: 'Pemindaian dinonaktifkan', challenge: 'Pemindaian dinonaktifkan', error: 'Pemindaian dinonaktifkan' };
+const stateLabels: Record<ProjectsCoIdStatus['state'], string> = { stopped: 'Siap membaca listing', opening: 'Membuka sumber', checking: 'Memeriksa sumber', scanning: 'Membaca listing', drafting: 'Menyiapkan draf', ready: 'Listing terbuka terbaca', paused: 'Automasi dijeda', login_required: 'Login diperlukan', account_mismatch: 'Akun berbeda', challenge: 'Verifikasi diperlukan', error: 'Pembacaan gagal' };
 const fieldLabel = new Map<string, string>(PROJECTS_CO_ID_FIELDS.map(field => [field.id, field.label]));
 
 type Stage = 'ready' | 'scanned' | 'sent' | 'won' | 'skipped';
@@ -39,6 +39,7 @@ export default function ProjectsCoIdPage() {
   const [proposalEdits, setProposalEdits] = useState<Record<string, string | null>>({});
   const [notice] = useState('');
   const refresh = async () => { await Promise.all(['projects-co-id', 'projects-co-id-drafts', 'pipeline', 'projects', 'activity', 'policy', 'work'].map(key => client.invalidateQueries({ queryKey: [key] }))); };
+  const scan = useMutation({ mutationFn: () => api<ProjectsCoIdStatus>('/projects-co-id/scan', jsonRequest('POST', {})), onSuccess: refresh });
   const worker = status.isError ? undefined : status.data;
   const projects = entries.isError ? undefined : entries.data;
   const settings = policy.isError || !policy.data ? undefined : policy.data.projectsCoId;
@@ -54,15 +55,16 @@ export default function ProjectsCoIdPage() {
     if (focusId && projects) document.getElementById(`pci-${focusId}`)?.scrollIntoView({ block: 'start' });
   }, [focusId, projects]);
   return <div className="projects-co-id-page">
-    <PageIntro eyebrow="projects.co.id" title="Peluang dan draf Rupiah" description="Pemindaian otomatis dinonaktifkan. Proyek tersimpan, draf lokal, dan aksi pemilik tetap tersedia." />
+    <PageIntro eyebrow="projects.co.id" title="Peluang dan draf Rupiah" description="Pemindaian GET read-only membaca listing tanpa mengirim penawaran. Draf dan aksi pemilik tetap tersedia." />
     {notice && <p className="notice notice-success" role="status">{notice}</p>}
 
     <section className="pci-overview" aria-labelledby="pci-worker-title">
       <div className="pci-overview-head">
         <div><p className="eyebrow">Scout projects.co.id</p><h2 id="pci-worker-title">{status.isPending ? 'Memuat status…' : worker ? stateLabels[worker.state] : 'Status tidak tersedia'}</h2></div>
-        {worker && <span className="state-label pci-state-attention">Pemindaian nonaktif</span>}
+        {worker && <><span className="state-label pci-state-attention">{worker.mode === 'off' ? 'Pemindaian nonaktif' : 'GET read-only'}</span><button className="button button-primary" type="button" disabled={scan.isPending || worker.mode === 'off'} onClick={() => scan.mutate()}>{scan.isPending ? 'Membaca…' : 'Baca penawaran'}</button></>}
       </div>
       {status.isError && <p role="alert">Status projects.co.id tidak tersedia. <button className="button button-text" onClick={() => status.refetch()}>Coba lagi</button></p>}
+      {scan.isError && <p role="alert">Pembacaan gagal: {scan.error.message}</p>}
       {worker && <>
         <p role="status" className="pci-reason">{worker.reason}</p>
         <dl className="card-facts">

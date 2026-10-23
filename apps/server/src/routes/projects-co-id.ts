@@ -4,7 +4,7 @@ import type { ProjectsCoIdService } from '../services/projects-co-id.js';
 import { z } from 'zod';
 
 const projectParams = z.object({ id: z.string().regex(/^projects_co_id:[a-f0-9]{6}$/) });
-const disabled = { error: 'Pemindaian projects.co.id dinonaktifkan. Proyek tersimpan, draf lokal, dan aksi pemilik tetap tersedia.' };
+const disabled = { error: 'Pemindaian projects.co.id read-only tidak tersedia. Proyek tersimpan, draf lokal, dan aksi pemilik tetap tersedia.' };
 export function registerProjectsCoIdRoutes(app: FastifyInstance, service: ProjectsCoIdService | undefined) {
   app.addHook('onRequest', async (req, reply) => {
     if (!req.url.startsWith('/api/projects-co-id')) return;
@@ -13,7 +13,12 @@ export function registerProjectsCoIdRoutes(app: FastifyInstance, service: Projec
   });
   app.get('/api/projects-co-id', async () => service ? service.status() : null);
   app.get('/api/projects-co-id/drafts', async (_req, reply) => service ? service.drafts() : reply.code(503).send(disabled));
-  app.put('/api/projects-co-id/mode', async (_req, reply) => reply.code(410).send(disabled));
+  app.put('/api/projects-co-id/mode', async (req, reply) => {
+    if (!service) return reply.code(503).send(disabled);
+    const body = z.object({ mode: z.enum(['off', 'scan-only', 'drafts']) }).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: 'Mode projects.co.id tidak valid.' });
+    try { await service.setMode(body.data.mode); return service.status(); } catch { return reply.code(409).send({ error: 'Mode projects.co.id tidak dapat disimpan.' }); }
+  });
   for (const action of ['draft', 'mark-sent', 'skip', 'won'] as const) app.post(`/api/projects-co-id/projects/:id/${action}`, async (req, reply) => {
     if (!service) return reply.code(503).send(disabled);
     const params = projectParams.safeParse(req.params);
@@ -24,5 +29,9 @@ export function registerProjectsCoIdRoutes(app: FastifyInstance, service: Projec
       await service.ownerAction(params.data.id, action); return { ok: true };
     } catch { return reply.code(409).send({ error: action === 'draft' ? 'Draf belum dibuat. Periksa kebijakan, kuota dan Aktivitas.' : 'Proyek tidak ditemukan, sudah diproses, atau belum memiliki draf.' }); }
   });
-  for (const action of ['open', 'check', 'close', 'scan'] as const) app.post(`/api/projects-co-id/${action}`, async (_req, reply) => reply.code(410).send(disabled));
+  app.post('/api/projects-co-id/scan', async (_req, reply) => {
+    if (!service) return reply.code(503).send(disabled);
+    try { return await service.scan(); } catch (error) { return reply.code(502).send({ error: error instanceof Error ? error.message : 'Pemindaian gagal.' }); }
+  });
+  for (const action of ['open', 'check', 'close'] as const) app.post(`/api/projects-co-id/${action}`, async (_req, reply) => reply.code(410).send({ error: 'Chrome/CDP tidak digunakan. Gunakan pemindaian GET read-only.' }));
 }

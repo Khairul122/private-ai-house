@@ -114,7 +114,7 @@ Nama paket npm: `@fvh/<nama>`. Semua paket diekspor langsung dari `src/index.ts`
 3. **`FreelancerAutopilot`** (`services/autopilot.ts`): siklus tiap `scanIntervalMinutes` kebijakan (5 menit sejak 20 Okt 2026). Per siklus: 1 pencarian `jobs[]` (skill profil yang cocok, `from_time`) + maks. 2 kata kunci bergilir. HTTP 429 → interval ×2 (maks ×8), kembali normal setelah sukses.
 4. **`BusinessSync`** (`services/business-sync.ts`): **read-only**, terlepas dari status kebijakan. Pesan klien tiap 1 menit (satu panggilan threads `last_message` + `from_updated_time`), sapuan penuh 30 thread tiap 30 menit; hasil bid tiap 5 menit. 429 → backoff per job; hasil parsial tetap disimpan; header `RateLimit-*` tampil di status.
 5. **`createApp`** (`app.ts`): hook keamanan, header CSP, lalu route per domain dari `routes/` (handler di `controllers/`).
-6. **`ProjectsCoIdService`** (`projects-co-id.ts`): pemindaian eksternal dinonaktifkan. Data proyek tersimpan, draf Hermes/template, dan aksi pemilik tetap tersedia. Tidak ada pembacaan listing baru atau mode submit.
+6. **`ProjectsCoIdService`** (`projects-co-id.ts`): membaca listing projects.co.id melalui HTTP GET read-only. Tidak login lewat Chrome, tidak memakai CDP/Playwright, dan tidak mengirim penawaran. Data proyek tersimpan, draf Hermes/template, dan aksi pemilik tetap tersedia.
 
 ### 5.1 Siklus autopilot
 1. `start()`: baca profil Freelancer; **isi profil lokal dari Freelancer hanya sekali** (saat `specializations` lokal kosong). Bootstrap kebijakan bila belum aktif (kecuali dijeda).
@@ -169,7 +169,7 @@ Pengecualian pemilik 19 Oktober 2026: proyek `projects_co_id` boleh `submitted` 
 | `GET /api/autopilot` | `state, lastRunAt, nextRunAt, lastMessage, cycleInProgress, draftsInProgress, …` |
 
 | `GET /api/hermes-kanban` · `GET /api/hermes-kanban/tasks/:id` · `POST /api/hermes-kanban/tasks` | Board Hermes `fvh-house` lewat CLI `hermes kanban`. Kartu baru hanya untuk profil `fvh-*`; body memuat snapshot data aplikasi (dibaca dari route GET aplikasi sendiri) bila `includeData`. Aktif hanya bila Hermes + consent aktif. |
-| `GET /api/projects-co-id` · `/drafts` · `POST /projects/:id/draft`, `/mark-sent`, `/skip`, `/won` | Prefix route `/api/projects-co-id`. Pemindaian eksternal nonaktif; data tersimpan, draf, dan aksi pemilik tetap tersedia. Aksi penandaan memerlukan `confirm: true`. |
+| `GET /api/projects-co-id` · `/drafts` · `POST /scan` · `PUT /mode` · `POST /projects/:id/draft`, `/mark-sent`, `/skip`, `/won` | Prefix route `/api/projects-co-id`. `/scan` hanya GET read-only; `/open`, `/check`, `/close` tetap dinonaktifkan. Tidak ada submit otomatis. Aksi penandaan memerlukan `confirm: true`. |
 | `GET /api/business-sync` | Status BusinessSync (null jika tidak tersedia) |
 | `GET /api/dashboard` | Hitungan, kebijakan, `bidUsage {today, week}` (zona waktu kebijakan), `externalWrites` |
 | `GET /api/insights/bids` | Hasil bid (`winRate` null bila belum ada keputusan), alasan skip, waktu cek terakhir |
@@ -224,7 +224,7 @@ Satu sumber kebenaran: `deriveOfficeAgents(autopilot, activity, { sync, hermes, 
 | Agen | Sinyal nyata | Aturan |
 |---|---|---|
 | **Lead Agent (Hermes)** | `capabilities.hermes` | nonaktif → Offline (alasan dari server); `draftsInProgress > 0` → Bekerja; aktif → Idle; data gagal → Tidak diketahui |
-| Scout projects.co.id (lantai 1) | `/api/projects-co-id` | Pemindaian nonaktif → Offline dengan alasan jelas; data tersimpan tetap dapat dikelola; draf aktif → Bekerja. |
+| Scout projects.co.id (lantai 1) | `/api/projects-co-id` | `mode=off`/paused/error → Offline; GET read-only berjalan → Meninjau; draf aktif → Bekerja; idle → siap membaca listing tersimpan. |
 | Market Scout | autopilot | running + `cycleInProgress` → Bekerja; running → Idle; paused/blocked/error → Offline (alasan spesifik); starting/undefined → Tidak diketahui |
 | Bid Strategist | autopilot + sync | `sync.step === 'outcomes'` → Meninjau; selain itu seperti Market Scout tapi siklus → Berkolaborasi |
 | Compliance Auditor | autopilot | seperti Market Scout, siklus → Berkolaborasi |

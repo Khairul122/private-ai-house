@@ -144,9 +144,9 @@
     "semantic_hash": "61655d67301af074aac27d1ff6be1f52"
   },
   "apps/server/src/index.ts": {
-    "mtime": 1792722897.7353213,
-    "seen": 1792723279.4528594,
-    "ast_hash": "1e0ff5798fdf04448b4d077a1a148f5d",
+    "mtime": 1792724551.596997,
+    "seen": 1792724958.4765358,
+    "ast_hash": "fc94703b05286d8dc62463e475932e3d",
     "semantic_hash": ""
   },
   "apps/server/src/lib/credential-store.ps1": {
@@ -216,9 +216,9 @@
     "semantic_hash": "c54e88225a7dbd939c8060879508cdea"
   },
   "apps/server/src/models/projects-co-id-types.ts": {
-    "mtime": 1792704932.0075629,
-    "seen": 1792723279.4528785,
-    "ast_hash": "8c9e7aa29dfada2c5bce8ed347d72c51",
+    "mtime": 1792723859.271651,
+    "seen": 1792724958.47657,
+    "ast_hash": "5ce6da536f9a1faadd5bee5f5594c8b4",
     "semantic_hash": ""
   },
   "apps/server/src/routes/activity.ts": {
@@ -336,9 +336,9 @@
     "semantic_hash": "6510779c6dfdd2eed074a73c75f74037"
   },
   "apps/server/src/services/autopilot.test.ts": {
-    "mtime": 1792703699.1990895,
-    "seen": 1792723279.4529083,
-    "ast_hash": "19e79f97e29ec0f462d311837145b0cc",
+    "mtime": 1792723734.4624841,
+    "seen": 1792724958.4766245,
+    "ast_hash": "5b9f580742f7e0745dd33eed06214af8",
     "semantic_hash": ""
   },
   "apps/server/src/services/autopilot.ts": {
@@ -432,9 +432,9 @@
     "semantic_hash": "43608b7a8ae7481b62eabae4c73c39fb"
   },
   "apps/server/src/services/projects-co-id.test.ts": {
-    "mtime": 1792704709.790497,
-    "seen": 1792723279.452935,
-    "ast_hash": "16023c3d2de797eb67b20ae7a40dd81d",
+    "mtime": 1792723949.9335675,
+    "seen": 1792724958.4766715,
+    "ast_hash": "923680d22786eb08ee4e6810b062ebc8",
     "semantic_hash": ""
   },
   "apps/server/src/services/projects-co-id.ts": {
@@ -654,15 +654,15 @@
     "semantic_hash": ""
   },
   "apps/web/src/state/office-state.test.ts": {
-    "mtime": 1792704759.9242408,
-    "seen": 1792723279.4529998,
-    "ast_hash": "7a2ea9355e808d91eca2818b8ac08083",
+    "mtime": 1792723939.0574536,
+    "seen": 1792724958.4767919,
+    "ast_hash": "dc5365ebf4bb42f9c3d383bc81b144fb",
     "semantic_hash": ""
   },
   "apps/web/src/state/office-state.ts": {
-    "mtime": 1792703769.1223178,
-    "seen": 1792723279.4530013,
-    "ast_hash": "938f88fd07e029e4448ffbf5667c0c5f",
+    "mtime": 1792723930.3014991,
+    "seen": 1792724958.476795,
+    "ast_hash": "4d67a1ec674634836c44e978213c0526",
     "semantic_hash": ""
   },
   "apps/web/src/state/owner-input.test.ts": {
@@ -768,10 +768,10 @@
     "semantic_hash": "f9d4816e283e10fd0437d1cd949b6a47"
   },
   "apps/web/src/views/ProjectsCoIdPage.test.tsx": {
-    "mtime": 1792446008.7900841,
-    "seen": 1792488322.7876122,
-    "ast_hash": "b4d8625d74a78866523f7c09d4c01950",
-    "semantic_hash": "b4d8625d74a78866523f7c09d4c01950"
+    "mtime": 1792723777.0015001,
+    "seen": 1792724958.4768455,
+    "ast_hash": "829b2741fdbb7e1bb3bb975956d75556",
+    "semantic_hash": ""
   },
   "apps/web/src/views/ProjectsCoIdPage.tsx": {
     "mtime": 1792722923.4208226,
@@ -1164,9 +1164,9 @@
     "semantic_hash": "f54b580a14670eb57954af1043126cd3"
   },
   "AGENTS.md": {
-    "mtime": 1792723238.821715,
-    "seen": 1792723279.453127,
-    "ast_hash": "6c4b25ef53c8822b5e1905272f50a4eb",
+    "mtime": 1792723417.032467,
+    "seen": 1792724958.4770267,
+    "ast_hash": "30827cc537cb96a2a2247ae8bdb4b5f5",
     "semantic_hash": ""
   },
   "DESIGN.md": {
@@ -1194,9 +1194,9 @@
     "semantic_hash": ""
   },
   "docs/floor-two-operations.md": {
-    "mtime": 1792705049.949866,
-    "seen": 1792723279.4531343,
-    "ast_hash": "2ecab8072a9e774a66b784bd87a0f0d2",
+    "mtime": 1792723849.1883638,
+    "seen": 1792724958.4770405,
+    "ast_hash": "2aa0f5b613476ce35390d64551f80b88",
     "semantic_hash": ""
   },
   "docs/hermes-agent-setup.md": {
@@ -1353,12 +1353,6 @@
     "mtime": 1792552142.2552261,
     "seen": 1792582105.0624259,
     "ast_hash": "32e57a55490ebe9962b483aa8b231d0b",
-    "semantic_hash": ""
-  },
-  ".playwright-mcp/page-2026-10-21T06-54-55-452Z.yml": {
-    "mtime": 1792565695.4568942,
-    "seen": 1792582105.0640783,
-    "ast_hash": "b1a9e17a6117201f8fee15cd707bb60a",
     "semantic_hash": ""
   },
   "packages/persistence/migrations/0003_office_learning.sql": {

@@ -1,7 +1,7 @@
 import type { ProjectOpportunity, ProjectsCoIdSettings } from '@fvh/domain';
 
 export const PROJECTS_CO_ID_ORIGIN = 'https://projects.co.id';
-export const PROJECTS_CO_ID_AUTO_REASON = 'Pemindaian projects.co.id dinonaktifkan. Data tersimpan dan draf lokal tetap tersedia; penawaran dikirim sendiri oleh pemilik di situs.';
+export const PROJECTS_CO_ID_AUTO_REASON = 'Pemindaian projects.co.id read-only aktif. Penawaran tidak dikirim aplikasi; aksi pengiriman tetap dilakukan sendiri oleh pemilik di situs.';
 export const PROJECTS_CO_ID_PROPOSAL_LIMIT = 1200;
 export { chooseProjectsCoIdBid } from '@fvh/domain';
 export type ProjectsCoIdStatus = {

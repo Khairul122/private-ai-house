@@ -1,6 +1,6 @@
 # projects.co.id: data lokal dan aksi pemilik
 
-Pemindaian Chrome, Telegram, CDP, dan Playwright sudah dihapus. Aplikasi tidak lagi membaca listing atau akun projects.co.id.
+Pemindaian listing projects.co.id aktif melalui HTTP GET read-only. Aplikasi tidak login lewat Chrome, tidak memakai CDP/Playwright, dan tidak mengirim penawaran.
 
 Yang tetap tersedia:
 
@@ -9,6 +9,6 @@ Yang tetap tersedia:
 - edit, salin, buka tautan, lewati, tandai terkirim, dan tandai menang oleh pemilik;
 - proyek aktif dari aksi “Saya menang”.
 
-Route kontrol pemindaian (`/open`, `/check`, `/close`, `/scan`, dan `PUT /mode`) mengembalikan HTTP `410` dengan alasan eksplisit. Status worker selalu `autoAvailable: false`; tidak ada status siap palsu.
+Route `/scan` membaca listing lewat GET dan menyimpan proyek valid. Route `/open`, `/check`, dan `/close` tetap HTTP `410`; `PUT /mode` hanya mengubah `off` atau `scan-only`. Mode draf otomatis tidak tersedia. Status worker tetap `autoAvailable: false`; tidak ada submit otomatis.
 
 Aksi pemilik tetap memerlukan konfirmasi `confirm: true`. “Ditandai terkirim oleh Anda” bukan bukti pengiriman yang diverifikasi aplikasi dan tidak masuk `bid_results` atau hitungan bid Freelancer.

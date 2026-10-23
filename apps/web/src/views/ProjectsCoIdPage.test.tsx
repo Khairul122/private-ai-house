@@ -6,7 +6,7 @@ import ProjectsCoIdPage from './ProjectsCoIdPage.js';
 import type { ProjectsCoIdStatus } from '../api/projects-co-id-api.js';
 
 const worker: ProjectsCoIdStatus = {
-  mode: 'off', state: 'stopped', busy: false, reason: 'Pemindaian dinonaktifkan.',
+  mode: 'scan-only', state: 'stopped', busy: false, reason: 'Pemindaian projects.co.id read-only aktif.',
   username: null, remaining: null, checkedAt: null, pageStatus: null,
   lastScanAt: null, lastResult: null, lastSearchTerms: [], searchTerms: [], autoAvailable: false,
   draftsInProgress: 0, projectCount: 0, readyDrafts: 0, blockedWrites: 0,
@@ -23,8 +23,8 @@ describe('projects.co.id stored data', () => {
     client.setQueryData(['projects-co-id'], worker);
     client.setQueryData(['projects-co-id-drafts'], []);
     const html = render(client);
-    expect(html).toContain('Pemindaian dinonaktifkan');
-    expect(html).toContain('Pemindaian nonaktif');
+    expect(html).toContain('GET read-only');
+    expect(html).toContain('Baca penawaran');
     expect(html).not.toContain('HTTP 200');
     expect(html).not.toContain('Akun teramati');
     client.clear();
@@ -37,7 +37,7 @@ describe('projects.co.id stored data', () => {
     const html = render(client);
     expect(html).not.toContain('KhairulHuda06');
     expect(html).toContain('Status tidak tersedia');
-    expect(html).toContain('Draf siap dikirim (–)');
+    expect(html).toContain('Status tidak tersedia');
     client.clear();
   });
 });
