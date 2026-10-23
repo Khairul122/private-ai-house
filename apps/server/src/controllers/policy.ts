@@ -42,6 +42,7 @@ export function policyController({ options, repository, now }: AppContext) {
       if (policy.state === 'paused') return reply.code(409).send({ error: 'Kebijakan dijeda. Gunakan tindakan lanjutkan oleh pemilik.' });
       if (!Number.isFinite(Date.parse(policy.expiresAt)) || Date.parse(policy.expiresAt) <= now().getTime()) return reply.code(409).send({ error: 'Perbarui masa berlaku sebelum aktivasi.' });
       if ((!options.autopilot || !(options.getCredentialStatus?.() ?? options.credentialStatus)?.freelancerAccessTokenConfigured)) return reply.code(409).send({ error: 'Autopilot dan kredensial Freelancer harus tersedia sebelum aktivasi live.' });
+       if (options.freelancerBidCapability?.() !== 'supported') return reply.code(409).send({ error: 'Kemampuan submit bid Freelancer belum terverifikasi.' });
       const profile = await repository.getProfile();
       if (!profile.primaryField.trim() || profile.specializations.length === 0) return reply.code(409).send({ error: 'Isi bidang utama dan minimal satu spesialisasi sebelum mengaktifkan kebijakan.' });
       if (!policy.allowedActions.includes('bid.submit')) return reply.code(409).send({ error: 'Kebijakan harus mengizinkan tindakan bid.' });

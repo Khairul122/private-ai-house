@@ -1,7 +1,6 @@
-import type { AuditEvent, Autopilot, BusinessSyncStatus } from '../api/api.js';
+﻿import type { AuditEvent, Autopilot, BusinessSyncStatus } from '../api/api.js';
 import { OPERATIONS_ROSTER, OFFICE_ROSTER as ROSTER } from '@fvh/domain';
 import type { OperationsData } from '../api/operations-api.js';
-import type { BrowserBiddingStatus } from '../api/browser-bidding-api.js';
 import type { ProjectsCoIdStatus } from '../api/projects-co-id-api.js';
 import type { HermesKanbanStatus } from '../../../server/src/models/hermes-kanban-types.js';
 import type { OfficeLearningStatus } from '../../../server/src/models/office-learning-types.js';
@@ -64,7 +63,6 @@ function activityFor(id: string, activity: AuditEvent[]): AuditEvent[] {
   if (id === 'chief-of-staff') return activity.slice(0, 3);
   const matches = (event: AuditEvent): boolean => {
     if (id === 'projects-co-id-scout') return event.type.startsWith('projects_co_id.') || event.type === 'autopilot.draft_fallback' && event.resourceId.startsWith('projects_co_id:');
-    if (id === 'browser-bid-operator') return event.type.startsWith('browser.') || event.type === 'marketplace.production.submit_bid' && event.reason.includes('melalui browser');
     if (id === 'market-scout') return ['marketplace.projects_synced', 'marketplace.sync_failed', 'autopilot.cycle'].includes(event.type);
     if (id === 'bid-strategist') return event.type.startsWith('bid.') || event.type === 'marketplace.production.submit_bid';
     if (id === 'compliance-auditor') return event.type === 'autopilot.bid_skipped' || event.type.startsWith('policy.');
@@ -83,7 +81,6 @@ export type OfficeContext = {
   projectsCoId?: ProjectsCoIdStatus | null | undefined;
   /** Hermes kanban board `fvh-house`; each employee is the profile `fvh-<id>`. */
   kanban?: Pick<HermesKanbanStatus, 'available' | 'team' | 'tasks'> | null | undefined;
-  browserBidding?: BrowserBiddingStatus | null | undefined;
   operations?: Pick<OperationsData,'runtime'|'whatsapp'|'google'> | undefined;
   sync?: BusinessSyncStatus | null | undefined;
   hermes?: { active: boolean; reason: string; draftsInProgress?: number | undefined } | undefined;
@@ -124,13 +121,6 @@ export function deriveOfficeAgents(autopilot: Autopilot | undefined, activity: A
       else if (worker.draftsInProgress > 0) derived = { state: 'working', reason: worker.reason, task: worker.reason };
       else if (worker.busy) derived = { state: 'reviewing', reason: worker.reason, task: worker.reason };
       else derived = { state: 'idle', reason: worker.reason, task: `${worker.readyDrafts} draf menunggu Anda kirim` };
-    }
-    else if (entry.id === 'browser-bid-operator') {
-      const browser=context.browserBidding;
-      if(!browser) derived={state:'unknown',reason:'Status worker browser tidak tersedia.'};
-      else if(browser.busy) derived={state:browser.state==='submitting'?'working':'reviewing',reason:browser.reason,task:browser.reason};
-      else if(browser.state==='ready' || browser.state==='quota_exhausted') derived={state:'idle',reason:browser.reason};
-      else derived={state:'offline',reason:browser.reason};
     }
     else if (entry.id === 'lead-agent' && context.operations?.runtime.jobs['lead-operations']?.busy) derived={state:'reviewing',reason:'Hermes meninjau laporan manajer.',task:'Kolaborasi dengan manajer lantai 1 dan 2.'};
     else if (OPERATIONS_ROSTER.some(a=>a.id===entry.id)) {

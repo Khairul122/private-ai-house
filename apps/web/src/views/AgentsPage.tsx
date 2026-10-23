@@ -1,9 +1,8 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+﻿import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { api, type AuditEvent, type Autopilot, type BusinessSyncStatus, type Capabilities, type Inbox, type Policy, type Profile, type Work } from '../api/api.js';
 import { deriveOfficeAgents, summarize, STATE_COLORS, STATE_LABELS } from '../state/office-state.js';
 import type { ProjectsCoIdStatus } from '../api/projects-co-id-api.js';
-import type { BrowserBiddingStatus } from '../api/browser-bidding-api.js';
 import type { OperationsData } from '../api/operations-api.js';
 import { OPERATIONS_ROSTER } from '@fvh/domain';
 import { kanbanQuery, officeLearningQuery } from '../api/queries.js';
@@ -11,7 +10,7 @@ import { OfficeLearningCard } from '../components/OfficeLearningCard.js';
 import { ErrorNotice, LoadingPanel, PageIntro, Metric } from '../components/ui.js';
 import { formatDate } from '../components/format.js';
 
-type AgentCopy = { id: string; name: string; dept: string; role: string; task: string; boundary: string; metric: string; to: string };
+type AgentCopy = { id: string; name: string; dept: string; role: string; task: string; boundary: string; metric?: string; to: string };
 
 export default function AgentsPage() {
   const queryClient = useQueryClient();
@@ -27,7 +26,6 @@ export default function AgentsPage() {
   }>('/dashboard'), refetchInterval: 10_000 });
   const autopilot = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 10_000 });
   const profile = useQuery({ queryKey: ['profile'], queryFn: () => api<Profile>('/profile'), refetchInterval: 30_000 });
-  const browserBidding = useQuery({ queryKey: ['browser-bidding'], queryFn: () => api<BrowserBiddingStatus | null>('/browser-bidding'), refetchInterval: 3000 });
   const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: () => api<Capabilities>('/capabilities'), refetchInterval: 10_000 });
   const sync = useQuery({ queryKey: ['business-sync'], queryFn: () => api<BusinessSyncStatus | null>('/business-sync'), refetchInterval: 10_000 });
   const inbox = useQuery({ queryKey: ['inbox'], queryFn: () => api<Inbox>('/inbox'), refetchInterval: 10_000 });
@@ -42,7 +40,6 @@ export default function AgentsPage() {
     projectsCoId: projectsCoId.isError ? undefined : projectsCoId.data, kanban: kanban.isError ? undefined : kanban.data,
     sync: sync.isError ? undefined : sync.data, inboxWaiting, dueSoon: work.isError ? undefined : work.data?.dueSoon,
     hermes: capabilities.isError ? undefined : capabilities.data?.hermes, knowledge: knowledgeSync.isError ? undefined : knowledgeSync.data?.job,
-    operations: operations.isError ? undefined : operations.data, browserBidding: browserBidding.isError ? undefined : browserBidding.data,
   });
 
   const agents: AgentCopy[] = [
@@ -117,13 +114,6 @@ export default function AgentsPage() {
       to: '/tasks',
     },
     {
-      id: 'browser-bid-operator', name: 'Operator Browser Bid', dept: 'Lantai 1', role: 'Pengiriman bid melalui Chrome',
-      task: 'Mengirim proposal autopilot melalui tab kerja pada Chrome berprofil pemilik.',
-      boundary: 'Kebijakan, kuota, akun dan payload diperiksa sebelum klik; hasil tidak pasti ditahan.',
-      metric: browserBidding.isError ? 'Status tidak tersedia' : browserBidding.data?.reason ?? 'Worker belum tersedia.',
-      to: '/capabilities',
-    },
-    {
       id: 'projects-co-id-scout', name: 'Scout projects.co.id', dept: 'Lantai 1', role: 'Cari proyek & siapkan draf projects.co.id',
       task: 'Membaca proyek dan menulis draf lokal sesuai kebijakan IDR.',
       boundary: 'Worker hanya membaca; pemilik mengirim sendiri di situs.',
@@ -144,7 +134,6 @@ export default function AgentsPage() {
     capabilities.isError && { key: 'capabilities', label: 'integrasi' },
     autopilot.isError && { key: 'autopilot', label: 'operasi' },
     projectsCoId.isError && { key: 'projects-co-id', label: 'projects.co.id' },
-    browserBidding.isError && { key: 'browser-bidding', label: 'browser bid' },
     kanban.isError && { key: 'hermes-kanban', label: 'kanban Hermes' },
     sync.isError && { key: 'business-sync', label: 'sinkronisasi bisnis' },
     inbox.isError && { key: 'inbox', label: 'kotak masuk' },

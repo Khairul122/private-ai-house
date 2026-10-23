@@ -1,4 +1,4 @@
-import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+﻿import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router';
 import { api, jsonRequest, type AuditEvent, type Autopilot, type BidDraft, type BusinessSyncStatus, type Capabilities, type Inbox, type Opportunity, type Policy, type Profile, type Work } from '../api/api.js';
@@ -7,7 +7,6 @@ import { BOARDS, dayPhase, FLOOR, LIFT, OWNER_SPOT, PODS, spotsFor, ZONES, type 
 import type { BoardContent, CameraCommand } from './VisualOffice.js';
 import { bindOwnerKeyboard, createOwnerInput, type OwnerDirection, type OwnerInput } from '../state/owner-input.js';
 import type { ProjectsCoIdStatus } from '../api/projects-co-id-api.js';
-import type { BrowserBiddingStatus } from '../api/browser-bidding-api.js';
 import type { OperationsData } from '../api/operations-api.js';
 import { OPERATIONS_ROSTER } from '@fvh/domain';
 import { formatMoney, formatDate, activityTitle } from '../components/format.js';
@@ -81,7 +80,7 @@ function buildBoards(data: ShellData): BoardContent[] {
     opportunities: data.dashboard ? { lines: [`${data.dashboard.counts.openProjects} peluang`, data.autopilot?.nextRunAt ? `Pindai berikutnya ${timeOf(data.autopilot.nextRunAt)}` : `Autopilot ${data.autopilot?.state ?? 'tidak diketahui'}`] } : { lines: unavailable },
     pipeline: data.pipeline ? { lines: [`${data.pipeline.filter(p => p.source === 'freelancer' && ['submitted', 'in_conversation'].includes(p.pipelineStatus)).length} dari Freelancer`, `${data.pipeline.filter(p => p.source === 'projects_co_id' && p.pipelineStatus === 'submitted').length} ditandai oleh Anda`] } : { lines: unavailable },
     tasks: data.pipeline ? { lines: [`${count(['new', 'scored'])} di antrean`, `${count(['draft_ready', 'policy_check'])} draf · ${count(['skipped', 'lost', 'expired', 'reconciliation_required', 'error'])} selesai`] } : { lines: unavailable },
-    calendar: data.dashboard?.bidUsage && data.policy ? { lines: [`Bid ${data.dashboard.bidUsage.today}/${data.policy.dailyBidLimit} hari ini`, data.work?.dueSoon ? `${data.work.dueSoon} tenggat klien ≤ 2 hari` : `${data.dashboard.bidUsage.week}/${data.policy.weeklyBidLimit} minggu ini`], alert: Boolean(data.work?.dueSoon) } : { lines: unavailable },
+    calendar: data.dashboard?.bidUsage && data.policy ? { lines: [`Bid ${data.dashboard.bidUsage.today}/${data.policy.dailyBidLimit} hari ini`, data.work?.dueSoon ? `${data.work.dueSoon} tenggat klien â‰¤ 2 hari` : `${data.dashboard.bidUsage.week}/${data.policy.weeklyBidLimit} minggu ini`], alert: Boolean(data.work?.dueSoon) } : { lines: unavailable },
     inbox: data.inbox ? { lines: [`${data.inbox.needsReply.length} menunggu balasan`, `${data.inbox.followUps.length} perlu follow-up`], alert: data.inbox.needsReply.length > 0 } : { lines: unavailable },
     work: data.work ? { lines: [`${data.work.projects.filter((item) => item.status === 'active').length} proyek aktif`, `Diterima ${moneyList(data.work.income.received)}`] } : { lines: unavailable },
     activity: data.activity ? { lines: data.activity[0] ? [activityTitle(data.activity[0].type), timeOf(data.activity[0].createdAt)] : ['Belum ada aktivitas'] } : { lines: unavailable },
@@ -173,9 +172,7 @@ export default function OfficeShell() {
   const pipeline = useQuery({ queryKey: ['pipeline'], queryFn: () => api<Array<Opportunity & { latestDraft: BidDraft | null }>>('/pipeline'), refetchInterval: 60_000 });
   const policy = useQuery({ queryKey: ['policy'], queryFn: () => api<Policy>('/policy'), refetchInterval: 30_000 });
   const profile = useQuery({ queryKey: ['profile'], queryFn: () => api<Profile>('/profile'), refetchInterval: 30_000 });
-  const knowledge = useQuery({ queryKey: ['knowledge'], queryFn: () => api<{ coverage: { sources: number; chunks: number } }>('/knowledge'), refetchInterval: 30_000 });
-  const browserBidding = useQuery({queryKey:['browser-bidding'],queryFn:()=>api<BrowserBiddingStatus|null>('/browser-bidding'),refetchInterval:poll(3000)});
-  const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: () => api<Capabilities>('/capabilities'), refetchInterval: poll(3000) });
+  const knowledge = useQuery({ queryKey: ['knowledge'], queryFn: () => api<{ coverage: { sources: number; chunks: number } }>('/knowledge'), refetchInterval: 30_000 });  const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: () => api<Capabilities>('/capabilities'), refetchInterval: poll(3000) });
   const pause = useMutation({
     mutationFn: (action: 'pause' | 'resume') => api<Policy>(`/policy/${action}`, jsonRequest('POST')),
     onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ['dashboard'] }); void queryClient.invalidateQueries({ queryKey: ['policy'] }); },
@@ -191,7 +188,7 @@ export default function OfficeShell() {
   const hermes = fresh(capabilities)?.hermes;
   const knowledgeJob = fresh(knowledgeSync)?.job;
   const operationsData=fresh(operations);
-  const allAgents = useMemo(() => deriveOfficeAgents(autopilotData, activityData, { learning: fresh(learning), projectsCoId: projectsCoId.isError ? undefined : projectsCoId.data, kanban: fresh(kanban), sync: syncData, inboxWaiting, dueSoon, hermes, knowledge: knowledgeJob,operations:operationsData,browserBidding:browserBidding.isError?undefined:browserBidding.data }), [learning.isError, learning.data, projectsCoId.isError, projectsCoId.data, kanban.isError, kanban.data, browserBidding.isError,browserBidding.data,autopilotData, activityData, syncData, inboxWaiting, dueSoon, hermes, knowledgeJob,operationsData]);
+  const allAgents = useMemo(() => deriveOfficeAgents(autopilotData, activityData, { learning: fresh(learning), projectsCoId: projectsCoId.isError ? undefined : projectsCoId.data, kanban: fresh(kanban), sync: syncData, inboxWaiting, dueSoon, hermes, knowledge: knowledgeJob,operations:operationsData, }), [learning.isError, learning.data, projectsCoId.isError, projectsCoId.data, kanban.isError, kanban.data, autopilotData, activityData, syncData, inboxWaiting, dueSoon, hermes, knowledgeJob,operationsData]);
   const agents=useMemo(()=>allAgents.filter(a=>(a.floor ?? 1)===floor),[allAgents,floor]);
   const spots = useMemo(() => spotsFor(agents), [agents]);
   const ownerTarget = selectedId ? spots.get(selectedId) ?? null : null;

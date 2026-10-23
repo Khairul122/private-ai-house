@@ -1,36 +1,10 @@
 # Capability matrix
 
-Updated 16 October 2026 against provider documentation, implementation, and authenticated reads from this workspace. An account capability changes to `supported` only after the corresponding request succeeds. Mock tests verify adapter contracts; they do not prove account authorization. See [the current runtime and UI audit](mission-control-upgrade.md) for evidence and limits.
-
-| Provider / capability | Status | Evidence and boundary |
+| Kapabilitas | Status | Batas |
 |---|---|---|
-| Freelancer profile read | `supported` | Live authenticated GET `/api/users/0.1/self/` returned a valid account ID. Only the ID was used for the other checks. |
-| Freelancer project read | `supported` | Live authenticated active-project search returned a valid response with limit 1. Verification results were not synced to the local project store. |
-| Freelancer portfolio read | `supported` | Live authenticated GET `/api/users/0.1/portfolios/` for the account ID with limit 1 returned the expected user/portfolio response. Portfolio contents were discarded and not stored. The route and query contract follow the [official SDK implementation](https://github.com/freelancer/freelancer-sdk-python/blob/master/freelancersdk/resources/users/users.py) and [example](https://github.com/freelancer/freelancer-sdk-python/blob/master/examples/get_portfolios.py). |
-| Freelancer message read | `supported` | Live authenticated GET `/api/messages/0.1/threads/` for the account's threads and GET `/api/messages/0.1/messages/` with limit 1 succeeded. The message body and thread data were discarded. The read routes and filters follow the [official SDK](https://github.com/freelancer/freelancer-sdk-python/blob/master/freelancersdk/resources/messages/messages.py) and [examples](https://github.com/freelancer/freelancer-sdk-python/tree/master/examples). |
-| Freelancer `submit_bid` | `supported`; last attempt blocked by account quota | The autopilot rotates search terms at the configured 5–60 minute interval and submits fixed-price USD bids within policy. Two live bids received HTTP 200 on 15 October. On 16 October, the API returned `BID_LIMIT_EXCEEDED`; scanning continues and new drafting/sending waits one hour after that rejection. The endpoint follows the [official bid example](https://github.com/freelancer/freelancer-sdk-python/blob/master/examples/place_project_bid.py). |
-| Freelancer `edit_profile` | `supported` | The app read the current job list twice, confirmed both reads matched, then called `PUT /api/users/0.1/self/jobs/` with those same IDs. Freelancer returned HTTP 200; the profile list content was preserved. The method follows the [official SDK](https://github.com/freelancer/freelancer-sdk-python/blob/master/freelancersdk/resources/users/users.py). |
-| Freelancer `send_message` | `unknown` in production | The authenticated `POST /api/messages/0.1/threads/{thread_id}/messages/` route is available but is not invoked automatically without an inbound-message response rule. Capability status changes only after a real production HTTP 200. The endpoint follows the [official SDK](https://github.com/freelancer/freelancer-sdk-python/blob/master/freelancersdk/resources/messages/messages.py). |
-| GitHub selected/owned repository read | `supported` | Authenticated API sync indexed 49 repositories on 16 October; one empty repository was skipped. Limits: 50 recent owned non-fork/non-archived repos, 100 eligible files per repo, 100 KB per file. Per-repository results disclose partial coverage. Unchanged tree refs avoid duplicate downloads; source replacement is atomic. |
-| LinkedIn OIDC lite profile | `connected`, API sync verified | Authenticated `/userinfo` was read and indexed as one replaceable Knowledge Hub source on 16 October. Optional claims are validated. Page-load connection status checks token presence and expiry; full employment history/skills still require the user's export. |
-| Hermes Agent CLI drafting | `active`, consent supplied | Runtime capabilities report Hermes active with the owner's existing data consent. The local profile writes proposals only when requested by the manual drafting flow or an eligible autopilot candidate. Account bid-quota cooldown prevents unnecessary drafting after a confirmed quota rejection. |
-| Local simulated bid | `supported` | Deterministic policy check plus audit payload hash; never calls a marketplace endpoint and never marks a bid externally submitted. |
-| Freelancer bid through existing Chrome | `implemented`, account connection verified; live submit pending | Added 17 October. Owner enabled Chrome debugging and allowed the connection; Playwright attached to the logged-in profile and created its own tab. At 10.02 WIB the worker verified `khairulhuda01`, dashboard HTTP 200, and zero bids remaining. Eight local Chrome fixture cases verify submission boundaries and that disconnect preserves existing tabs. No production form submission was performed. See [browser bidding](browser-bidding.md). |
-
-## Live verification record
-
-- The local workspace is running at `http://localhost:5174`; `GET /api/health` returned HTTP `200`.
-- Freelancer verification returned HTTP `200`; authenticated profile, project, portfolio, and message reads all succeeded. The local autopilot now starts without a per-project form and has read the profile's public skills and summary.
-- Sandbox write checks use only `FVH_FREELANCER_SANDBOX_ACCESS_TOKEN` and the fixed `freelancer-sandbox.com` host. Sandbox results do not change production capability status. The capability page no longer exposes per-operation forms.
-- The initial 15 October sample contained 25 projects without a provider deadline. Unknown deadlines are now an explicit owner policy choice; the current saved policy allows them with a deterministic 14-day bid period.
-- LinkedIn shows connected based on the successful OAuth flow and its currently unexpired encrypted member token. This is limited to OIDC `openid profile`.
-- API health and the running autopilot returned HTTP `200`. Two automatic production bids received HTTP `200`, so `submit_bid` is `supported`. The idempotent profile-list sync returned HTTP `200`, so `edit_profile` is `supported`. `send_message` remains `unknown` because no client message needed a reply; the capability page has no per-operation forms.
-- The initial unauthenticated GitHub check returned HTTP 403. Authenticated sync on 16 October succeeded for 49 repositories; combined GitHub/LinkedIn coverage is 50 sources and 21,172 chunks.
-- Unit, adapter, persistence, server, and smoke tests pass; workspace typecheck, lint, and build pass. The production build reports a large Three.js chunk warning, but completes successfully.
-
-## Sources
-
-- [Freelancer developer portal](https://developer.freelancer.com/) describes the sandbox as separate from production. The endpoint contracts follow the official SDK's [bid example](https://github.com/freelancer/freelancer-sdk-python/blob/master/examples/place_project_bid.py), [message implementation](https://github.com/freelancer/freelancer-sdk-python/blob/master/freelancersdk/resources/messages/messages.py), and [profile job methods](https://github.com/freelancer/freelancer-sdk-python/blob/master/freelancersdk/resources/users/users.py). See also the [API Terms](https://www.freelancer.com/about/apiterms).
-- [GitHub repository contents API](https://docs.github.com/en/rest/repos/contents).
-- [LinkedIn 3-legged authorization-code flow](https://learn.microsoft.com/en-us/linkedin/shared/authentication/authorization-code-flow) and [OIDC profile endpoint](https://learn.microsoft.com/en-us/linkedin/consumer/integrations/self-serve/sign-in-with-linkedin-v2).
-- [Hermes CLI](https://hermes-agent.nousresearch.com/docs/user-guide/cli), [profiles](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/profiles.md), and [toolsets](https://hermes-agent.nousresearch.com/docs/reference/toolsets-reference).
+| Freelancer API read | Didukung | Kredensial tetap di server; data hanya dari API resmi. |
+| Freelancer API bid | Didukung | Policy engine, kill switch, kuota, idempotensi, dan audit wajib. |
+| projects.co.id browser/CDP/Playwright | Dihapus | Tidak ada pemindaian atau pengiriman melalui browser. |
+| projects.co.id stored data and owner actions | Didukung | Draf lokal dan penandaan pemilik tetap tersedia. |
+| Hermes drafting | Konfigurasi tersimpan | Draf tervalidasi; fallback template bila Hermes gagal. |
+| Knowledge Hub | Didukung | Sumber dibaca dan divalidasi sebelum indeks. |

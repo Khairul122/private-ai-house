@@ -2,7 +2,7 @@ import type { PipelineStatus } from './types.js';
 
 const transitions: Record<PipelineStatus, PipelineStatus[]> = {
   new: ['scored', 'draft_ready', 'in_conversation', 'won', 'lost', 'skipped', 'expired', 'error'],
-  scored: ['draft_ready', 'skipped', 'expired', 'error'],
+  scored: ['draft_ready', 'reconciliation_required', 'skipped', 'expired', 'error'],
   draft_ready: ['policy_check', 'submitted', 'in_conversation', 'won', 'lost', 'skipped', 'error'],
   policy_check: ['submitted', 'skipped', 'reconciliation_required', 'error', 'draft_ready'],
   submitted: ['in_conversation', 'won', 'lost', 'reconciliation_required', 'error'],

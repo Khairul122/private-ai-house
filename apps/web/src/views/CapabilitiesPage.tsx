@@ -1,7 +1,6 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, jsonRequest, type AuditEvent, type Autopilot, type Capabilities } from '../api/api.js';
-import BrowserBiddingCard from '../components/BrowserBiddingCard.js';
 import { EmptyState, StateLabel, ErrorNotice, LoadingPanel, PageIntro, OperationStatus } from '../components/ui.js';
 import { formatDate } from '../components/format.js';
 
@@ -107,11 +106,10 @@ export default function CapabilitiesPage() {
   const data = query.data;
   const reads = [['profil', data.freelancerCredentials.readProfile], ['proyek', data.freelancerCredentials.readProjects], ['portofolio', data.freelancerCredentials.readPortfolio], ['pesan', data.freelancerCredentials.readMessages]] as const;
   return <>
-    <PageIntro eyebrow="Integrasi" title="Koneksi dan operasi" description="Fokus utama: temukan sumber yang bermasalah. Hasil tes API, status browser, dan konfigurasi Hermes dibedakan di bawah." />
+    <PageIntro eyebrow="Integrasi" title="Koneksi dan operasi" description="Fokus utama: temukan sumber yang bermasalah. Hasil tes API dan konfigurasi Hermes dibedakan di bawah." />
     {notice && <div className={'notice ' + (noticeError ? 'notice-error' : 'notice-success')} role={noticeError ? 'alert' : 'status'}>{notice}</div>}
     <OperationStatus data={status} unavailable={autopilot.isError} />
     <HealthCard />
-    <BrowserBiddingCard />
     <div className="capability-grid">
       <section className="form-card" aria-labelledby="freelancer-api-title">
         <div className="section-heading"><div><p className="eyebrow">API Freelancer.com</p><h2 id="freelancer-api-title">Akses API Freelancer</h2></div><StateLabel state={data.freelancerCredentials.verificationStatus} /></div>

@@ -1,16 +1,15 @@
-import { useState, type FormEvent } from 'react';
+﻿import { useState, type FormEvent } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { currencyDigits, invoiceBalance, OPERATIONS_ROSTER, toMinor } from '@fvh/domain';
 import { api, jsonRequest } from '../api/api.js';
 import type { OperationsData } from '../api/operations-api.js';
 import ClientWhatsAppCard from '../components/ClientWhatsAppCard.js';
-import BrowserBiddingCard from '../components/BrowserBiddingCard.js';
 import WhatsAppStatus from '../components/WhatsAppStatus.js';
 import { checkWhatsAppStatus } from '../api/whatsapp-status.js';
 import { Metric, PageIntro } from '../components/ui.js';
 
-const TABS=['Klien & progres','Invoice','Jadwal pemilik','WhatsApp','Google Calendar','Laporan tim','Bid browser'] as const;
+const TABS=['Klien & progres','Invoice','Jadwal pemilik','WhatsApp','Google Calendar','Laporan tim'] as const;
 const money=(n:number,c:string)=>new Intl.NumberFormat('id-ID',{style:'currency',currency:c,minimumFractionDigits:0,maximumFractionDigits:currencyDigits(c)}).format(n);
 const date=(s:string)=>new Date(s).toLocaleString('id-ID',{dateStyle:'medium',timeStyle:'short'});
 const text=(f:FormData,k:string)=>String(f.get(k) ?? '').trim();
@@ -97,7 +96,6 @@ export default function OperationsPage() {
         <label className="form-field"><span>Client ID</span><input value={googleId} onChange={e=>setGoogleId(e.target.value)} required autoComplete="off"/></label><label className="form-field"><span>Client secret</span><input type="password" value={googleSecret} onChange={e=>setGoogleSecret(e.target.value)} required autoComplete="off"/></label><button className="button button-primary">Simpan konfigurasi terenkripsi</button>
       </fieldset></form></details><div className="operations-actions"><button className="button button-primary" disabled={busy||!data.google?.configured} onClick={async()=>{if(!window.confirm('Hubungkan akun Google dan lanjut ke halaman izin Google?'))return;setBusy(true);try{const result=await api<{url:string}>('/operations/google/connect',jsonRequest('POST'));window.location.assign(result.url);}catch(e){setNotice({text:e instanceof Error?e.message:'Koneksi gagal.',error:true});setBusy(false);}}}>Hubungkan akun Google</button><button className="button button-secondary" disabled={busy||!data.google?.configured} onClick={()=>void run('/operations/google/check','POST')}>Periksa koneksi Google</button><button className="button button-secondary" disabled={busy||(!data.google?.connected&&!data.google?.tokenStored)} onClick={()=>{if(window.confirm('Putuskan akun Google dan hapus koneksi tersimpan?')) void run('/operations/google/disconnect','POST');}}>Putuskan akun</button></div>
     </section>}
-    {tab==='Bid browser'&&<BrowserBiddingCard/>}
     {tab==='Laporan tim'&&<>
       <section className="form-card card-section"><h2>Aktivitas tim operasional</h2><p>Manajer tiap lantai mengirim ringkasan sekali per jam saat server aktif. Lead Agent meninjau melalui Hermes. Laporan dan saran tidak mengubah kebijakan atau mengirim pesan ke klien.</p><div className="operations-team">{OPERATIONS_ROSTER.map(agent=>{const signal=data.runtime.jobs[agent.id];return <article key={agent.id}><small>Lantai {agent.floor}</small><strong>{agent.name}</strong><p>{agent.role}</p><p>{signal?.busy?'Sedang bekerja':signal?.error?'Pekerjaan terakhir gagal':signal?'Menunggu tugas':'Tidak diketahui'}</p><small>{signal?.reason ?? 'Bekerja saat ada tugas sesuai peran.'}</small>{signal?.lastRunAt&&<small>Terakhir: {date(signal.lastRunAt)}</small>}</article>;})}</div></section>
       <section className="form-card card-section"><h2>Kolaborasi manajer → Lead Agent</h2>{!data.briefings.length?<p>Laporan pertama akan dibuat pada siklus operasional berikutnya.</p>:data.briefings.map(b=><article className="operations-row" key={b.id}><strong>{b.manager} · Lantai {b.floor}</strong><small>{date(b.createdAt)}</small><ul>{b.facts.map(f=><li key={f}>{f}</li>)}</ul><p><strong>Tinjauan Lead</strong>{b.state==='reviewed'?b.leadReview:b.state==='waiting'?'Menunggu tinjauan Hermes.':'Tinjauan Hermes tidak tersedia; fakta laporan tetap tersimpan.'}</p>{b.state!=='reviewed'&&<button className="button button-secondary" disabled={busy||Boolean(data.runtime.jobs['lead-operations']?.busy)} onClick={()=>void run(`/operations/briefings/${encodeURIComponent(b.id)}/review`,'POST')}>Minta Lead meninjau laporan</button>}</article>)}</section>

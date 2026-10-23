@@ -3,7 +3,7 @@ import { WorkspaceRepository } from '@fvh/persistence';
 import { projectsCoIdSettingsSchema } from '@fvh/contracts';
 import { PROJECTS_CO_ID_DEFAULTS, projectsCoIdDraftPolicy, projectsCoIdFieldsOf, projectsCoIdSearchTerms, projectsCoIdSettings, scoreProject, type AutonomyPolicy } from '@fvh/domain';
 import { chooseProjectsCoIdBid, mentionedRupiahAmounts, parseProjectsCoIdProject, projectsCoIdPath, validProjectsCoIdProposal, readRupiahBudget } from '../models/projects-co-id-types.js';
-import { PageBudget, ProjectsCoIdService } from './projects-co-id.js';
+import { ProjectsCoIdService } from './projects-co-id.js';
 import { createApp } from '../app.js';
 
 const now = new Date('2026-10-19T09:00:00Z');
@@ -23,16 +23,6 @@ describe('projects.co.id read-only integration', () => {
     expect(validProjectsCoIdProposal('Saya akan menguji aplikasi dengan biaya Rp500 ribu dalam 14 hari sesuai lingkup.', 500_000, 14)).toBe(true);
     for (const text of ['Harga Rp1,5 juta untuk aplikasi dengan estimasi pengerjaan 14 hari.', 'Harga USD 500 untuk aplikasi dengan estimasi pengerjaan 14 hari.', 'Harga Rp500.000 untuk aplikasi dengan estimasi pengerjaan 5 hari.', 'a'.repeat(1201)]) expect(validProjectsCoIdProposal(text, 500_000, 14)).toBe(false);
     expect(() => projectsCoIdPath({ id: project().id, sourceSlug: '../../evil' })).toThrow();
-  });
-  it('page budget never allows more than three loads in any rolling 30-minute window', () => {
-    let clock = 0; const budget = new PageBudget(3, 30 * 60_000, () => clock); const loads: number[] = [];
-    for (let i = 0; i < 500; i++) { clock += (i * 7919) % 400_000; const n = 1 + (i % 3); if (budget.take(n)) loads.push(...Array<number>(n).fill(clock)); }
-    expect(loads.length).toBeGreaterThan(30);
-    for (const at of loads) expect(loads.filter(t => t > at - 30 * 60_000 && t <= at).length).toBeLessThanOrEqual(3);
-    clock += 30 * 60_000;
-    expect(budget.take(4)).toBe(false); expect(budget.take(0)).toBe(false); expect(budget.used).toBe(0);
-    expect(budget.take(3)).toBe(true); expect(budget.take(1)).toBe(false);
-    expect(budget.nextFreeAt()).toBe(new Date(clock + 30 * 60_000).toISOString());
   });
 
   let repo: WorkspaceRepository | undefined;
@@ -102,15 +92,6 @@ describe('projects.co.id read-only integration', () => {
     expect(await repo.bidUsage(boundary, 'UTC', 'projects_co_id.draft_created')).toEqual({ today: 2, week: 2 });
   });
 
-  it('blocks scanning when paused', async () => {
-    repo = await WorkspaceRepository.open();
-    service = new ProjectsCoIdService(repo, async () => { throw new Error('Fixture does not connect'); });
-    const policy = await repo.getPolicy();
-    await repo.savePolicy({ ...policy, state: 'paused' });
-    await expect(service.scan()).rejects.toThrow(/dijeda/);
-    expect(await repo.listProjects()).toEqual([]);
-  });
-
   it('protects control routes and rejects auto/free payloads while policy settings round-trip through the API', async () => {
     repo = await WorkspaceRepository.open();
     await repo.savePolicy({ ...await repo.getPolicy(), state: 'active', simulationOnly: false });
@@ -119,9 +100,9 @@ describe('projects.co.id read-only integration', () => {
     try {
       const origin = { origin: 'http://127.0.0.1:5174' };
       expect((await app.inject({ method: 'GET', url: '/api/projects-co-id' })).headers['cache-control']).toBe('no-store');
-      expect((await app.inject({ method: 'POST', url: '/api/projects-co-id/scan' })).statusCode).toBe(403);
-      expect((await app.inject({ method: 'PUT', url: '/api/projects-co-id/mode', headers: origin, payload: { mode: 'auto' } })).statusCode).toBe(400);
-      expect((await app.inject({ method: 'POST', url: '/api/projects-co-id/open', headers: origin, payload: { url: 'https://evil.test' } })).statusCode).toBe(400);
+      expect((await app.inject({ method: 'POST', url: '/api/projects-co-id/scan', headers: origin })).statusCode).toBe(410);
+      expect((await app.inject({ method: 'PUT', url: '/api/projects-co-id/mode', headers: origin, payload: { mode: 'auto' } })).statusCode).toBe(410);
+      expect((await app.inject({ method: 'POST', url: '/api/projects-co-id/open', headers: origin, payload: { url: 'https://evil.test' } })).statusCode).toBe(410);
       expect((await app.inject({ method: 'POST', url: '/api/projects-co-id/submit', headers: origin })).statusCode).toBe(404);
       const policy = await repo.getPolicy();
       const saved = await app.inject({ method: 'PUT', url: '/api/policy', headers: origin, payload: { ...policy, projectsCoId: PROJECTS_CO_ID_DEFAULTS, expectedVersion: policy.version } });

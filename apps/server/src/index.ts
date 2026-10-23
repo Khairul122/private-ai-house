@@ -22,7 +22,6 @@ import { DpapiIntegrationVault } from './lib/integration-vault.js';
 import { WhatsAppService } from './services/whatsapp.js';
 import { GoogleCalendarService } from './services/google-calendar.js';
 import { PublicPortfolioResolver } from './services/portfolio.js';
-import { BrowserBiddingService, SharedChromeSession } from './services/browser-bidding.js';
 import { ProjectsCoIdService } from './services/projects-co-id.js';
 import { HermesKanban, hermesKanbanRunner } from './services/hermes-kanban.js';
 import { OfficeLearningService } from './services/office-learning.js';
@@ -93,17 +92,8 @@ const drafting = hermesEnabled ? new HermesCliDraftingAdapter({
   timeoutMs: 180_000,
 }) : undefined;
 const portfolio = new PublicPortfolioResolver();
-// Both Chrome workers share one CDP connection so the owner approves Chrome's dialog once.
-const chrome = new SharedChromeSession();
-const projectsCoId = new ProjectsCoIdService(repository, () => chrome.acquire(), undefined, drafting ? input => drafting.draftBid(input) : undefined);
-const browserBidding = new BrowserBiddingService(dataDirectory,async()=>{
-  const account=await (await createFreelancerReader()).readOwnProfile();
-  if(!account.username) throw new Error('Username API belum tersedia.');
-  return {id:account.id,username:account.username};
-},()=>chrome.acquire());
+const projectsCoId = new ProjectsCoIdService(repository, drafting ? input => drafting.draftBid(input) : undefined);
 const autopilot = new FreelancerAutopilot({
-  bidTransportReady:()=>browserBidding.readiness(),
-  guardedSubmitBid:(input,authorize)=>browserBidding.submit(input,authorize,async()=>new FreelancerProductionWriteAdapter({token:await getFreelancerToken()}).run(input)),
   publicPortfolio:(evidence)=>portfolio.select(evidence),
   repository,
   readProfile: async () => (await createFreelancerReader()).readOwnProfile(),
@@ -137,7 +127,7 @@ const officeLearning = drafting ? new OfficeLearningService({
       void hermesKanban?.status();
       return true;
     }
-    return drafting.workInProgress > 0 || autopilot.liveState().busy || projectsCoId.busy || browserBidding.status().busy
+    return drafting.workInProgress > 0 || autopilot.liveState().busy || projectsCoId.busy
       || businessSync.getStatus().step !== null || Object.values(operations.status().jobs).some(job => job.busy)
       || !board.available || board.tasks.some(task => task.status === 'running');
   },
@@ -145,7 +135,6 @@ const officeLearning = drafting ? new OfficeLearningService({
 if (officeLearning) live.watch(['office-learning'], () => officeLearning.peek());
 live.watch(['autopilot', 'capabilities'], () => autopilot.liveState());
 live.watch(['business-sync'], () => businessSync.getStatus());
-live.watch(['browser-bidding'], () => browserBidding.status());
 live.watch(['projects-co-id'], () => projectsCoId.liveState());
 live.watch(['operations'], () => [operations.status(), whatsapp.status(), googleCalendar.status()]);
 // checkedAt moves on every read; only a changed board is news.
@@ -153,7 +142,7 @@ if (hermesKanban) live.watch(['hermes-kanban'], () => { const board = hermesKanb
 const app = await createApp({
   live,
   publicPortfolio:(evidence)=>portfolio.select(evidence),
-  operations,whatsapp,googleCalendar,browserBidding,projectsCoId,
+  operations,whatsapp,googleCalendar,projectsCoId,
   // Cards carry stored app data to the Hermes team, so they follow the same consent as drafting.
   ...(hermesKanban ? { hermesKanban } : {}),
   ...(officeLearning ? { officeLearning } : {}),
@@ -238,7 +227,7 @@ const app = await createApp({
 if (hasWebBuild) {
   await app.register(fastifyStatic, { root: webBuild, prefix: '/' });
 }
-app.addHook('onClose',async()=>{autopilot.stop();whatsapp.close();await browserBidding.close();await projectsCoId.close();await operations.close();});
+app.addHook('onClose',async()=>{autopilot.stop();whatsapp.close();await projectsCoId.close();await operations.close();});
 
 if (!['127.0.0.1', 'localhost', '::1'].includes(host)) throw new Error('FVH_HOST must stay on loopback for the local single-user app.');
 await app.listen({ host, port });
@@ -250,7 +239,6 @@ void (async () => {
   void hermesKanban?.status(); // warm the ~10 s first read so the office does not wait on it
   await startupStep('freelancer-verify', () => app.inject({ method: 'POST', url: '/api/freelancer/verify' }));
   await startupStep('business-sync', () => businessSync.start());
-  await startupStep('browser-bidding', () => browserBidding.restore());
   await startupStep('projects-co-id', () => projectsCoId.restore());
   await startupStep('google-calendar', () => googleCalendar.restore());
   await startupStep('whatsapp', () => whatsapp.restore());

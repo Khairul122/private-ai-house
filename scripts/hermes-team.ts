@@ -27,7 +27,6 @@ const FOCUS: Record<string, string> = {
   'knowledge-curator': 'Merangkum repo GitHub dan dokumen menjadi bukti portofolio yang dapat dikutip.',
   'compliance-auditor': 'Memeriksa rencana atau draf terhadap kebijakan bid, keamanan data dan aturan marketplace.',
   'qa-engineer': 'Menyusun skenario uji, checklist verifikasi dan risiko regresi untuk perubahan aplikasi.',
-  'browser-bid-operator': 'Menyiapkan langkah dan pemeriksaan untuk bid lewat Chrome; tidak pernah mengirim bid.',
   'projects-co-id-scout': 'Menilai proyek projects.co.id dan menyiapkan draf proposal Bahasa Indonesia dalam IDR.',
   'floor-one-manager': 'Manajer lantai 1: mengoordinasikan pasar, bid dan laporan ke Lead.',
   'delivery-manager': 'Manajer lantai 2: mengoordinasikan delivery proyek, invoice, pembayaran dan jadwal.',

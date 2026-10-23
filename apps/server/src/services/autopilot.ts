@@ -1,10 +1,8 @@
-import { evaluatePolicy, policySchedule, scoreProject, selectSearchTerms } from '@fvh/domain';
-import type { AutonomyPolicy, BidDraft, ProjectOpportunity } from '@fvh/domain';
+﻿import { evaluatePolicy, policySchedule, scoreProject, selectSearchTerms } from '@fvh/domain';
+import type { AutonomyPolicy, BidDraft, CapabilityStatus, ProjectOpportunity } from '@fvh/domain';
 import type { FreelancerProfile, FreelancerWriteResult } from '@fvh/adapter-freelancer';
 import { createId, hashPayload, type AiDraftingPort } from '@fvh/application';
 import type { WorkspaceRepository, ServiceProfile } from '@fvh/persistence';
-import type { BrowserBidInput } from '../models/browser-bid-types.js';
-
 type AutopilotDependencies = {
   repository: WorkspaceRepository;
   readProfile: () => Promise<FreelancerProfile>;
@@ -13,8 +11,7 @@ type AutopilotDependencies = {
   readProjectsByJobs?: (jobIds: number[], fromTime: number, limit: number) => Promise<{ projects: ProjectOpportunity[]; skipped: number }>;
   syncProfileJobs?: (jobIds: number[]) => Promise<FreelancerWriteResult>;
   submitBid: (input: { operation: 'submit_bid'; projectId: number; amount: number; period: number; milestonePercentage: number; description: string }) => Promise<FreelancerWriteResult>;
-  guardedSubmitBid?: (input: BrowserBidInput, authorize: () => Promise<void>) => Promise<FreelancerWriteResult>;
-  bidTransportReady?: () => { ready: boolean; reason: string };
+  bidCapability?: () => CapabilityStatus;
   /** Hermes drafting; when absent or failing, the built-in template writes the proposal. */
   draftProposal?: AiDraftingPort['draftBid'];
   publicPortfolio?: (evidence:Parameters<AiDraftingPort['draftBid']>[0]['evidence'])=>Promise<Array<{label:string;url:string}>>;
@@ -386,7 +383,7 @@ export class FreelancerAutopilot {
         const bid = chooseBid(project, activePolicy);
         if (!bid) { count(project.projectType !== 'fixed' ? 'Tipe proyek bukan harga tetap' : project.currency !== 'USD' ? 'Mata uang bukan USD' : 'Anggaran atau tenggat di luar batas bid'); continue; }
         const confidence = project.score / 100;
-        const decision = evaluatePolicy({ policy: activePolicy, project, action: 'bid.submit', confidence, proposedPrice: bid.amount, dailyUsed, weeklyUsed, now: this.now(), capability: 'supported', executionMode: 'external' });
+        const decision = evaluatePolicy({ policy: activePolicy, project, action: 'bid.submit', confidence, proposedPrice: bid.amount, dailyUsed, weeklyUsed, now: this.now(), capability: this.dependencies.bidCapability?.() ?? 'unknown', executionMode: 'external' });
         if (!decision.allowed) {
           count(decision.reason);
           if (activePolicy.version !== policy.version || skipped.get(project.id) !== decision.reason) await repository.appendAudit({ type: 'autopilot.bid_skipped', resourceId: project.id, status: 'blocked', reason: decision.reason, policyVersion: activePolicy.version, payloadHash: null });
@@ -394,15 +391,13 @@ export class FreelancerAutopilot {
         }
         eligible += 1;
         if (quotaCooldown) { count('Menunggu kuota akun Freelancer; jeda satu jam sejak penolakan API terakhir'); continue; }
-        const transport = this.dependencies.bidTransportReady?.();
-        if (transport && !transport.ready) { count(transport.reason); continue; }
         const written = await this.writeProposal(project, activePolicy, bid, project.score);
         const proposal = written.proposal;
         if (this.stopping) break;
         // Recheck after drafting: the owner may change the policy while Hermes runs.
         const latest = await repository.getPolicy();
         const latestUsage = await repository.bidUsage(this.now(), latest.timezone);
-        const latestDecision = evaluatePolicy({ policy: latest, project, action: 'bid.submit', confidence: scoreProject(project, latest.specializations).score / 100, proposedPrice: bid.amount, dailyUsed: latestUsage.today, weeklyUsed: latestUsage.week, now: this.now(), capability: 'supported', executionMode: 'external' });
+        const latestDecision = evaluatePolicy({ policy: latest, project, action: 'bid.submit', confidence: scoreProject(project, latest.specializations).score / 100, proposedPrice: bid.amount, dailyUsed: latestUsage.today, weeklyUsed: latestUsage.week, now: this.now(), capability: this.dependencies.bidCapability?.() ?? 'unknown', executionMode: 'external' });
         if (latest.simulationOnly || !latestDecision.allowed || latest.version !== activePolicy.version) { count('Kebijakan berubah saat proposal ditulis; diperiksa lagi pada siklus berikutnya'); continue; }
         const payloadHash = hashPayload({ projectId: project.id, amount: bid.amount, period: bid.period, description: proposal });
         const claimed = await repository.claimAudit({
@@ -417,18 +412,16 @@ export class FreelancerAutopilot {
         await repository.createDraft(draft);
         await repository.setPipelineStatus(project.id, 'policy_check');
         try {
-          const input: BrowserBidInput = { operation: 'submit_bid', projectId: Number(project.id.replace(/^freelancer:/, '')), amount: bid.amount, period: bid.period, milestonePercentage: 100, description: proposal };
-          const authorize = async () => {
-            const current = await repository.getPolicy();
-            const usage = await repository.bidUsage(this.now(), current.timezone);
-            const decision = evaluatePolicy({ policy: current, project, action: 'bid.submit', confidence: scoreProject(project, current.specializations).score / 100, proposedPrice: bid.amount, dailyUsed: usage.today, weeklyUsed: usage.week, now: this.now(), capability: 'supported', executionMode: 'external' });
-            if (this.stopping || current.simulationOnly || current.version !== activePolicy.version || !decision.allowed) throw new Error('Kebijakan atau status automasi berubah sebelum submit; bid dibatalkan.');
-          };
-          const result = this.dependencies.guardedSubmitBid ? await this.dependencies.guardedSubmitBid(input, authorize) : await this.dependencies.submitBid(input);
+          const input = { operation: 'submit_bid' as const, projectId: Number(project.id.replace(/^freelancer:/, '')), amount: bid.amount, period: bid.period, milestonePercentage: 100, description: proposal };
+          const current = await repository.getPolicy();
+          const usage = await repository.bidUsage(this.now(), current.timezone);
+          const decision = evaluatePolicy({ policy: current, project, action: 'bid.submit', confidence: scoreProject(project, current.specializations).score / 100, proposedPrice: bid.amount, dailyUsed: usage.today, weeklyUsed: usage.week, now: this.now(), capability: this.dependencies.bidCapability?.() ?? 'unknown', executionMode: 'external' });
+          if (this.stopping || current.simulationOnly || current.version !== activePolicy.version || !decision.allowed) throw new Error('Kebijakan atau status automasi berubah sebelum submit; bid dibatalkan.');
+          const result = await this.dependencies.submitBid(input);
           const success = result.statusCode === 200;
           const resultId = result.resultId?.trim();
           const confirmed = success && Boolean(resultId);
-          await repository.appendAudit({ type: 'marketplace.production.submit_bid', resourceId: project.id, status: confirmed ? 'recorded' : success ? 'uncertain' : 'failed', reason: `Bid otomatis melalui ${'transport' in result && result.transport==='browser'?'browser':'API'} menghasilkan HTTP ${result.statusCode}.${resultId ? ` ID hasil: ${resultId}.` : ''}${success && !resultId ? ' ID bid tidak diberikan; hasil perlu direkonsiliasi.' : ''} Isi proposal tidak disimpan pada audit.`, policyVersion: activePolicy.version, payloadHash });
+          await repository.appendAudit({ type: 'marketplace.production.submit_bid', resourceId: project.id, status: confirmed ? 'recorded' : success ? 'uncertain' : 'failed', reason: `Bid otomatis melalui API menghasilkan HTTP ${result.statusCode}.${resultId ? ` ID hasil: ${resultId}.` : ''}${success && !resultId ? ' ID bid tidak diberikan; hasil perlu direkonsiliasi.' : ''} Isi proposal tidak disimpan pada audit.`, policyVersion: activePolicy.version, payloadHash });
           if (confirmed) {
             await repository.setPipelineStatus(project.id, 'submitted', { marketplaceConfirmed: true });
             await repository.recordSubmittedBid({ projectId: project.id, bidId: resultId!, amount: bid.amount, currency: project.currency, submittedAt: runAt.toISOString() });

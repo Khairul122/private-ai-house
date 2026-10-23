@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import type { QueryClient } from '@tanstack/react-query';
 import type { LiveTopic } from '@fvh/domain';
 
@@ -24,7 +24,6 @@ export const TOPIC_QUERY_KEYS: Record<LiveTopic, string[]> = {
   knowledge: ['knowledge', 'knowledge-sync'],
   capabilities: ['capabilities', 'health'],
   'projects-co-id': ['projects-co-id', 'projects-co-id-drafts'],
-  'browser-bidding': ['browser-bidding'],
   operations: ['operations', 'operations-qr'],
   'hermes-kanban': ['hermes-kanban'],
   'office-learning': ['office-learning'],

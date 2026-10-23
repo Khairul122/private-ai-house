@@ -24,8 +24,6 @@ describe('office layout', () => {
     const agents=ROSTER.filter(a=>(a.floor ?? 1)===1 && a.id!=='qa-engineer').map(a=>({...a,state:'idle' as const,room:'lounge' as const,reason:'Fixture',task:null,recentActivity:[]}));
     const spots=spotsFor(agents);
     expect(new Set([...spots.values()].map(s=>s.x+','+s.z)).size).toBe(agents.length);
-    const working=spotsFor(agents.map(a=>a.id==='browser-bid-operator'?{...a,state:'working' as const,room:'workspace' as const}:a));
-    expect(Number.isFinite(working.get('browser-bid-operator')?.x)).toBe(true);
   });
 
   it('keeps shared-room seats stable when agents enter or leave room', () => {
@@ -62,10 +60,6 @@ describe('office layout', () => {
 
   it('mounts every board inside its wall without overlap and with a unique route', () => {
     expect(BOARDS.find(b => b.id === 'projects-co-id')?.route).toBe('/projects-co-id');
-    const scouts = ROSTER.filter(a => ['projects-co-id-scout', 'browser-bid-operator'].includes(a.id)).map(a => ({ ...a, state: 'working' as const, room: 'workspace' as const, reason: '', task: null, recentActivity: [] }));
-    const seats = spotsFor(scouts);
-    expect(new Set([...seats.values()].map(s => `${s.x},${s.z}`)).size).toBe(2);
-    expect(planPath(seats.get('browser-bid-operator')!, seats.get('projects-co-id-scout')!).at(-1)).toEqual([seats.get('projects-co-id-scout')!.x, seats.get('projects-co-id-scout')!.z]);
     expect(new Set(BOARDS.map((board) => board.route)).size).toBe(BOARDS.length);
     for (const floor of [1,2]) for (const wall of [0, Math.PI / 2]) {
       const along = BOARDS.filter((board) => board.rotY === wall && (board.floor ?? 1)===floor).map((board) => (wall === 0 ? board.x : board.z)).sort((a, b) => a - b);

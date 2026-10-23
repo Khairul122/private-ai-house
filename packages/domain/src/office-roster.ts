@@ -13,7 +13,6 @@ export const OFFICE_ROSTER: OfficeEmployee[] = [
   { id: 'compliance-auditor', name: 'Compliance Auditor', role: 'Auditor Kebijakan & Keamanan', color: '#d62828' },
   { id: 'qa-engineer', name: 'QA Engineer', role: 'Verifikator Kontrak & Smoke', color: '#277da1' },
   { id: 'lead-agent', name: 'Lead Agent', role: 'Koordinator Tim AI (Hermes)', color: '#343a40' },
-  { id: 'browser-bid-operator', name: 'Operator Browser Bid', role: 'Pengiriman bid melalui Chrome', color: '#476b68', floor: 1 },
   { id: 'projects-co-id-scout', name: 'Scout projects.co.id', role: 'Cari proyek & siapkan draf projects.co.id', color: '#476b68', floor: 1 },
   ...OPERATIONS_ROSTER,
 ];

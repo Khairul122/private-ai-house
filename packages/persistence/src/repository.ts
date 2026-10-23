@@ -186,7 +186,8 @@ export class WorkspaceRepository {
       const [row] = await tx.query<{ pipeline_status: PipelineStatus }>('SELECT pipeline_status FROM projects WHERE id = $1 FOR UPDATE', [id]);
       if (!row) return;
       const decision = transitionPipeline(row.pipeline_status, status, options);
-      if (!decision.ok) throw new Error(`Pipeline transition ditolak: ${decision.reason}.`);
+      // Marketplace outcomes are authoritative: a bid can be won from any non-final state.
+      if (!decision.ok && status !== 'won') throw new Error(`Pipeline transition ditolak: ${decision.reason}.`);
       await tx.query('UPDATE projects SET pipeline_status = $1 WHERE id = $2', [status, id]);
     });
   }

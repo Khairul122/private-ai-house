@@ -27,8 +27,6 @@ export type ProjectsCoIdStatus = {
   draftUsage: { today: number; week: number; dailyLimit: number; weeklyLimit: number };
   /** Official public channel preview (t.me/s); `ok` is null before the first request. */
   telegram?: { lastCheckedAt: string | null; ok: boolean | null; error: string | null; nextCheckAt: string | null; queued: number };
-  /** Listing + detail page loads in the worker tab within the rolling 30-minute window. */
-  pageBudget?: { used: number; limit: number; nextFreeAt: string | null };
 };
 export type ProjectsCoIdObservation = Pick<ProjectsCoIdStatus, 'username' | 'remaining' | 'checkedAt' | 'pageStatus'> & { challenge: boolean };
 export type ProjectsCoIdListing = { href: string; title: string; description: string; clientName: string; skills: string[]; text: string };

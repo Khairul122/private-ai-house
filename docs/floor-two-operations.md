@@ -43,7 +43,7 @@ Invoice memakai bilangan bulat minor unit ISO 4217. `currencyDigits()` determini
 
 Proposal Hermes mengutamakan solusi, langkah, hasil serah terima, dan pertanyaan relevan. Resolver memeriksa metadata repo GitHub **tanpa token**, dengan cache dan timeout. Hanya repo yang terverifikasi public masuk `publicPortfolio`; tautan lain di teks proposal ditolak. Harga/durasi dan pengecekan kill switch tetap di jalur autopilot. Fallback tetap memberi rencana dan tautan publik yang tersedia, tanpa mengarang pengalaman.
 
-Kuota `BID_LIMIT_EXCEEDED` milik akun Freelancer. Pengiriman dengan Chrome pada akun sama tidak menambah kuota. Worker browser memakai profil khusus dan mematuhi batas yang sama; baca [pengiriman bid melalui Chrome](browser-bidding.md) untuk mode, login dan verifikasinya. Profil Chrome harian tidak disalin atau dikunci oleh aplikasi.
+Kuota `BID_LIMIT_EXCEEDED` milik akun Freelancer. Semua pengiriman bid memakai Freelancer API dan melewati policy engine, kuota, idempotensi, serta audit.
 
 ## Sumber API
 

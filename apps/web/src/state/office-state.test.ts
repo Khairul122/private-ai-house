@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+﻿import { describe, expect, it } from 'vitest';
 import type { AuditEvent, Autopilot, BusinessSyncStatus } from '../api/api.js';
 import { deriveOfficeAgents, summarize } from './office-state.js';
 import type { ProjectsCoIdStatus } from '../api/projects-co-id-api.js';
@@ -92,8 +92,6 @@ describe('office state', () => {
     expect(agent(agents, 'bid-strategist').recentActivity.map((item) => item.type)).toEqual(['bid.created']);
     expect(agent(agents, 'compliance-auditor').recentActivity.map((item) => item.type)).toEqual(['policy.checked']);
     expect(agent(agents, 'chief-of-staff').recentActivity).toHaveLength(3);
-    const browserEvents = [event('browser.mode_changed'), {...event('marketplace.production.submit_bid'), reason:'Bid otomatis melalui API menghasilkan HTTP 200.'}, {...event('marketplace.production.submit_bid'), reason:'Bid otomatis melalui browser menghasilkan HTTP 200.'}];
-    expect(agent(deriveOfficeAgents(autopilot(), browserEvents), 'browser-bid-operator').recentActivity).toEqual([browserEvents[0], browserEvents[2]]);
   });
 
   it('uses business sync, inbox, and deadlines as real signals', () => {
@@ -120,17 +118,10 @@ describe('office state', () => {
     expect(lead({ active: true, reason: '', draftsInProgress: 1 })).toMatchObject({ state: 'working', room: 'workspace', task: 'Menyusun 1 draf proposal.' });
   });
 
-  it('shows browser staff working only from a real browser job', () => {
-    const browser = { mode:'browser' as const,state:'ready' as const,busy:false,reason:'Siap',username:'fixture',remaining:3,checkedAt:new Date().toISOString(),pageStatus:200,lastRunAt:null,lastResult:null };
-    expect(agent(deriveOfficeAgents(autopilot(),[],{browserBidding:browser}),'browser-bid-operator')).toMatchObject({state:'idle',floor:1});
-    expect(agent(deriveOfficeAgents(autopilot(),[],{browserBidding:{...browser,state:'submitting',busy:true}}),'browser-bid-operator')).toMatchObject({state:'working',room:'workspace'});
-    expect(agent(deriveOfficeAgents(autopilot(),[],{browserBidding:{...browser,state:'login_required'}}),'browser-bid-operator')).toMatchObject({state:'offline'});
-    expect(agent(deriveOfficeAgents(autopilot(),[]),'browser-bid-operator')).toMatchObject({state:'unknown'});
-  });
   it('summarizes derived states', () => {
     const agents = deriveOfficeAgents(autopilot({ cycleInProgress: true }), []);
-    expect(summarize(agents)).toEqual({ working: 3, idle: 4, offline: 0, unknown: 14 });
-    expect(summarize(deriveOfficeAgents(undefined, []))).toEqual({ working: 0, idle: 0, offline: 0, unknown: 21 });
+    expect(summarize(agents)).toEqual({ working: 3, idle: 4, offline: 0, unknown: 13 });
+    expect(summarize(deriveOfficeAgents(undefined, []))).toEqual({ working: 0, idle: 0, offline: 0, unknown: 20 });
   });
 
   it('keeps every owner-visible agent state in a safe room', () => {

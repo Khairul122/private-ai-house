@@ -72,16 +72,16 @@ apps/
     app.ts        createApp: Fastify, hook keamanan Host/Origin, header/CSP, konteks bersama, register routes
     routes/       satu register<Domain>Routes per domain: method+path → controller
     controllers/  handler HTTP (validasi zod, panggil repository/service, balasan); shared.ts = AppContext
-    services/     logika bisnis & worker: autopilot, business-sync, operations, projects-co-id, browser-bidding,
+    services/     logika bisnis & worker: autopilot, business-sync, operations, projects-co-id,
                   whatsapp, google-calendar, linkedin-oauth, portfolio, payment-reminders, hermes-kanban
     models/       tipe & parser server (*-types.ts), juga diimpor web
     config/       pembaca .env (ai-env, freelancer-env, linkedin-env, github-env)
-    lib/          infrastruktur: credential-store(.ps1), integration-vault(.ps1), linkedin-api, halaman Playwright
+    lib/          infrastruktur: credential-store(.ps1), integration-vault(.ps1), linkedin-api
     views/        template HTML server (invoice-html)
   web/src/      React 19 + react-router + @tanstack/react-query + three/@react-three/fiber
     App.tsx       tabel route saja; main.tsx = provider + QueryClient
     views/        satu file per halaman/kartu
-    components/   UI bersama (ui.tsx, format.ts, source-filter.tsx) + kartu (BrowserBidding, HermesKanban, WhatsApp)
+    components/   UI bersama (ui.tsx, format.ts, source-filter.tsx) + kartu (HermesKanban, WhatsApp)
     api/          klien fetch + tipe respons (api.ts, *-api.ts, queries.ts)
     state/        logika kantor: office-state, office-layout, owner-motion, owner-input
     office/       OfficeShell (layout + overlay) dan VisualOffice (3D, lazy)
@@ -114,7 +114,7 @@ Nama paket npm: `@fvh/<nama>`. Semua paket diekspor langsung dari `src/index.ts`
 3. **`FreelancerAutopilot`** (`services/autopilot.ts`): siklus tiap `scanIntervalMinutes` kebijakan (5 menit sejak 20 Okt 2026). Per siklus: 1 pencarian `jobs[]` (skill profil yang cocok, `from_time`) + maks. 2 kata kunci bergilir. HTTP 429 → interval ×2 (maks ×8), kembali normal setelah sukses.
 4. **`BusinessSync`** (`services/business-sync.ts`): **read-only**, terlepas dari status kebijakan. Pesan klien tiap 1 menit (satu panggilan threads `last_message` + `from_updated_time`), sapuan penuh 30 thread tiap 30 menit; hasil bid tiap 5 menit. 429 → backoff per job; hasil parsial tetap disimpan; header `RateLimit-*` tampil di status.
 5. **`createApp`** (`app.ts`): hook keamanan, header CSP, lalu route per domain dari `routes/` (handler di `controllers/`).
-6. **`ProjectsCoIdService`** (`projects-co-id.ts`): worker Chrome read-only, maksimum tiga halaman daftar/detail tiap 30 menit (penghitung bersama `pageBudget`); proyek baru dideteksi tiap 1 menit dari kanal Telegram publik `t.me/s/lowongankerjafreelance` lalu detailnya dibuka dalam batas itu; mode `off/scan-only/drafts`. Pencarian dari bidang (`PROJECTS_CO_ID_FIELDS`, termasuk AI), kata kunci dan skill profil di Kebijakan; tiga pencarian per scan, bergiliran. Hermes membuat draf Bahasa Indonesia dengan harga IDR deterministik dan `author` tercatat; pemilik mengirim sendiri. Baca `docs/projects-co-id.md` sebelum mengubah worker, guard proposal, kuota atau penandaan sumber ini. Tidak ada mode submit.
+6. **`ProjectsCoIdService`** (`projects-co-id.ts`): pemindaian eksternal dinonaktifkan. Data proyek tersimpan, draf Hermes/template, dan aksi pemilik tetap tersedia. Tidak ada pembacaan listing baru atau mode submit.
 
 ### 5.1 Siklus autopilot
 1. `start()`: baca profil Freelancer; **isi profil lokal dari Freelancer hanya sekali** (saat `specializations` lokal kosong). Bootstrap kebijakan bila belum aktif (kecuali dijeda).
@@ -167,9 +167,9 @@ Pengecualian pemilik 19 Oktober 2026: proyek `projects_co_id` boleh `submitted` 
 |---|---|
 | `GET /api/health` | Mode, status AI (`ai: hermes/disabled`), autopilot |
 | `GET /api/autopilot` | `state, lastRunAt, nextRunAt, lastMessage, cycleInProgress, draftsInProgress, …` |
-| `GET /api/browser-bidding` · `PUT /api/browser-bidding/mode` · `POST /api/browser-bidding/open` · `/check` · `/close` | Worker Playwright tersambung ke Chrome berprofil pemilik melalui izin debugging; mode API, fallback 401/403/429, atau browser. Tidak ada submit bebas. Baca `docs/browser-bidding.md`. |
+
 | `GET /api/hermes-kanban` · `GET /api/hermes-kanban/tasks/:id` · `POST /api/hermes-kanban/tasks` | Board Hermes `fvh-house` lewat CLI `hermes kanban`. Kartu baru hanya untuk profil `fvh-*`; body memuat snapshot data aplikasi (dibaca dari route GET aplikasi sendiri) bila `includeData`. Aktif hanya bila Hermes + consent aktif. |
-| `GET /api/projects-co-id` · `/drafts` · `PUT /mode` · `POST /open`, `/check`, `/close`, `/scan` · `POST /projects/:id/draft`, `/mark-sent`, `/skip`, `/won` | Prefix semua route `/api/projects-co-id`. Worker read-only; aksi penandaan memerlukan `confirm: true`. Tidak menerima URL/selector/skrip atau submit bebas. |
+| `GET /api/projects-co-id` · `/drafts` · `POST /projects/:id/draft`, `/mark-sent`, `/skip`, `/won` | Prefix route `/api/projects-co-id`. Pemindaian eksternal nonaktif; data tersimpan, draf, dan aksi pemilik tetap tersedia. Aksi penandaan memerlukan `confirm: true`. |
 | `GET /api/business-sync` | Status BusinessSync (null jika tidak tersedia) |
 | `GET /api/dashboard` | Hitungan, kebijakan, `bidUsage {today, week}` (zona waktu kebijakan), `externalWrites` |
 | `GET /api/insights/bids` | Hasil bid (`winRate` null bila belum ada keputusan), alasan skip, waktu cek terakhir |

@@ -2,7 +2,7 @@ import type { Query } from '@tanstack/react-query';
 
 const CARD_QUERIES: Record<string, string[]> = {
   '/overview': ['dashboard', 'projects', 'autopilot', 'inbox', 'work'],
-  '/agents': ['dashboard', 'autopilot', 'profile', 'capabilities', 'business-sync', 'inbox', 'work', 'activity', 'operations', 'knowledge-sync', 'browser-bidding', 'projects-co-id', 'hermes-kanban', 'office-learning'],
+  '/agents': ['dashboard', 'autopilot', 'profile', 'capabilities', 'business-sync', 'inbox', 'work', 'activity', 'operations', 'knowledge-sync', 'projects-co-id', 'hermes-kanban', 'office-learning'],
   '/tasks': ['pipeline', 'hermes-kanban'],
   '/calendar': ['operations', 'autopilot', 'agenda', 'projects', 'policy', 'dashboard', 'work'],
   '/opportunities': ['projects', 'draft', 'autopilot'],
@@ -13,8 +13,8 @@ const CARD_QUERIES: Record<string, string[]> = {
   '/policy': ['policy', 'policy-presets', 'autopilot'],
   '/knowledge': ['knowledge', 'knowledge-sync', 'capabilities'],
   '/activity': ['activity'],
-  '/capabilities': ['capabilities', 'autopilot', 'browser-bidding', 'activity'],
-  '/operations': ['operations', 'operations-qr', 'browser-bidding'],
+  '/capabilities': ['capabilities', 'autopilot', 'activity'],
+  '/operations': ['operations', 'operations-qr'],
   '/projects-co-id': ['projects-co-id', 'projects-co-id-drafts', 'policy'],
 };
 

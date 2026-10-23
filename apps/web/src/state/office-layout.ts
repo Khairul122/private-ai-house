@@ -12,7 +12,6 @@ const POD_ZS = [-9.5, -3, 3.5];
 export const LEAD_ID = 'lead-agent';
 // The lead has its own desk (LEAD_DESK); the other nine agents fill the 3×3 pod grid.
 export const PODS = ROSTER.filter((entry) => entry.id !== LEAD_ID && !entry.floor).map((entry, i) => ({ ...entry, x: POD_XS[i % 3]!, z: POD_ZS[Math.floor(i / 3)]! }));
-export const BROWSER_DESK = {x:-16,z:9.2};
 export const PROJECTS_CO_ID_DESK = { x: -12.5, z: 9.2 };
 export const MANAGER_DESK = {x:-9,z:9.2};
 export const FLOOR_TWO_PODS = PODS.map((pod,index)=>{const entry=ROSTER.filter(a=>a.floor===2 && a.id!=='delivery-manager')[index];return {...pod,...(entry ?? {id:`vacant-${index}`,name:'Meja tersedia',role:'Belum ditempati',color:'#8b928e'})};});
@@ -59,7 +58,6 @@ LOBBY_SLOTS.push({x:-7.5,z:7.7,y:0,facing:0,seated:false,via:[[SPINE_X,6.75],[-7
 
 function podSeat(id: string): Spot {
   if (id === 'projects-co-id-scout') return { x: PROJECTS_CO_ID_DESK.x, z: PROJECTS_CO_ID_DESK.z - 1, y: 0.5, facing: 0, seated: true, via: [[SPINE_X, 6.75], [PROJECTS_CO_ID_DESK.x + 1.6, 6.75], [PROJECTS_CO_ID_DESK.x + 1.6, PROJECTS_CO_ID_DESK.z - 1]] };
-  if(id==='browser-bid-operator') return {x:BROWSER_DESK.x,z:BROWSER_DESK.z-1,y:0.5,facing:0,seated:true,via:[[SPINE_X,6.75],[BROWSER_DESK.x+1.8,6.75],[BROWSER_DESK.x+1.8,BROWSER_DESK.z-1]]};
   if(id==='floor-one-manager') return {x:MANAGER_DESK.x,z:MANAGER_DESK.z-1,y:0.5,facing:0,seated:true,via:[[SPINE_X,corridorZ(POD_ZS[2]!)],[MANAGER_DESK.x+1.8,corridorZ(POD_ZS[2]!)],[MANAGER_DESK.x+1.8,MANAGER_DESK.z-1]]};
   if (id === LEAD_ID || id==='delivery-manager') return { x: LEAD_DESK.x, z: LEAD_DESK.z - 1, y: 0.5, facing: 0, seated: true, via: [[SPINE_X, corridorZ(POD_ZS[2]!)], [LEAD_DESK.x + 1.8, corridorZ(POD_ZS[2]!)], [LEAD_DESK.x + 1.8, LEAD_DESK.z - 1]] };
   const pod = [...PODS,...FLOOR_TWO_PODS].find((entry) => entry.id === id)!;

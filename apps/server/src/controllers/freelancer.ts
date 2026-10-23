@@ -1,6 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { FreelancerReadError, FreelancerSandboxWriteError, FreelancerWriteError } from '@fvh/adapter-freelancer';
+import { FreelancerReadError, FreelancerSandboxWriteError } from '@fvh/adapter-freelancer';
 import type { FreelancerSandboxWriteInput, FreelancerWriteOperation } from '@fvh/adapter-freelancer';
 import { hashPayload } from '@fvh/application';
 import type { WorkspaceRepository } from '@fvh/persistence';
@@ -39,7 +39,7 @@ export async function readProductionWriteChecks(repository: WorkspaceRepository)
   return checks;
 }
 
-export function freelancerController({ options, repository, now, state, freelancerSandboxWriteChecks, freelancerProductionWriteChecks }: AppContext) {
+export function freelancerController({ options, repository, now, state, freelancerSandboxWriteChecks }: AppContext) {
   return {
     verify: async (_request: FastifyRequest, reply: FastifyReply) => {
       const credentialStatus = options.getCredentialStatus?.() ?? options.credentialStatus;

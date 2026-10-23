@@ -2,7 +2,7 @@ import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { BOARD_SIZE, BOARDS, FLOOR, FLOOR_TWO_PODS, BROWSER_DESK, PROJECTS_CO_ID_DESK, LEAD_DESK, LIFT, liftDoorReached, LEAD_ID, MANAGER_DESK, OWNER_SPOT, PODS, POD_SIZE, spotsFor, ZONES, type BoardId, type BoardSlot, type dayPhase, type P2, type Spot } from '../state/office-layout.js';
+import { BOARD_SIZE, BOARDS, FLOOR, FLOOR_TWO_PODS, PROJECTS_CO_ID_DESK, LEAD_DESK, LIFT, liftDoorReached, LEAD_ID, MANAGER_DESK, OWNER_SPOT, PODS, POD_SIZE, spotsFor, ZONES, type BoardId, type BoardSlot, type dayPhase, type P2, type Spot } from '../state/office-layout.js';
 import type { OfficeAgent } from '../state/office-state.js';
 import type { OfficeLearningStatus } from '../../../server/src/models/office-learning-types.js';
 import type { OwnerInput } from '../state/owner-input.js';
@@ -307,7 +307,6 @@ function Building({ agents, phase, floor }: { agents: OfficeAgent[]; phase: Phas
     <WallPanel p={[maxX - 0.35, 2.05, -5.2]} rotY={Math.PI / 2} color="#6c806f" />
     <Lounge /><Pantry /><Lobby />
     <LeadDesk active={agents.some((agent) => agent.id === (floor===1?LEAD_ID:'delivery-manager') && agent.room === 'workspace')} />
-    <group position={[BROWSER_DESK.x,0,BROWSER_DESK.z]}><B p={[0,0.75,0]} s={[2.8,0.12,1]} c="#67523f"/><B p={[0,0.36,0]} s={[0.15,0.72,0.8]} c="#343a40"/><Chair p={[0,0,-0.95]}/></group>
     <group position={[PROJECTS_CO_ID_DESK.x, 0, PROJECTS_CO_ID_DESK.z]}><B p={[0,0.75,0]} s={[2.8,0.12,1]} c="#67523f"/><B p={[0,0.36,0]} s={[0.15,0.72,0.8]} c="#343a40"/><Chair p={[0,0,-0.95]}/></group>
     <group position={[MANAGER_DESK.x,0,MANAGER_DESK.z]}><B p={[0,0.75,0]} s={[2.8,0.12,1]} c="#67523f"/><B p={[0,0.36,0]} s={[0.15,0.72,0.8]} c="#343a40"/><Chair p={[0,0,-0.95]}/></group>
     {[[-24, 0, -8], [-25, 0, 6], [maxX + 5, 0, -10], [maxX + 6, 0, 4], [-8, 0, 18], [6, 0, 19], [maxX + 4, 0, 16]].map((p, i) => <Tree key={i} p={p as V3} s={0.9 + (i % 3) * 0.2} />)}

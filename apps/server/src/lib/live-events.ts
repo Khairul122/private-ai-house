@@ -1,4 +1,4 @@
-import type { LiveTopic } from '@fvh/domain';
+﻿import type { LiveTopic } from '@fvh/domain';
 import type { Database, Queryable } from '@fvh/persistence';
 
 export type { LiveTopic };
@@ -145,7 +145,6 @@ const ROUTE_TOPICS: Array<[prefix: string, topics: LiveTopic[]]> = [
   ['/api/freelancer', ['capabilities', 'pipeline', 'dashboard']],
   ['/api/linkedin', ['capabilities', 'knowledge']],
   ['/api/integrations', ['capabilities', 'operations']],
-  ['/api/browser-bidding', ['browser-bidding', 'autopilot']],
   ['/api/operations', ['operations', 'work']],
   ['/api/hermes-kanban', ['hermes-kanban']],
   ['/api/office-learning', ['office-learning']],
