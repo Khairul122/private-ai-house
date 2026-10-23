@@ -588,10 +588,10 @@
     "semantic_hash": "c21c5d6ae42f1d30f4047262d73b814a"
   },
   "apps/web/src/components/HermesKanbanCard.tsx": {
-    "mtime": 1792445978.4161806,
-    "seen": 1792488322.787555,
-    "ast_hash": "bc6dded6d6b5c041f841773b4f4b679d",
-    "semantic_hash": "bc6dded6d6b5c041f841773b4f4b679d"
+    "mtime": 1792746661.7642367,
+    "seen": 1792746938.3381374,
+    "ast_hash": "6365fb6b57b589c61fb74a0e3715104e",
+    "semantic_hash": ""
   },
   "apps/web/src/components/WhatsAppStatus.tsx": {
     "mtime": 1792445977.8676438,
@@ -630,15 +630,15 @@
     "semantic_hash": "89efe558826bc24bdbbcd7aa93516e39"
   },
   "apps/web/src/office/OfficeShell.tsx": {
-    "mtime": 1792706635.8037343,
-    "seen": 1792723279.452989,
-    "ast_hash": "ae653d32f706a0aacb9695875f28017a",
+    "mtime": 1792746656.0213783,
+    "seen": 1792746938.3381658,
+    "ast_hash": "e40f8f065d915faadd25b902069be4ed",
     "semantic_hash": ""
   },
   "apps/web/src/office/VisualOffice.tsx": {
-    "mtime": 1792734217.2642665,
-    "seen": 1792739371.352338,
-    "ast_hash": "6a932e8fb7c8df29a5a48bde999e416d",
+    "mtime": 1792746058.2850144,
+    "seen": 1792746938.3381677,
+    "ast_hash": "be7f313686d1ecde875bee7e3672ed1c",
     "semantic_hash": ""
   },
   "apps/web/src/state/office-layout.test.ts": {
@@ -648,9 +648,9 @@
     "semantic_hash": ""
   },
   "apps/web/src/state/office-layout.ts": {
-    "mtime": 1792703834.0064182,
-    "seen": 1792723279.4529958,
-    "ast_hash": "c49c1d38459d806bc325faabf001d1b4",
+    "mtime": 1792746164.3770537,
+    "seen": 1792746938.3381827,
+    "ast_hash": "b49f891f184f1f857cbfe1e2344f1a76",
     "semantic_hash": ""
   },
   "apps/web/src/state/office-state.test.ts": {
@@ -876,9 +876,9 @@
     "semantic_hash": ""
   },
   "packages/adapter-hermes/src/index.ts": {
-    "mtime": 1792741094.99226,
-    "seen": 1792741341.2263336,
-    "ast_hash": "88ba4a57ffc4b9ce38988f4127475366",
+    "mtime": 1792742077.922969,
+    "seen": 1792746938.3382723,
+    "ast_hash": "138de424bcdfcb1fc8896d589d37e3cd",
     "semantic_hash": ""
   },
   "packages/adapter-hermes/tsconfig.json": {
@@ -1272,9 +1272,9 @@
     "semantic_hash": ""
   },
   "apps/web/src/office/OfficeAgent.tsx": {
-    "mtime": 1792566868.1891868,
-    "seen": 1792582105.0497742,
-    "ast_hash": "d2e26a8499d3d58ddd27a7046c7a60e4",
+    "mtime": 1792746058.2817607,
+    "seen": 1792746938.338159,
+    "ast_hash": "93ce6cbfb99a0cc46e2a8ee654ca9fc0",
     "semantic_hash": ""
   },
   "apps/web/src/office/OfficeEnvironment.tsx": {
@@ -1290,15 +1290,15 @@
     "semantic_hash": ""
   },
   "apps/web/src/state/office-life.ts": {
-    "mtime": 1792552243.2886744,
-    "seen": 1792582105.0506618,
-    "ast_hash": "6a2fd8578bb390fa9cab891b2d8adfa4",
+    "mtime": 1792746121.9924545,
+    "seen": 1792746938.3381865,
+    "ast_hash": "2f3c58eb0181bd09e3a9f46ca9897eb5",
     "semantic_hash": ""
   },
   "apps/server/src/controllers/office-learning.ts": {
-    "mtime": 1792552299.6470344,
-    "seen": 1792582105.03419,
-    "ast_hash": "c7fbaf15ea3c4b4f78b2e7b45f51dd04",
+    "mtime": 1792742330.7757304,
+    "seen": 1792746938.3379283,
+    "ast_hash": "0ba860b02583d40b8612e084c6bed298",
     "semantic_hash": ""
   },
   "apps/server/src/models/office-learning-types.ts": {
@@ -1320,21 +1320,21 @@
     "semantic_hash": ""
   },
   "apps/server/src/services/office-learning.ts": {
-    "mtime": 1792732652.7659643,
-    "seen": 1792739371.3522356,
-    "ast_hash": "36a732af32b0bcb8aae5cf0aa73964cf",
+    "mtime": 1792742258.7672231,
+    "seen": 1792746938.3380606,
+    "ast_hash": "e99dfa9fa08db0b2a86d992d3a3a598c",
     "semantic_hash": ""
   },
   "apps/web/src/components/OfficeLearningCard.tsx": {
-    "mtime": 1792566689.889662,
-    "seen": 1792582105.048555,
-    "ast_hash": "bff9d2ee142cdc10b00d1490bea5068c",
+    "mtime": 1792745974.3321922,
+    "seen": 1792746938.3381395,
+    "ast_hash": "43b4b528c1b47cee00a0ed70449140fb",
     "semantic_hash": ""
   },
   "apps/web/src/state/office-life.test.ts": {
-    "mtime": 1792558796.6738563,
-    "seen": 1792582105.0506556,
-    "ast_hash": "8f4ee6d04769f57f03573f78ec7c362f",
+    "mtime": 1792746483.1740851,
+    "seen": 1792746938.3381846,
+    "ast_hash": "3a9040939cce8739b5c2b0466a0b421d",
     "semantic_hash": ""
   },
   "packages/adapter-hermes/src/office-discussion.test.ts": {
@@ -1383,6 +1383,24 @@
     "mtime": 1792730940.5968165,
     "seen": 1792739371.3525395,
     "ast_hash": "edb8c0675261b8f15bed82e89bcee354",
+    "semantic_hash": ""
+  },
+  "apps/web/src/state/office-interaction.test.ts": {
+    "mtime": 1792746123.1611285,
+    "seen": 1792746938.3381755,
+    "ast_hash": "e78a357dfeb43172875bc0f46e30f66b",
+    "semantic_hash": ""
+  },
+  "apps/web/src/state/office-interaction.ts": {
+    "mtime": 1792746161.4145834,
+    "seen": 1792746938.3381782,
+    "ast_hash": "47d940a4e62307e253def2182e63e62a",
+    "semantic_hash": ""
+  },
+  ".playwright-mcp/page-2026-10-23T09-04-35-986Z.yml": {
+    "mtime": 1792746275.9902904,
+    "seen": 1792746938.338393,
+    "ast_hash": "a816275aac2da48a48379c876fc50a29",
     "semantic_hash": ""
   }
 }

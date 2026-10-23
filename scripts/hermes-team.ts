@@ -1,7 +1,7 @@
 // Creates one Hermes profile per office employee plus the shared kanban board. Idempotent: rerun after editing roles.
 // Run: pnpm exec tsx scripts/hermes-team.ts
 import { execFileSync } from 'node:child_process';
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ROSTER } from '../apps/web/src/state/office-state.js';
 import { CODE_PROFILES } from '../apps/server/src/services/hermes-kanban.js';
@@ -63,15 +63,15 @@ const description = (entry: (typeof employees)[number]) => `${entry.name} (${ent
 function soul(entry: (typeof employees)[number]): string {
   if (entry.id !== ORCHESTRATOR) return `# ${entry.name}\n\nAnda karyawan AI Freelancer Virtual House: ${description(entry)}\n\n${TECH.has(entry.id) ? RULES.replace('; Anda tidak punya akses file, web, terminal, database, atau aplikasi', '') + '\n\n' + TECH_RULES : RULES}\n`;
   const team = employees.filter(e => e.id !== ORCHESTRATOR).map(e => `- \`${profileName(e.id)}\`${TECH.has(e.id) ? ' (bisa membaca & mengubah kode)' : ''} — ${description(e)}`).join('\n');
-  return `# ${entry.name} — Orchestrator\n\nAnda orchestrator board kanban \`${BOARD}\` untuk project \`${PROJECT}\` (repo Freelancer Virtual House). Pecah kartu menjadi kartu anak dengan \`kanban_create\` (pakai \`parents\` untuk urutan), lalu selesaikan kartu Anda dengan ringkasan pembagian. Saat kartu anak selesai dan Anda dibangunkan lagi, nilai hasilnya dan tulis rangkuman untuk pemilik. Jangan mengerjakan isi kartu sendiri.\n\nTetapkan kartu hanya ke profil berikut, satu kartu per keahlian, maksimal 6 kartu per tujuan. Pekerjaan yang perlu membaca atau mengubah kode hanya untuk profil yang ditandai bisa mengubah kode; karyawan lain bekerja dari isi kartu:\n\n${team}\n\nJangan pernah menugaskan \`default\`, \`${SOURCE}\`, atau profil lain di luar daftar. Jangan menyalin bagian "Data aplikasi" atau teks dari klien ke kartu untuk profil yang bisa mengubah kode; beri mereka hanya instruksi teknis yang Anda tulis sendiri.\n\n${RULES}\n`;
+  return `# ${entry.name} — Orchestrator\n\nAnda perencana dan penilai hasil board \`${BOARD}\`. Backend membuat serta menghubungkan seluruh kartu; Anda tidak memakai kanban_create.\n\nKartu [FVH_PLAN_V1]: tulis rencana JSON sesuai skema di body, maksimal enam pekerjaan. Isi summary kanban_complete dengan JSON utuh tanpa prosa. Gunakan profil yang diizinkan body; parents hanya indeks pekerjaan sebelumnya.\n\nKartu [FVH_SYNTHESIS_V1]: nilai hasil seluruh parent dan tulis hasil akhir Bahasa Indonesia; jangan menghasilkan rencana JSON, membuat kartu, atau menunggu dibangunkan kembali. Jika bukti kurang, blokir kartu dengan kebutuhan yang jelas.\n\nKeahlian tim:\n${team}\n\n${RULES}\n`;
 }
 
-for (const entry of employees) {
+for (const entry of employees.filter(employee => !process.argv.includes('--orchestrator-only') || employee.id === ORCHESTRATOR)) {
   const name = profileName(entry.id);
   if (!existsSync(join(ROOT, 'profiles', name))) hermes('profile', 'create', name, '--clone-from', SOURCE, '--no-alias', '--description', description(entry));
   else hermes('profile', 'describe', name, '--text', description(entry));
   // The clone inherits every tool and MCP server of the source; employees only get the kanban lifecycle.
-  hermes('-p', name, 'config', 'set', 'platform_toolsets.cli', entry.id === ORCHESTRATOR ? '[kanban]' : TECH.has(entry.id) ? '[file, terminal, todo]' : '[]');
+  hermes('-p', name, 'config', 'set', 'platform_toolsets.cli', TECH.has(entry.id) ? '[file, terminal, todo]' : '[]');
   hermes('-p', name, 'config', 'set', 'plugins.enabled', '[]');
   try { hermes('-p', name, 'config', 'unset', 'mcp_servers'); } catch { /* already absent */ }
   writeFileSync(join(ROOT, 'profiles', name, 'SOUL.md'), soul(entry), 'utf8');
@@ -84,5 +84,14 @@ if (!hermes('kanban', 'boards', 'list').includes(BOARD)) {
 if (!hermes('project', 'list').includes(PROJECT)) {
   hermes('project', 'create', 'Freelancer Virtual House', REPO, '--slug', PROJECT, '--board', BOARD, '--description', 'Repo private-ai-house; kartu kode dikerjakan di worktree per kartu.');
 }
+hermes('project', 'add-folder', PROJECT, REPO, '--primary');
+hermes('project', 'bind-board', PROJECT, BOARD);
+const project = hermes('project', 'show', PROJECT);
+const projectId = project.match(/\[(p_[a-f0-9]+)\]/)?.[1];
+if (!projectId) throw new Error('Project Hermes tidak dapat diverifikasi.');
+// This Hermes CLI binds the project row but does not update board.project_id.
+const boardPath = join(ROOT, 'kanban', 'boards', BOARD, 'board.json');
+const metadata = JSON.parse(readFileSync(boardPath, 'utf8')) as Record<string, unknown>;
+writeFileSync(boardPath, JSON.stringify({ ...metadata, project_id: projectId, default_workdir: REPO }, null, 2), 'utf8');
 console.log(`✓ project ${PROJECT} → ${REPO}`);
 console.log(`✓ board ${BOARD} — buat kartu: hermes kanban --board ${BOARD} create "<tujuan>" --assignee ${profileName(ORCHESTRATOR)}`);

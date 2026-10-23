@@ -12,4 +12,7 @@ export function registerHermesKanbanRoutes(app: FastifyInstance, kanban: HermesK
   app.get('/api/hermes-kanban', c.status);
   app.get('/api/hermes-kanban/tasks/:id', c.detail);
   app.post('/api/hermes-kanban/tasks', c.create);
+  app.post('/api/hermes-kanban/tasks/:id/recover', c.recover);
+  app.addHook('onReady', async () => { kanban?.start(); });
+  app.addHook('onClose', async () => { kanban?.stop(); });
 }

@@ -32,11 +32,17 @@ export const projectsCoIdSettingsSchema = z.object({
 export const projectsCoIdModeSchema = z.object({ mode: z.enum(['off', 'scan-only', 'drafts']) }).strict();
 export const projectsCoIdOwnerActionSchema = z.object({ confirm: z.literal(true) }).strict();
 export const hermesKanbanTaskSchema = z.object({
+  requestId: z.string().uuid().optional(),
   title: z.string().trim().min(3).max(200).regex(/^[^-]/, 'Judul tidak boleh diawali tanda minus.'),
   goal: z.string().trim().max(4000).default(''),
   assignee: z.string().regex(/^fvh-[a-z0-9-]{1,60}$/),
   includeData: z.boolean().default(true),
 }).strict();
+
+export const hermesKanbanRecoverySchema = z.object({
+  message: z.string().trim().max(4000).default(''),
+  resume: z.boolean().default(false),
+}).strict().refine(input => input.resume || input.message.length > 0, 'Tulis komentar atau pilih lanjutkan.');
 
 export const updatePolicySchema = z.object({
   projectsCoId: projectsCoIdSettingsSchema.optional(),

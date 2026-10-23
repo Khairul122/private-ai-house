@@ -1,7 +1,7 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { hermesKanbanTaskSchema } from '@fvh/contracts';
+import { hermesKanbanTaskSchema, hermesKanbanRecoverySchema } from '@fvh/contracts';
 import { CODE_PROFILES, type HermesKanban } from '../services/hermes-kanban.js';
 
 const CONTEXT_LIMIT = 12_000;
@@ -56,18 +56,28 @@ export function hermesKanbanController(app: FastifyInstance, kanban: HermesKanba
       try { return await kanban.detail(params.data.id); } catch { return reply.code(404).send({ error: 'Kartu tidak ditemukan atau tidak dapat dibaca.' }); }
     },
 
+    recover: async (req: FastifyRequest, reply: FastifyReply) => {
+      const params = idParams.safeParse(req.params);
+      const input = hermesKanbanRecoverySchema.safeParse(req.body);
+      if (!kanban) return reply.code(503).send({ error: 'Kanban Hermes tidak aktif.' });
+      if (!params.success || !input.success) return reply.code(400).send({ error: 'ID atau jawaban pemulihan tidak valid.' });
+      try { await kanban.recover(params.data.id, input.data.message, input.data.resume); return { ok: true }; }
+      catch (error) { return reply.code(error instanceof Error && error.message === 'not_recoverable' ? 409 : 502).send({ error: 'Kartu tidak dapat dipulihkan. Muat ulang status; hanya kartu diblokir atau terjadwal yang dapat dilanjutkan.' }); }
+    },
+
     create: async (req: FastifyRequest, reply: FastifyReply) => {
       if (!kanban) return reply.code(503).send({ error: 'Kanban Hermes tidak aktif. Hermes dan persetujuan data harus aktif.' });
       const input = hermesKanbanTaskSchema.safeParse(req.body);
       if (!input.success) return reply.code(400).send({ error: 'Kartu tidak valid.', issues: input.error.issues.map(i => `${i.path.join('.')}: ${i.message}`) });
       if (input.data.includeData && CODE_PROFILES.includes(input.data.assignee)) return reply.code(400).send({ error: 'Karyawan dengan akses kode tidak menerima snapshot data aplikasi. Matikan lampiran data atau pilih karyawan lain.' });
       const body = [input.data.goal || input.data.title, ...(input.data.includeData ? ['', await applicationSnapshot(app, now())] : [])].join('\n');
-      const key = createHash('sha256').update(JSON.stringify([input.data.title, input.data.goal, input.data.assignee, input.data.includeData])).digest('hex').slice(0, 32);
+      const key = createHash('sha256').update(JSON.stringify([input.data.requestId ?? randomUUID(), input.data.title, input.data.goal, input.data.assignee, input.data.includeData])).digest('hex').slice(0, 32);
       try { return reply.code(201).send(await kanban.create({ title: input.data.title, body, assignee: input.data.assignee, key })); }
       catch (error) {
         const code = error instanceof Error ? error.message : '';
         if (code === 'unknown_assignee') return reply.code(400).send({ error: 'Karyawan tidak ada di tim Hermes.' });
         if (code === 'unavailable') return reply.code(503).send({ error: 'Kanban Hermes tidak dapat dibaca. Periksa instalasi Hermes.' });
+        if (code === 'workspace_unverified') return reply.code(502).send({ error: 'Worktree kode belum terverifikasi. Periksa project Hermes fvh dan board sebelum melanjutkan.' });
         return reply.code(502).send({ error: 'Hasil pembuatan kartu tidak pasti. Periksa board; mengulang permintaan yang sama tidak membuat kartu ganda.' });
       }
     },

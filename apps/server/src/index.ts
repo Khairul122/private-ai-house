@@ -126,15 +126,17 @@ const googleCalendar = new GoogleCalendarService(integrationVault,new Operations
 const operations = new OperationsService({repository,messenger:whatsapp,calendar:googleCalendar,...(drafting?{review:(facts:string[])=>drafting.reviewOperations(facts)}:{})});
 const hasWebBuild = existsSync(webBuild);
 const hermesKanban = hermesEnabled ? new HermesKanban(hermesKanbanRunner(draftingConfig.executable)) : undefined;
+let discussionActive = false;
 const officeLearning = drafting ? new OfficeLearningService({
   repository, employees: OFFICE_ROSTER,
   discuss: input => drafting.discussOffice(input),
   available: () => hermesEnabled,
+  onSessionStateChange: active => { discussionActive = active; },
   busy: () => {
     const board = hermesKanban?.peek();
     // A stale or failed board read is unknown, not busy: refresh it without freezing the schedule.
     if (hermesKanban && (!board || Date.now() - Date.parse(board.checkedAt) > 60_000)) void hermesKanban.status();
-    return discussionBlocked(drafting.workInProgress, board?.available === true ? board.tasks.filter(task => task.status === 'running').length : 0);
+    return discussionBlocked(drafting.workInProgress, board?.available === true ? board.tasks.filter(task => task.status === 'running').length : 0, discussionActive);
   },
 }) : undefined;
 if (officeLearning) live.watch(['office-learning'], () => officeLearning.peek());

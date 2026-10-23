@@ -37,8 +37,8 @@ export const TOPICS = [
  * running kanban cards. Autopilot scans, BusinessSync and projects.co.id reads are HTTP-only, so
  * including them starved every session while autopilot ran.
  */
-export function discussionBlocked(hermesWork: number, runningCards: number): boolean {
-  return hermesWork > 0 || runningCards > 0;
+export function discussionBlocked(hermesWork: number, runningCards: number, discussionActive = false): boolean {
+  return hermesWork > 0 || runningCards > 0 || discussionActive;
 }
 
 export class OfficeLearningService {
@@ -58,6 +58,7 @@ export class OfficeLearningService {
     employees: readonly Employee[];
     available: () => boolean;
     busy: () => boolean;
+    onSessionStateChange?: (active: boolean) => void;
     now?: () => Date;
   }) { this.store = new OfficeLearningRepository(options.repository.sql); }
 
@@ -138,10 +139,12 @@ export class OfficeLearningService {
     this.state.sessions = [session, ...this.state.sessions].slice(0, 60);
     this.state.nextRunAt = new Date(this.now().getTime() + INTERVAL).toISOString();
     try {
+      // Reserve Hermes for both turns; another worker must not interrupt between speakers.
+      this.options.onSessionStateChange?.(true);
       // Persist the quota reservation before any provider call so a restart cannot create free retries.
       await this.store.save(this.state);
       for (const [employee, colleague] of [[first, second], [second, first]] as const) {
-        if (this.stopping || !this.state.enabled || !this.options.available() || this.options.busy()) throw new Error('interrupted');
+        if (this.stopping || !this.state.enabled || !this.options.available()) throw new Error('interrupted');
         this.phase = session.turns.length ? 'discussing' : 'learning';
         this.speaker = employee.id;
         const output = officeDiscussionOutputSchema.parse(await this.options.discuss({
@@ -159,6 +162,7 @@ export class OfficeLearningService {
     } catch {
       session.state = 'failed'; session.error = 'Diskusi tidak selesai; pekerjaan aktif, jeda, atau gangguan Hermes.'; this.phase = 'error';
     } finally {
+      this.options.onSessionStateChange?.(false);
       session.completedAt = this.now().toISOString(); this.speaker = null;
       try { await this.store.save(this.state); }
       catch { this.storageError = true; }

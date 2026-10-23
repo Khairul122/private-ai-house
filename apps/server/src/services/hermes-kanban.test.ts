@@ -13,7 +13,8 @@ function fakeRunner(calls: string[][], bodies: string[] = []): HermesKanbanRunne
     calls.push(args);
     if (args[0] === 'list') return list;
     if (args[0] === 'assignees') return assignees;
-    if (args[0] === 'create') { bodies.push(readFileSync(args[args.indexOf('--body-file') + 1]!, 'utf8')); return JSON.stringify({ id: 't_cc33dd44', title: args[1], assignee: args[args.indexOf('--assignee') + 1], status: 'ready' }); }
+    if (args[0] === '@gateway') return 'Gateway is running';
+    if (args[0] === 'create') { bodies.push(readFileSync(args[args.indexOf('--body-file') + 1]!, 'utf8')); return JSON.stringify({ id: 't_cc33dd44', title: args[1], assignee: args[args.indexOf('--assignee') + 1], status: 'ready', workspace_kind: args.includes('--project') ? 'worktree' : 'scratch', project_id: args.includes('--project') ? 'fvh' : null }); }
     if (args[0] === 'show') return JSON.stringify({ latest_summary: 'Selesai.', children: ['t_ee55ff66'], runs: [{ profile: 'fvh-market-scout', outcome: 'completed', summary: 'Tiga peluang cocok.', started_at: 1792424392, ended_at: 1792424450 }] });
     throw new Error('unexpected');
   };
@@ -27,7 +28,7 @@ describe('Hermes kanban', () => {
     await kanban.status();
 
     expect(status).toMatchObject({ available: true, team: ['fvh-chief-of-staff', 'fvh-market-scout', 'fvh-qa-engineer'], tasks: [{ id: 't_aa11bb22', status: 'running', assignee: 'fvh-chief-of-staff', createdAt: '2026-10-19T15:39:43.000Z', completedAt: null }] });
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(3);
   });
 
   it('serves the last snapshot at once while refreshing, and drops it after a new card', async () => {
@@ -89,6 +90,13 @@ describe('Hermes kanban', () => {
       expect(bodies[0]).toContain('API inventori dengan TypeScript');
       expect(calls.find(args => args[0] === 'create')).toEqual(expect.arrayContaining(['--assignee', 'fvh-market-scout', '--max-runtime', '30m', '--idempotency-key']));
       expect(detail.json()).toMatchObject({ summary: 'Selesai.', children: ['t_ee55ff66'], runs: [{ profile: 'fvh-market-scout', outcome: 'completed' }] });
+      const requestId = '7dfd72ba-758e-48e9-87a3-75fdc5ba82df';
+      for (const id of [requestId, requestId, 'ee6dfc73-b819-4ee6-9b7b-25fb77fba2f2']) {
+        expect((await app.inject({ method: 'POST', url: '/api/hermes-kanban/tasks', headers: { origin: 'http://127.0.0.1:5174' }, payload: { ...payload, requestId: id, includeData: false } })).statusCode).toBe(201);
+      }
+      const keys = calls.filter(args => args[0] === 'create').slice(-3).map(args => args[args.indexOf('--idempotency-key') + 1]);
+      expect(keys[0]).toBe(keys[1]);
+      expect(keys[1]).not.toBe(keys[2]);
     } finally {
       await app.close();
       await repository.close();

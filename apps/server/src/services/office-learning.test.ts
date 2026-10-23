@@ -44,8 +44,8 @@ describe('OfficeLearningService', () => {
     expect(service.peek()).toMatchObject({ busy: true, phase: 'learning', activeSpeakerId: 'qa' });
     busy = true; release(answer);
     const status = await pending;
-    expect(discuss).toHaveBeenCalledTimes(1);
-    expect(status.sessions[0]?.state).toBe('failed');
+    expect(discuss).toHaveBeenCalledTimes(2);
+    expect(status.sessions[0]?.state).toBe('completed');
   });
 
   it('reserves failed attempts, enforces 30 minutes and 12 sessions across restart, then resets at Jakarta midnight', async () => {

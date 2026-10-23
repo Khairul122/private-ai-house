@@ -1,14 +1,15 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, jsonRequest } from '../api/api.js';
 import { ROSTER } from '../state/office-state.js';
+import { kanbanStage, kanbanSubmission } from '../state/kanban-state.js';
 import type { HermesKanbanDetail, HermesKanbanStatus, HermesKanbanTask } from '../../../server/src/models/hermes-kanban-types.js';
 
 const ORCHESTRATOR = 'fvh-chief-of-staff';
 const COLUMNS: Array<{ title: string; hint: string; statuses: string[] }> = [
-  { title: 'Antre', hint: 'Menunggu dispatcher, kartu induk, atau jadwal', statuses: ['triage', 'todo', 'ready', 'scheduled'] },
+  { title: 'Antre', hint: 'Menunggu dispatcher, kartu induk, atau jadwal', statuses: ['todo', 'ready', 'scheduled'] },
   { title: 'Dikerjakan', hint: 'Karyawan Hermes sedang bekerja atau meninjau', statuses: ['running', 'review'] },
-  { title: 'Butuh Anda', hint: 'Diblokir: karyawan meminta data atau keputusan', statuses: ['blocked'] },
+  { title: 'Butuh Anda', hint: 'Karyawan meminta data, penjelasan, atau keputusan', statuses: ['blocked', 'triage'] },
   { title: 'Selesai', hint: 'Hasil siap dibaca', statuses: ['done'] },
 ];
 const STATUS: Record<string, string> = { triage: 'Triage', todo: 'Menunggu', ready: 'Siap', scheduled: 'Terjadwal', running: 'Berjalan', review: 'Ditinjau', blocked: 'Diblokir', done: 'Selesai' };
@@ -19,16 +20,41 @@ const employee = (profile: string | null) => {
 const time = (value: string | null) => value ? new Date(value).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) : null;
 
 function TaskResult({ id }: { id: string }) {
-  const detail = useQuery({ queryKey: ['hermes-kanban', id], queryFn: () => api<HermesKanbanDetail>(`/hermes-kanban/tasks/${id}`), refetchInterval: 30_000 });
+  const [selected, setSelected] = useState(id);
+  const detail = useQuery({ queryKey: ['hermes-kanban', selected], queryFn: () => api<HermesKanbanDetail>(`/hermes-kanban/tasks/${selected}`), refetchInterval: 30_000 });
+  const cache = useQueryClient();
+  const [message, setMessage] = useState('');
+  const [pending, setPending] = useState(false);
+  const [notice, setNotice] = useState('');
+  useEffect(() => { setSelected(id); setMessage(''); setNotice(''); }, [id]);
+  async function recover(resume: boolean) {
+    setPending(true); setNotice('');
+    try {
+      await api(`/hermes-kanban/tasks/${selected}/recover`, jsonRequest('POST', { message, resume }));
+      setMessage(''); setNotice(resume ? 'Permintaan lanjut dicatat. Hermes tetap memeriksa dependensi.' : 'Komentar dicatat.');
+      await cache.invalidateQueries({ queryKey: ['hermes-kanban'] });
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Pemulihan gagal.'); }
+    finally { setPending(false); }
+  }
   if (detail.isPending) return <p role="status">Memuat hasil…</p>;
   if (detail.isError) return <p role="alert">Hasil kartu tidak tersedia.</p>;
   return <div className="hermes-result">
+    <p><strong>{detail.data.task?.title ?? selected}</strong></p>
+    {selected !== id && <button type="button" className="button button-text" onClick={() => { setSelected(id); setMessage(''); setNotice(''); }}>Kembali ke kartu awal</button>}
     <p>{detail.data.summary ?? 'Belum ada ringkasan hasil.'}</p>
     {detail.data.runs.length > 0 && <ol>{detail.data.runs.map((run, index) => <li key={index}>
       <strong>{employee(run.profile)}</strong> — {run.outcome ?? 'tidak diketahui'}{run.endedAt ? `, ${time(run.endedAt)}` : ''}{run.error ? `. Kesalahan: ${run.error}` : ''}
       {run.summary && run.summary !== detail.data.summary && <p>{run.summary}</p>}
     </li>)}</ol>}
-    {detail.data.children.length > 0 && <p>Kartu turunan: {detail.data.children.join(', ')}</p>}
+    <div className="form-actions">{[...(detail.data.parents ?? []), ...detail.data.children].map(target => <button type="button" className="button button-text" key={target} onClick={() => { setSelected(target); setMessage(''); setNotice(''); }}>{target}</button>)}</div>
+    {detail.data.task?.error && <p role="alert">{detail.data.task.error}</p>}
+    {!!detail.data.comments?.length && <details><summary>Komentar</summary>{detail.data.comments.map((comment, index) => <p key={index}><strong>{comment.author ?? 'Tidak diketahui'}</strong>: {comment.text}</p>)}</details>}
+    {!!detail.data.events?.length && <details><summary>Riwayat kartu</summary><ol>{detail.data.events.map((event, index) => <li key={index}>{event.kind} · {time(event.createdAt) ?? 'Waktu tidak tersedia'}</li>)}</ol></details>}
+    <label className="form-field"><span>Jawaban atau komentar untuk kartu {selected}</span><textarea value={message} maxLength={4000} rows={3} onChange={event => setMessage(event.target.value)} /></label>
+    <div className="form-actions"><button type="button" className="button button-secondary" disabled={pending || !message.trim()} onClick={() => void recover(false)}>Kirim komentar</button>
+      {['blocked', 'scheduled'].includes(detail.data.task?.status ?? '') && <button type="button" className="button button-primary" disabled={pending} onClick={() => void recover(true)}>Lanjutkan kartu</button>}</div>
+    <p className="form-help">Melanjutkan kartu dapat menjalankan Hermes dan memakai kuota model.</p>
+    {notice && <p role="status">{notice}</p>}
   </div>;
 }
 
@@ -37,13 +63,15 @@ function TaskCard({ task }: { task: HermesKanbanTask }) {
   return <article className="kanban-card">
     <div className="kanban-card-top">
       <span className="kanban-card-client">{employee(task.assignee)}</span>
-      <span className={`state-label state-${task.status}`}>{STATUS[task.status] ?? task.status}</span>
+      <span className={`state-label state-${kanbanStage(task)}`}>{task.goalStatus === 'planning' ? 'Menyusun rencana' : STATUS[kanbanStage(task)] ?? task.status}</span>
     </div>
     <h4>{task.title}</h4>
     <p className="kanban-hint">{task.createdBy === 'mission-control' ? 'Dari Mission Control' : task.createdBy === ORCHESTRATOR ? 'Dibagi oleh Chief of Staff' : `Dari ${task.createdBy ?? 'tidak diketahui'}`} · {time(task.completedAt ?? task.startedAt ?? task.createdAt) ?? 'Waktu tidak tersedia'}</p>
     {task.error && <p className="notice notice-error">{task.error}</p>}
-    {['done', 'blocked', 'review', 'running'].includes(task.status) && <button type="button" className="button button-secondary" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? 'Tutup hasil' : 'Lihat hasil'}</button>}
-    {open && <TaskResult id={task.id} />}
+    {task.goalStatus && <p className="form-help">Status tujuan keseluruhan. Kartu rencana: {STATUS[task.status] ?? task.status}.</p>}
+    {task.goalError && <p role="alert">{task.goalError}</p>}
+    <button type="button" className="button button-secondary" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? 'Tutup hasil' : 'Lihat hasil & tindak lanjut'}</button>
+    {open && <TaskResult id={task.resultId ?? task.id} />}
   </article>;
 }
 
@@ -56,15 +84,19 @@ export default function HermesKanbanCard({ employeeId, purpose = 'task', meeting
   const [includeData, setIncludeData] = useState(!employeeId);
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState<{ error: boolean; text: string } | null>(null);
+  const submission = useRef<{ signature: string; id: string } | null>(null);
   const data = query.isError ? undefined : query.data;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setPending(true); setNotice(null);
     try {
-      const task = await api<HermesKanbanTask>('/hermes-kanban/tasks', jsonRequest('POST', { title, goal, assignee, includeData }));
+      const payload = { title, goal, assignee, includeData };
+      submission.current = kanbanSubmission(submission.current, payload, () => crypto.randomUUID());
+      const task = await api<HermesKanbanTask>('/hermes-kanban/tasks', jsonRequest('POST', { ...payload, requestId: submission.current.id }));
+      submission.current = null;
       setTitle(''); setGoal('');
-      setNotice({ error: false, text: `Kartu ${task.id} dibuat untuk ${employee(task.assignee)}. Dispatcher Hermes akan mengambilnya.` });
+      setNotice({ error: false, text: `Kartu ${task.id} tercatat untuk ${employee(task.assignee)}. Eksekusi bergantung pada dispatcher Hermes.` });
       await cache.invalidateQueries({ queryKey: ['hermes-kanban'] });
     } catch (error) { setNotice({ error: true, text: error instanceof Error ? error.message : 'Kartu belum dibuat.' }); }
     finally { setPending(false); }
@@ -78,9 +110,11 @@ export default function HermesKanbanCard({ employeeId, purpose = 'task', meeting
       : !data.available ? <p role="alert">{data.reason}</p>
       : <>
         <p className="card-status-note">{data.reason} Hasil pekerjaan berupa usulan untuk Anda tinjau.</p>
+        <p role="status">Gateway: {data.gateway === 'running' ? 'Berjalan; kesiapan dispatcher belum dijamin' : data.gateway === 'stopped' ? 'Tidak berjalan; antrean menunggu gateway' : 'Tidak diketahui'}. Data diperiksa {time(data.checkedAt)}.{data.oldestReadyAt ? ` Kartu siap tertua: ${time(data.oldestReadyAt)}.` : ''}</p>
+        {data.orchestrationError && <p role="alert">{data.orchestrationError}</p>}
         <div className="kanban-board">
           {COLUMNS.map(column => {
-            const tasks = data.tasks.filter(task => column.statuses.includes(task.status) && (!employeeId || task.assignee === `fvh-${employeeId}`));
+            const tasks = data.tasks.filter(task => column.statuses.includes(kanbanStage(task)) && (!employeeId || task.assignee === `fvh-${employeeId}`));
             return <div className="kanban-column" key={column.title}>
               <div className="kanban-col-head"><h3>{column.title}</h3><span className="kanban-count">{tasks.length}</span></div>
               <p className="kanban-hint">{column.hint}</p>
