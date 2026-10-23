@@ -39,7 +39,7 @@ export class HermesDraftingError extends Error {
 
 /** Environment passed to Hermes child processes: enough to find its install and profile, never app secrets. */
 export function allowedEnvironment(): NodeJS.ProcessEnv {
-  const safeNames = new Set(['PATH', 'SystemRoot', 'SYSTEMROOT', 'TEMP', 'TMP', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'HERMES_HOME']);
+  const safeNames = new Set(['PATH', 'SystemRoot', 'SYSTEMROOT', 'TEMP', 'TMP', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'HERMES_HOME', 'PATHEXT']);
   const env: NodeJS.ProcessEnv = {};
   for (const name of safeNames) {
     const value = process.env[name];
@@ -125,7 +125,7 @@ function extractFinalText(output: string): string {
   const deltas: string[] = [];
   let finalText: string | undefined;
   for (const line of output.split(/\r?\n/)) {
-    if (!line.trim()) continue;
+    if (!line.trim() || line.startsWith('Warning:')) continue;
     let event: unknown;
     try { event = JSON.parse(line); } catch { throw new HermesDraftingError('invalid_output', 'Output Hermes Agent bukan JSONL yang dapat dibaca.'); }
     if (typeof event !== 'object' || event === null) continue;

@@ -15,6 +15,8 @@ import { useLiveUpdates } from '../api/live.js';
 import { StateLabel, useClock } from '../components/ui.js';
 import { CardDataStatus } from '../components/CardDataStatus.js';
 import { isCardQuery } from '../api/card-data.js';
+import { invitationSpot, type OfficeInvitation } from '../state/office-interaction.js';
+import HermesKanbanCard from '../components/HermesKanbanCard.js';
 import { isTabletShortcut } from './tablet-shortcut.js';
 
 const VisualOffice = lazy(() => import('./VisualOffice.js'));
@@ -141,6 +143,8 @@ export default function OfficeShell() {
   const sheetHeading = useRef<HTMLHeadingElement>(null);
   const sheetElement = useRef<HTMLElement>(null);
   const [refreshingSheet, setRefreshingSheet] = useState(false);
+  const [invitation, setInvitation] = useState<OfficeInvitation>(null);
+  const [interaction, setInteraction] = useState<'task' | 'chat' | 'meeting' | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [panel, setPanel] = useState<'owner' | 'agent' | 'activity' | 'channels' | null>(null);
   const [rosterOpen, setRosterOpen] = useState(false);
@@ -191,7 +195,9 @@ export default function OfficeShell() {
   const allAgents = useMemo(() => deriveOfficeAgents(autopilotData, activityData, { learning: fresh(learning), projectsCoId: projectsCoId.isError ? undefined : projectsCoId.data, kanban: fresh(kanban), sync: syncData, inboxWaiting, dueSoon, hermes, knowledge: knowledgeJob,operations:operationsData, }), [learning.isError, learning.data, projectsCoId.isError, projectsCoId.data, kanban.isError, kanban.data, autopilotData, activityData, syncData, inboxWaiting, dueSoon, hermes, knowledgeJob,operationsData]);
   const agents=useMemo(()=>allAgents.filter(a=>(a.floor ?? 1)===floor),[allAgents,floor]);
   const spots = useMemo(() => spotsFor(agents), [agents]);
-  const ownerTarget = selectedId ? spots.get(selectedId) ?? null : null;
+  const ownerTarget = invitationSpot(agents, invitation) ?? (selectedId ? spots.get(selectedId) ?? null : null);
+  const invitedSpot = invitationSpot(agents, invitation);
+  useEffect(() => { if (invitation && !invitedSpot) setInvitation(null); }, [invitation, invitedSpot]);
   const counts = summarize(agents);
   const boards = buildBoards({
     projectsCoId: fresh(projectsCoId),
@@ -298,7 +304,7 @@ export default function OfficeShell() {
   }, [location.pathname]);
 
   const selectAgent = (id: string | null) => {
-    setSelectedId(id);
+    setSelectedId(id); setInteraction(null);
     if (!id) return;
     setOwnerVisitVersion((version) => version + 1);
     setPanel('agent');
@@ -380,7 +386,7 @@ export default function OfficeShell() {
     <div className="vo3d-office-layer" inert={sheetOpen}>
     <div ref={officeSurface} className="vo3d-canvas" role="img" tabIndex={0} aria-label={`Kantor 3D Mission Control. ${summary}. Tekan Tab untuk membuka tablet. Gunakan tablet dan daftar agen untuk navigasi dengan keyboard.`}>
       {webgl ? <Suspense fallback={<div className="vo3d-fallback">Memuat kantor visual...</div>}>
-        <VisualOffice key={floor} floor={floor} ownerStart={arrival?.floor===floor?arrival.at:[OWNER_SPOT.x,OWNER_SPOT.z]} onLift={()=>goToFloor(floor===1?2:1,true)} agents={agents} learning={fresh(learning)} ready={!autopilot.isPending} selectedId={selectedId} ownerSelected={panel === 'owner'} ownerInput={ownerInput} ownerTarget={ownerTarget} ownerVisitVersion={ownerVisitVersion} onOwnerMoving={setOwnerMoving} followId={followId} onSelect={selectAgent} onOwnerSelect={openOwner} onCameraInteract={() => { setFollowId(null); setTour(false); }} command={command} view={view} tour={tour} phase={phase} reducedMotion={reducedMotion} boards={boards} onOpenBoard={openBoard} />
+        <VisualOffice invitation={invitation} key={floor} floor={floor} ownerStart={arrival?.floor===floor?arrival.at:[OWNER_SPOT.x,OWNER_SPOT.z]} onLift={()=>goToFloor(floor===1?2:1,true)} agents={agents} learning={fresh(learning)} ready={!autopilot.isPending} selectedId={selectedId} ownerSelected={panel === 'owner'} ownerInput={ownerInput} ownerTarget={ownerTarget} ownerVisitVersion={ownerVisitVersion} onOwnerMoving={setOwnerMoving} followId={followId} onSelect={selectAgent} onOwnerSelect={openOwner} onCameraInteract={() => { setFollowId(null); setTour(false); }} command={command} view={view} tour={tour} phase={phase} reducedMotion={reducedMotion} boards={boards} onOpenBoard={openBoard} />
       </Suspense> : <div className="vo3d-fallback">WebGL tidak tersedia di browser ini. Gunakan tablet untuk membuka setiap kartu.</div>}
     </div>
 
@@ -477,6 +483,15 @@ export default function OfficeShell() {
         {panel === 'agent' && (selected ? <>
           <div className="vo3d-profile"><span className="vo3d-avatar" style={{ borderColor: selected.color }}>{initials(selected.name)}</span>
             <div><h3>{selected.name}</h3><p>{selected.role}</p><span className="vo3d-badge"><span className="vo3d-state-dot" style={{ background: STATE_COLORS[selected.state] }} />{STATE_LABELS[selected.state]}</span></div></div>
+          <div className="vo3d-owner-actions">
+            <button type="button" onClick={() => setInteraction('chat')}>Ngobrol</button>
+            <button type="button" onClick={() => setInteraction('task')}>Tugas & hasil</button>
+            <button type="button" disabled={selected.state !== 'idle'} onClick={() => { ownerInput.stop(); setFollowId(selected.id); setOwnerVisitVersion(version => version + 1); setInvitation({ id: selected.id, place: 'owner' }); }}>Panggil ke meja owner</button>
+            <button type="button" disabled={selected.state !== 'idle' || agents.filter(agent => agent.room === 'meeting').length >= 8} onClick={() => { ownerInput.stop(); setFollowId(selected.id); setOwnerVisitVersion(version => version + 1); setInvitation({ id: selected.id, place: 'meeting' }); setInteraction('meeting'); }}>Ajak rapat</button>
+            {invitation?.id === selected.id && <button type="button" onClick={() => setInvitation(null)}>Selesai bertemu</button>}
+          </div>
+          <p className="vo3d-owner-hint" role="status">{invitation?.id === selected.id ? 'Undangan aktif. Karyawan menuju tempat pertemuan; pekerjaan nyata selalu didahulukan.' : 'Panggilan berlaku untuk satu karyawan idle. Ngobrol dan agenda dikirim sebagai tugas Hermes setelah Anda menekan Kirim.'}</p>
+          {interaction && <div className="vo3d-interaction"><HermesKanbanCard key={selected.id + interaction} employeeId={interaction === 'meeting' ? 'chief-of-staff' : selected.id} purpose={interaction} {...(interaction == 'meeting' ? { meetingWith: selected.name } : {})} /></div>}
           <details className="vo3d-panel-disclosure"><summary>Kontrol kamera & perjalanan</summary><div className="vo3d-owner-actions">
             <button type="button" disabled={!spots.has(selected.id)} aria-pressed={followId === selected.id} onClick={() => toggleFollow(selected.id)}>{followId === selected.id ? 'Hentikan ikuti kamera' : 'Ikuti kamera agen'}</button>
             <button type="button" onClick={openOwner}>Kembali ke Owner</button>

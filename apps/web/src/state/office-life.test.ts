@@ -7,6 +7,12 @@ import { spotsFor, type P2 } from './office-layout.js';
 const team: OfficeAgent[] = ROSTER.map((agent) => ({ ...agent, state: 'idle', room: 'lounge', task: null, reason: 'Ready', recentActivity: [] }));
 
 describe('ambient office routines', () => {
+  it('plans at most one new ambient journey per tick after a long pause', () => {
+    const life = createOfficeLife();
+    updateOfficeLife(life, team, 0, false);
+    updateOfficeLife(life, team, 600, false);
+    expect([...life.routines.values()].reduce((sum, routine) => sum + routine.visits, 0)).toBe(1);
+  });
   it('reserves distinct floor slots, walks between activities, and preserves real status', () => {
     const life = createOfficeLife();
     const original = JSON.stringify(team);

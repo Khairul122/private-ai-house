@@ -45,7 +45,7 @@ const BREAK_SLOTS: Spot[] = [
   { x: 9.5, z: 6.2, y: 0, facing: Math.PI / 2, seated: false, via: [[SPINE_X, 6.2], [9.5, 6.2]] },
 ];
 
-const MEETING_SEATS: Spot[] = [6.75, 8.25, 9.75, 11.25].flatMap((x) => [
+export const MEETING_SEATS: Spot[] = [6.75, 8.25, 9.75, 11.25].flatMap((x) => [
   { x, z: -7.6, y: 0.5, facing: Math.PI, seated: true, via: [[SPINE_X, -6.5], [5, -6.5]] as P2[] },
   { x, z: -10.4, y: 0.5, facing: 0, seated: true, via: [[SPINE_X, -6.5], [5, -6.5], [5, -10.4]] as P2[] },
 ]);

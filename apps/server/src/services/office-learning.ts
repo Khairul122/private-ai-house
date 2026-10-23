@@ -117,16 +117,16 @@ export class OfficeLearningService {
     catch { this.state.enabled = previous; throw new Error('Pengaturan pembelajaran tidak dapat disimpan.'); }
     return this.peek();
   }
-  run(): Promise<OfficeLearningStatus> {
+  run(force = false): Promise<OfficeLearningStatus> {
     if (this.active) return this.active;
-    this.active = this.cycle().finally(() => { this.active = null; });
+    this.active = this.cycle(force).finally(() => { this.active = null; });
     return this.active;
   }
-  private async cycle(): Promise<OfficeLearningStatus> {
+  private async cycle(force: boolean): Promise<OfficeLearningStatus> {
     await this.load();
     const status = this.peek();
     if (this.stopping || !status.available || !status.enabled || status.sessionsToday >= DAILY_LIMIT || this.options.busy()
-      || (this.state.nextRunAt !== null && Date.parse(this.state.nextRunAt) > this.now().getTime())) return status;
+      || (!force && this.state.nextRunAt !== null && Date.parse(this.state.nextRunAt) > this.now().getTime())) return status;
     const employees = this.options.employees;
     const first = employees[this.state.cursor % employees.length]!;
     const second = employees[(this.state.cursor + 1) % employees.length]!;

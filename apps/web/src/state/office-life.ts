@@ -32,6 +32,7 @@ export function updateOfficeLife(life: OfficeLife, agents: OfficeAgent[], elapse
     if (!idle.some((agent) => agent.id === id && (agent.floor ?? 1) === routine.floor)) life.routines.delete(id);
   }
   const occupied = (floor: number, slot: number) => [...life.routines.values()].some((routine) => routine.floor === floor && routine.slot === slot);
+  let moved = false;
   for (const [index, agent] of idle.entries()) {
     const floor = agent.floor ?? 1;
     let routine = life.routines.get(agent.id);
@@ -43,7 +44,7 @@ export function updateOfficeLife(life: OfficeLife, agents: OfficeAgent[], elapse
       life.routines.set(agent.id, routine);
     }
     if (reducedMotion) { routine.nextMoveAt = now + 12; continue; }
-    if (now < routine.nextMoveAt) continue;
+    if (now < routine.nextMoveAt || moved) continue;
     // Reserve destinations before another employee chooses one in the same frame.
     for (let offset = 1; offset < IDLE_SPOTS.length; offset++) {
       const slot = (routine.slot + offset) % IDLE_SPOTS.length;
@@ -51,6 +52,7 @@ export function updateOfficeLife(life: OfficeLife, agents: OfficeAgent[], elapse
       if (occupied(floor, slot) || !ownerCanStand(spot.x, spot.z)) continue;
       if (!planOwnerPath([routine.spot.x, routine.spot.z], [spot.x, spot.z]).length) continue;
       routine.slot = slot; routine.spot = spot; routine.activity = spot.activity; routine.visits++;
+      moved = true;
       break;
     }
     routine.nextMoveAt = now + 28 + index % 4 * 4;

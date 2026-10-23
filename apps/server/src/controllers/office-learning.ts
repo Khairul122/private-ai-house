@@ -7,7 +7,7 @@ export function officeLearningController(service: OfficeLearningService | undefi
     status: async () => service ? service.status() : null,
     run: async (_req: FastifyRequest, reply: FastifyReply) => {
       if (!service) return reply.code(503).send({ error: 'Hermes belum tersedia untuk belajar.' });
-      return service.run();
+      return service.run(true);
     },
     enabled: async (req: FastifyRequest, reply: FastifyReply) => {
       const { enabled } = officeLearningEnabledSchema.parse(req.body);

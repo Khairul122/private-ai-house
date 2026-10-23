@@ -10,7 +10,8 @@ import { createOwnerMotion, setOwnerDestination, stepOwnerMotion, stopOwnerMotio
 import { OfficeAgent as OfficeAgentCharacter, spokenOfficeTurn } from './OfficeAgent.js';
 import { OfficeEnvironment } from './OfficeEnvironment.js';
 import OfficeObjects from './OfficeObjects.js';
-import { createOfficeLife } from '../state/office-life.js';
+import { invitationSpot, type OfficeInvitation } from '../state/office-interaction.js';
+import { createOfficeLife, updateOfficeLife, type OfficeLife } from '../state/office-life.js';
 
 export type CameraCommand = { kind: 'overview' | 'zone' | 'agent' | 'board' | 'owner'; id?: string; n: number };
 /** Live summary drawn on a wall board; lines come from real API data. */
@@ -19,6 +20,7 @@ type Phase = ReturnType<typeof dayPhase>;
 type V3 = [number, number, number];
 
 export type VisualOfficeProps = {
+  invitation: OfficeInvitation;
   floor: 1 | 2;
   ownerStart: P2;
   onLift: () => void;
@@ -536,28 +538,41 @@ function CameraRig({ command, view, tour, spots, reducedMotion, followId, positi
   return null;
 }
 
+function OfficeLifeTick({ life, agents, reducedMotion }: { life: OfficeLife; agents: OfficeAgent[]; reducedMotion: boolean }) {
+  useFrame(({ clock }) => updateOfficeLife(life, agents, clock.elapsedTime, reducedMotion), -1);
+  return null;
+}
+
 function Lights({ phase }: { phase: Phase }) {
   return <>
     <color attach="background" args={[phase.sky]} />
     <hemisphereLight args={['#f5eddb', '#65715c', phase.ambient * 0.7]} />
     <ambientLight intensity={phase.ambient * 0.22} />
     <directionalLight position={[-12, 20, 12]} intensity={phase.sun * 1.1} color={phase.sunColor} castShadow
-      shadow-mapSize={[2048, 2048]} shadow-camera-left={-30} shadow-camera-right={30} shadow-camera-top={26} shadow-camera-bottom={-26} shadow-camera-far={80} shadow-bias={-0.0002} shadow-normalBias={0.04} />
+      shadow-mapSize={[1024, 1024]} shadow-camera-left={-30} shadow-camera-right={30} shadow-camera-top={26} shadow-camera-bottom={-26} shadow-camera-far={80} shadow-bias={-0.0002} shadow-normalBias={0.04} />
     <directionalLight position={[16, 9, -5]} intensity={phase.night ? 0.65 : 0.35} color={phase.night ? '#e6cba1' : '#f7edd7'} />
-    <pointLight position={[-10, 3.1, 2]} intensity={phase.night ? 1.2 : 0.28} distance={12} color="#ffd79a" castShadow />
+    <pointLight position={[-10, 3.1, 2]} intensity={phase.night ? 1.2 : 0.28} distance={12} color="#ffd79a" />
     <pointLight position={[8, 3.1, -7]} intensity={phase.night ? 1.1 : 0.22} distance={11} color="#c7dcff" />
     <pointLight position={[11, 3.1, 9]} intensity={phase.night ? 0.9 : 0.2} distance={10} color="#ffe3b0" />
   </>;
 }
 
-export default function VisualOffice({ floor, ownerStart, onLift, agents, learning, ready, selectedId, ownerSelected, ownerInput, ownerTarget, ownerVisitVersion, onOwnerMoving, followId, onSelect, onOwnerSelect, onCameraInteract, command, view, tour, phase, reducedMotion, boards, onOpenBoard, onOpenCommunity }: VisualOfficeProps) {
+export default function VisualOffice({ invitation, floor, ownerStart, onLift, agents, learning, ready, selectedId, ownerSelected, ownerInput, ownerTarget, ownerVisitVersion, onOwnerMoving, followId, onSelect, onOwnerSelect, onCameraInteract, command, view, tour, phase, reducedMotion, boards, onOpenBoard, onOpenCommunity }: VisualOfficeProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [hoveredBoard, setHoveredBoard] = useState<BoardId | null>(null);
   const spots = useMemo(() => spotsFor(agents), [agents]);
   const positions = useMemo(() => new Map<string, THREE.Vector3>(), []);
   const life = useMemo(() => createOfficeLife(), []);
+  const invitedSpot = useMemo(() => invitationSpot(agents, invitation), [agents, invitation]);
+  const [visible, setVisible] = useState(() => !document.hidden);
+  useEffect(() => {
+    const update = () => setVisible(!document.hidden);
+    document.addEventListener('visibilitychange', update);
+    return () => document.removeEventListener('visibilitychange', update);
+  }, []);
   useEffect(() => { document.body.style.cursor = hoveredId || hoveredBoard ? 'pointer' : ''; return () => { document.body.style.cursor = ''; }; }, [hoveredId, hoveredBoard]);
-  return <Canvas shadows dpr={[1, 2]} camera={{ position: [20, 28, 38], fov: 38, near: 0.5, far: 400 }} onPointerMissed={() => onSelect(null)}>
+  return <Canvas frameloop={visible ? 'always' : 'never'} shadows dpr={1} camera={{ position: [20, 28, 38], fov: 38, near: 0.5, far: 400 }} onPointerMissed={() => onSelect(null)}>
+    <OfficeLifeTick life={life} agents={agents} reducedMotion={reducedMotion} />
     <Lights phase={phase} />
     <Building agents={agents} phase={phase} floor={floor} />
     <OfficeEnvironment agents={agents} phase={phase} selectedId={selectedId} floor={floor} />
@@ -567,7 +582,7 @@ export default function VisualOffice({ floor, ownerStart, onLift, agents, learni
     {ready && agents.map((agent, index) => {
       const spot = spots.get(agent.id);
       return spot ? <OfficeAgentCharacter key={agent.id} agent={agent} agents={agents} index={index} spot={spot} selected={agent.id === selectedId} hovered={agent.id === hoveredId}
-        onSelect={onSelect} onHover={setHoveredId} reducedMotion={reducedMotion} positions={positions} life={life} spokenMessage={spokenOfficeTurn(learning, agent.id)} /> : null;
+        onSelect={onSelect} onHover={setHoveredId} reducedMotion={reducedMotion} positions={positions} life={life} invitation={agent.id === invitation?.id ? invitedSpot : undefined} spokenMessage={spokenOfficeTurn(learning, agent.id)} /> : null;
     })}
     <OwnerCharacter start={ownerStart} onLift={onLift} destination={ownerTarget} request={ownerVisitVersion} selected={ownerSelected} hovered={hoveredId === 'owner'} input={ownerInput} onMoving={onOwnerMoving} onSelect={onOwnerSelect} onHover={setHoveredId} reducedMotion={reducedMotion} positions={positions} />
     <CameraRig command={command} view={view} tour={tour} spots={spots} reducedMotion={reducedMotion} followId={followId} positions={positions} onInteract={onCameraInteract} />

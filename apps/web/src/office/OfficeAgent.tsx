@@ -2,7 +2,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { type P2, type Spot } from '../state/office-layout.js';
-import { planOfficeRoute, updateOfficeLife, type OfficeLife } from '../state/office-life.js';
+import { planOfficeRoute, type OfficeLife } from '../state/office-life.js';
 import { ownerCanStand } from '../state/owner-motion.js';
 import { STATE_COLORS, type OfficeAgent as AgentData } from '../state/office-state.js';
 
@@ -26,6 +26,7 @@ type Props = {
   positions: Map<string, THREE.Vector3>;
   life: OfficeLife;
   agents?: AgentData[];
+  invitation?: Spot | undefined;
   spokenMessage?: string | undefined;
 };
 
@@ -85,7 +86,7 @@ export function nearbyIdlePeer(id: string, agents: AgentData[], positions: Map<s
   return closest;
 }
 
-export function OfficeAgent({ agent, index, spot, selected, hovered, onSelect, onHover, reducedMotion, positions, life, agents = [], spokenMessage }: Props) {
+export function OfficeAgent({ agent, index, spot, selected, hovered, onSelect, onHover, reducedMotion, positions, life, agents = [], spokenMessage, invitation }: Props) {
   const root = useRef<THREE.Group>(null);
   const legL = useRef<THREE.Group>(null);
   const legR = useRef<THREE.Group>(null);
@@ -109,9 +110,8 @@ export function OfficeAgent({ agent, index, spot, selected, hovered, onSelect, o
     const dt = Math.max(0, Math.min(rawDt, 0.5));
     const t = clock.elapsedTime;
     const state = sim.current;
-    updateOfficeLife(life, agents, t, reducedMotion);
-    const routine = agent.state === 'idle' && !reducedMotion ? life.routines.get(agent.id) : undefined;
-    const destination = routine?.spot ?? spot;
+    const routine = agent.state === 'idle' && !invitation && !reducedMotion ? life.routines.get(agent.id) : undefined;
+    const destination = invitation ?? routine?.spot ?? spot;
     if (!state.initialized || (state.reducedMotion !== reducedMotion && reducedMotion)) {
       state.x = destination.x; state.z = destination.z; state.path = []; state.seat = destination.seated ? 1 : 0;
       state.spot = destination; state.origin = destination; state.initialized = true;
@@ -143,7 +143,7 @@ export function OfficeAgent({ agent, index, spot, selected, hovered, onSelect, o
     const arrived = !walking && state.path.length === 0 && Math.hypot(state.x - state.spot.x, state.z - state.spot.z) < 0.03;
     const active = arrived && (agent.state === 'working' || agent.state === 'reviewing');
     const collaborating = arrived && agent.state === 'collaborating';
-    const idle = arrived && agent.state === 'idle';
+    const idle = arrived && !invitation && agent.state === 'idle';
     const phase = (t + index * 7.3) % 23;
     const peer = idle ? nearbyIdlePeer(agent.id, agents, positions, state.x, state.z) : null;
     const social = idle && peer && routine?.activity === 'social';
@@ -213,7 +213,7 @@ export function OfficeAgent({ agent, index, spot, selected, hovered, onSelect, o
     <group ref={conversation} visible={false}><Label text="•••" p={[0, 2.75, 0]} bubble /></group>
     {spokenMessage && <Label text={spokenMessage} p={[0, 2.9, 0]} bubble />}
     {(selected || hovered) && <Label text={agent.name} dot={dot} p={[0, selected ? 2.75 : 2.45, 0]} />}
-    {(selected || hovered) && agent.state === 'idle' && !reducedMotion && <Label text="Gerak santai · animasi" p={[0, 2.05, 0]} />}
+    {(selected || hovered) && agent.state === 'idle' && !reducedMotion && <Label text={invitation ? "Undangan owner · animasi" : "Gerak santai · animasi"} p={[0, 2.05, 0]} />}
     <mesh position={[0, 1.1, 0]} visible={false}><boxGeometry args={[0.9, 2.3, 0.9]} /><meshBasicMaterial /></mesh>
   </group>;
 }

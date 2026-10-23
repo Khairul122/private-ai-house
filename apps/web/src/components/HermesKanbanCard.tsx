@@ -47,13 +47,13 @@ function TaskCard({ task }: { task: HermesKanbanTask }) {
   </article>;
 }
 
-export default function HermesKanbanCard() {
+export default function HermesKanbanCard({ employeeId, purpose = 'task', meetingWith }: { employeeId?: string; purpose?: 'task' | 'chat' | 'meeting'; meetingWith?: string } = {}) {
   const query = useQuery({ queryKey: ['hermes-kanban'], queryFn: () => api<HermesKanbanStatus | null>('/hermes-kanban'), refetchInterval: 30_000 });
   const cache = useQueryClient();
   const [title, setTitle] = useState('');
-  const [goal, setGoal] = useState('');
-  const [assignee, setAssignee] = useState(ORCHESTRATOR);
-  const [includeData, setIncludeData] = useState(true);
+  const [goal, setGoal] = useState(meetingWith ? `Bahas agenda owner bersama ${meetingWith}. Rangkum masukan dan langkah berikutnya. Jangan mengklaim peserta telah menjawab tanpa hasil nyata.` : '');
+  const [assignee, setAssignee] = useState(employeeId ? `fvh-${employeeId}` : ORCHESTRATOR);
+  const [includeData, setIncludeData] = useState(!employeeId);
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState<{ error: boolean; text: string } | null>(null);
   const data = query.isError ? undefined : query.data;
@@ -71,7 +71,7 @@ export default function HermesKanbanCard() {
   }
 
   return <section className="form-card" aria-label="Kanban tim Hermes">
-    <div className="section-heading"><div><p className="eyebrow">Tim AI · board {data?.board ?? 'fvh-house'}</p><h2>Pekerjaan tim Hermes</h2></div></div>
+    <div className="section-heading"><div><p className="eyebrow">Tim AI · board {data?.board ?? 'fvh-house'}</p><h2>{purpose === 'meeting' ? 'Agenda rapat' : purpose === 'chat' ? 'Diskusi dengan karyawan' : 'Pekerjaan tim Hermes'}</h2></div></div>
     {query.isPending ? <p role="status">Memuat kanban Hermes…</p>
       : query.isError ? <p role="alert">Kanban Hermes tidak tersedia. <button type="button" className="button button-text" onClick={() => void query.refetch()}>Coba lagi</button></p>
       : !data ? <p>Kanban Hermes tidak aktif: Hermes dan persetujuan data harus aktif di <code>.env</code>.</p>
@@ -80,7 +80,7 @@ export default function HermesKanbanCard() {
         <p className="card-status-note">{data.reason} Hasil pekerjaan berupa usulan untuk Anda tinjau.</p>
         <div className="kanban-board">
           {COLUMNS.map(column => {
-            const tasks = data.tasks.filter(task => column.statuses.includes(task.status));
+            const tasks = data.tasks.filter(task => column.statuses.includes(task.status) && (!employeeId || task.assignee === `fvh-${employeeId}`));
             return <div className="kanban-column" key={column.title}>
               <div className="kanban-col-head"><h3>{column.title}</h3><span className="kanban-count">{tasks.length}</span></div>
               <p className="kanban-hint">{column.hint}</p>
@@ -88,18 +88,19 @@ export default function HermesKanbanCard() {
             </div>;
           })}
         </div>
-        <details className="card-disclosure"><summary>Buat tugas untuk tim Hermes</summary>
+        <details className="card-disclosure" open={employeeId ? true : undefined}><summary>Buat tugas untuk tim Hermes</summary>
           <p className="form-help">Chief of Staff membagi tujuan ke tim, atau pilih satu karyawan. Setiap tugas memakai kuota model.</p>
-        <form onSubmit={event => void submit(event)}><fieldset disabled={pending}>
+        <form onSubmit={event => { if (data.team.includes(assignee)) void submit(event); else event.preventDefault(); }}><fieldset disabled={pending}>
           <div className="form-grid">
-            <label className="form-field"><span>Tugas</span><input value={title} onChange={e => setTitle(e.target.value)} required minLength={3} maxLength={200} placeholder="Contoh: Pilih 3 peluang AI terbaik minggu ini" /></label>
+            <label className="form-field"><span>{purpose === 'meeting' ? 'Agenda rapat' : purpose === 'chat' ? 'Pesan untuk karyawan' : 'Tugas'}</span><input value={title} onChange={e => setTitle(e.target.value)} required minLength={3} maxLength={200} placeholder={purpose === 'task' ? 'Contoh: Pilih 3 peluang AI terbaik minggu ini' : 'Tulis topik yang ingin Anda bahas'} /></label>
             <label className="form-field"><span>Karyawan</span><select value={assignee} onChange={e => setAssignee(e.target.value)}>
+              {!data.team.includes(assignee) && <option value={assignee} disabled>{employee(assignee)} — profil Hermes tidak tersedia</option>}
               {data.team.map(profile => <option key={profile} value={profile}>{employee(profile)}{profile === ORCHESTRATOR ? ' (orchestrator)' : ''}</option>)}
             </select></label>
           </div>
           <label className="form-field"><span>Detail tujuan (opsional)</span><textarea value={goal} onChange={e => setGoal(e.target.value)} maxLength={4000} rows={3} /></label>
           <label className="check-row"><input type="checkbox" checked={includeData} onChange={e => setIncludeData(e.target.checked)} /><span>Lampirkan snapshot data aplikasi (kebijakan, hasil bid, peluang, pesan klien, proyek & pembayaran). Data ini dikirim ke provider model Hermes.</span></label>
-          <div className="form-actions"><button className="button button-primary" type="submit">{pending ? 'Mengirim…' : 'Kirim ke tim Hermes'}</button><span>Setiap kartu memakai kuota model.</span></div>
+          <div className="form-actions"><button className="button button-primary" type="submit" disabled={!data.team.includes(assignee)}>{pending ? 'Mengirim…' : 'Kirim ke tim Hermes'}</button><span>Setiap kartu memakai kuota model.</span></div>
         </fieldset></form>
         {notice && <p className={`notice ${notice.error ? 'notice-error' : 'notice-success'}`} role={notice.error ? 'alert' : 'status'}>{notice.text}</p>}
         </details>
