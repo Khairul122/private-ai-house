@@ -28,6 +28,7 @@ import { ProjectsCoIdService } from './services/projects-co-id.js';
 import { HermesKanban, hermesKanbanRunner } from './services/hermes-kanban.js';
 import { OfficeLearningService, discussionBlocked } from './services/office-learning.js';
 import { announceWrites, LiveEvents } from './lib/live-events.js';
+import { DiscordKanbanMonitor } from './services/discord-kanban.js';
 
 function findProjectRoot(start: string): string {
   let directory = resolve(start);
@@ -72,7 +73,8 @@ const linkedinOAuth = new LinkedInOAuthService({
 
 // Only DATABASE_URL is read here; the other readers parse .env themselves and .env is not loaded into process.env.
 const envFile = join(projectRoot, '.env');
-const databaseUrl = (process.env.DATABASE_URL ?? (existsSync(envFile) ? parseEnv(readFileSync(envFile, 'utf8')).DATABASE_URL : undefined))?.trim();
+const envValues = existsSync(envFile) ? parseEnv(readFileSync(envFile, 'utf8')) : {};
+const databaseUrl = (process.env.DATABASE_URL ?? envValues.DATABASE_URL)?.trim();
 if (!databaseUrl) throw new Error('DATABASE_URL belum diatur di .env (connection string Postgres Supabase).');
 const live = new LiveEvents();
 // Every repository (and OperationsRepository via repository.sql) writes through this one wrapper.
@@ -126,6 +128,9 @@ const googleCalendar = new GoogleCalendarService(integrationVault,new Operations
 const operations = new OperationsService({repository,messenger:whatsapp,calendar:googleCalendar,...(drafting?{review:(facts:string[])=>drafting.reviewOperations(facts)}:{})});
 const hasWebBuild = existsSync(webBuild);
 const hermesKanban = hermesEnabled ? new HermesKanban(hermesKanbanRunner(draftingConfig.executable)) : undefined;
+const discordMonitor = hermesKanban && envValues.DISCORD_BOT_TOKEN && envValues.DISCORD_GUILD_ID && envValues.DISCORD_APPLICATION_ID
+  ? new DiscordKanbanMonitor({ token: envValues.DISCORD_BOT_TOKEN, guildId: envValues.DISCORD_GUILD_ID, applicationId: envValues.DISCORD_APPLICATION_ID, categoryName: 'mission-control', channelName: 'monitoring-kartu' }, hermesKanban)
+  : undefined;
 let discussionActive = false;
 const officeLearning = drafting ? new OfficeLearningService({
   repository, employees: OFFICE_ROSTER,
@@ -235,7 +240,7 @@ const app = await createApp({
 if (hasWebBuild) {
   await app.register(fastifyStatic, { root: webBuild, prefix: '/' });
 }
-app.addHook('onClose',async()=>{autopilot.stop();whatsapp.close();await projectsCoId.close();await operations.close();});
+app.addHook('onClose',async()=>{autopilot.stop();discordMonitor?.stop();whatsapp.close();await projectsCoId.close();await operations.close();});
 
 if (!['127.0.0.1', 'localhost', '::1'].includes(host)) throw new Error('FVH_HOST must stay on loopback for the local single-user app.');
 await app.listen({ host, port });
@@ -253,4 +258,5 @@ void (async () => {
   await startupStep('operations', () => operations.start());
   void autopilot.start();
   await startupStep('office-learning', () => officeLearning?.start());
+  await startupStep('discord-kanban', () => discordMonitor?.start());
 })();

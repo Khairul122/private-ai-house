@@ -40,6 +40,19 @@ function boardFixture(includeData = false) {
 }
 
 describe('durable orchestration graph', () => {
+  it('does not expand a plan after the server closes while a read is in flight', async () => {
+    const fixture = boardFixture();
+    let release!: () => void;
+    let reading!: () => void;
+    const entered = new Promise<void>(resolve => { reading = resolve; });
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const service = new HermesKanban(async args => { if (args[0] === 'show') { reading(); await held; } return fixture.run(args); });
+    const run = service.reconcile();
+    await entered;
+    const stop = service.stop();
+    release(); await Promise.all([run, stop]);
+    expect(fixture.tasks).toHaveLength(1);
+  });
   it('adds a synthesis stage to a legacy API goal without rerunning its workers', async () => {
     const fixture = boardFixture(); fixture.root.created_by = 'mission-control'; fixture.root.summary = 'Pekerjaan dibagi.';
     const child = { ...fixture.root, id: 't_11223344', assignee: 'fvh-market-scout', created_by: 'fvh-chief-of-staff', parents: [fixture.root.id] };

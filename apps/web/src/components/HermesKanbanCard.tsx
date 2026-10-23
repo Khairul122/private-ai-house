@@ -63,10 +63,10 @@ function TaskCard({ task }: { task: HermesKanbanTask }) {
   return <article className="kanban-card">
     <div className="kanban-card-top">
       <span className="kanban-card-client">{employee(task.assignee)}</span>
-      <span className={`state-label state-${kanbanStage(task)}`}>{task.goalStatus === 'planning' ? 'Menyusun rencana' : STATUS[kanbanStage(task)] ?? task.status}</span>
+      <span className={`state-label state-${kanbanStage(task)}`}>{task.goalStatus === 'planning' ? task.status === 'running' ? 'Menyusun rencana' : 'Menunggu rencana' : STATUS[kanbanStage(task)] ?? task.status}</span>
     </div>
     <h4>{task.title}</h4>
-    <p className="kanban-hint">{task.createdBy === 'mission-control' ? 'Dari Mission Control' : task.createdBy === ORCHESTRATOR ? 'Dibagi oleh Chief of Staff' : `Dari ${task.createdBy ?? 'tidak diketahui'}`} · {time(task.completedAt ?? task.startedAt ?? task.createdAt) ?? 'Waktu tidak tersedia'}</p>
+    <p className="kanban-hint">{task.createdBy?.startsWith('mission-control-plan') ? 'Tujuan pemilik' : task.createdBy?.startsWith('mission-control-final:') ? 'Rangkuman tujuan' : task.createdBy?.startsWith('mission-control-work:') ? 'Pekerjaan dari rencana' : task.createdBy === 'mission-control' ? 'Dari Mission Control' : task.createdBy === ORCHESTRATOR ? 'Dibagi oleh Chief of Staff' : `Dari ${task.createdBy ?? 'tidak diketahui'}`} · {time(task.completedAt ?? task.startedAt ?? task.createdAt) ?? 'Waktu tidak tersedia'}</p>
     {task.error && <p className="notice notice-error">{task.error}</p>}
     {task.goalStatus && <p className="form-help">Status tujuan keseluruhan. Kartu rencana: {STATUS[task.status] ?? task.status}.</p>}
     {task.goalError && <p role="alert">{task.goalError}</p>}

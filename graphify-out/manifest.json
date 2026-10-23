@@ -378,9 +378,9 @@
     "semantic_hash": ""
   },
   "apps/server/src/services/hermes-kanban.ts": {
-    "mtime": 1792749644.9876623,
-    "seen": 1792749691.6017036,
-    "ast_hash": "810ddc3d9b4322ff869d18c5d4a3339e",
+    "mtime": 1792749757.6868057,
+    "seen": 1792750000.3216455,
+    "ast_hash": "e9310041d498e9efc87b301bd7c1847a",
     "semantic_hash": ""
   },
   "apps/server/src/services/linkedin-oauth.test.ts": {

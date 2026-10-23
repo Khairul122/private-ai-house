@@ -6,6 +6,8 @@ describe('kanban goals and submissions', () => {
     expect(kanbanStage({ status: 'done', goalStatus: 'running' })).toBe('running');
     expect(kanbanStage({ status: 'done', goalStatus: 'blocked' })).toBe('blocked');
     expect(kanbanStage({ status: 'done', goalStatus: 'done' })).toBe('done');
+    expect(kanbanStage({ status: 'ready', goalStatus: 'planning' })).toBe('ready');
+    expect(kanbanStage({ status: 'running', goalStatus: 'planning' })).toBe('running');
   });
   it('keeps the same identity for a retry, but gives a new submission a new identity', () => {
     const first = kanbanSubmission(null, { title: 'Prioritas hari ini' }, () => 'one');

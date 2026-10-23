@@ -1,7 +1,7 @@
 import type { HermesKanbanTask } from '../../../server/src/models/hermes-kanban-types.js';
 
 export function kanbanStage(task: Pick<HermesKanbanTask, 'status' | 'goalStatus'>): string {
-  if (task.goalStatus) return task.goalStatus === 'planning' ? 'ready' : task.goalStatus;
+  if (task.goalStatus) return task.goalStatus === 'planning' ? task.status === 'running' ? 'running' : 'ready' : task.goalStatus;
   return task.status;
 }
 

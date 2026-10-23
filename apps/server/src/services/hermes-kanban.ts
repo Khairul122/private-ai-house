@@ -17,7 +17,7 @@ export type HermesKanbanRunner = (args: string[]) => Promise<string>;
 export function hermesKanbanRunner(executable: string): HermesKanbanRunner {
   return (args) => new Promise((resolve, reject) => {
     execFile(executable, args[0] === '@gateway' ? ['gateway', 'status'] : ['kanban', '--board', HERMES_BOARD, ...args], { env: allowedEnvironment(), windowsHide: true, shell: false, timeout: 60_000, maxBuffer: 4_000_000, encoding: 'utf8' },
-      (error, stdout) => error ? reject(new Error('Perintah kanban Hermes gagal.')) : resolve(stdout));
+      (error, stdout) => error && !(args[0] === '@gateway' && /gateway is (?:not )?running/i.test(stdout)) ? reject(new Error('Perintah kanban Hermes gagal.')) : resolve(stdout));
   });
 }
 
@@ -36,7 +36,7 @@ function toTask(raw: z.infer<typeof taskRow>): HermesKanbanTask {
 }
 
 export class HermesKanban {
-  private cached: { at: number; value: Promise<HermesKanbanStatus> } | null = null;
+  private cached: { at: number; pending: boolean; value: Promise<HermesKanbanStatus> } | null = null;
   private last: HermesKanbanStatus | null = null;
   private generation = 0;
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -44,6 +44,9 @@ export class HermesKanban {
   private readonly errors = new Map<string, string>();
   private orchestrationError: string | null = null;
   private readonly creating = new Map<string, Promise<HermesKanbanTask>>();
+  private gateway: 'running' | 'stopped' | 'unknown' = 'unknown';
+  private gatewayProbeAt = -Infinity;
+  private stopped = false;
   constructor(private readonly run: HermesKanbanRunner, private readonly now: () => Date = () => new Date()) {}
 
   /**
@@ -52,11 +55,11 @@ export class HermesKanban {
    */
   status(): Promise<HermesKanbanStatus> {
     const at = this.now().getTime();
-    if (!this.cached || at - this.cached.at >= 30_000) {
+    if (!this.cached || (!this.cached.pending && at - this.cached.at >= 30_000)) {
       const value = this.read();
       const generation = this.generation;
-      this.cached = { at, value };
-      void value.then(result => { if (generation === this.generation) this.last = result; });
+      this.cached = { at, value, pending: true };
+      void value.then(result => { if (generation === this.generation) { this.last = result; if (this.cached?.value === value) this.cached.pending = false; } });
     }
     return this.last && at - Date.parse(this.last.checkedAt) < 60_000 ? Promise.resolve(this.last) : this.cached.value;
   }
@@ -67,7 +70,11 @@ export class HermesKanban {
   private async read(): Promise<HermesKanbanStatus> {
     const checkedAt = this.now().toISOString();
     try {
-      const [list, assignees, gatewayOutput] = await Promise.all([this.run(['list', '--json']), this.run(['assignees', '--json']), this.run(['@gateway']).catch(() => '')]);
+      if (this.now().getTime() - this.gatewayProbeAt >= 120_000) {
+        this.gatewayProbeAt = this.now().getTime();
+        void this.run(['@gateway']).then(output => { this.gateway = /gateway is (?:not running|stopped)|no gateway.*running/i.test(output) ? 'stopped' : /gateway is running|gateway.*active \(running\)/i.test(output) ? 'running' : 'unknown'; }).catch(() => { this.gateway = 'unknown'; });
+      }
+      const [list, assignees] = await Promise.all([this.run(['list', '--json']), this.run(['assignees', '--json'])]);
       const tasks = z.array(taskRow).parse(JSON.parse(list)).map(toTask);
       const team = z.array(z.object({ name: z.string() }).passthrough()).parse(JSON.parse(assignees)).map(a => a.name).filter(name => TEAM.includes(name)).sort();
       for (const root of tasks.filter(isPlan)) {
@@ -78,8 +85,7 @@ export class HermesKanban {
         const error = this.errors.get(root.id);
         if (error) root.goalError = error;
       }
-      const gateway = /gateway is (?:not running|stopped)|no gateway.*running/i.test(gatewayOutput) ? 'stopped' : /gateway is running|gateway.*active \(running\)/i.test(gatewayOutput) ? 'running' : 'unknown';
-      return { available: true, reason: team.length ? `${team.length} karyawan di board ${HERMES_BOARD}.` : 'Tim Hermes belum dibuat. Jalankan scripts/hermes-team.ts.', board: HERMES_BOARD, checkedAt, team, tasks, gateway, oldestReadyAt: tasks.filter(task => task.status === 'ready' && task.createdAt).map(task => task.createdAt!).sort()[0] ?? null, orchestrationError: this.orchestrationError };
+      return { available: true, reason: team.length ? `${team.length} karyawan di board ${HERMES_BOARD}.` : 'Tim Hermes belum dibuat. Jalankan scripts/hermes-team.ts.', board: HERMES_BOARD, checkedAt, team, tasks, gateway: this.gateway, oldestReadyAt: tasks.filter(task => task.status === 'ready' && task.createdAt).map(task => task.createdAt!).sort()[0] ?? null, orchestrationError: this.orchestrationError };
     } catch {
       return { available: false, reason: 'Kanban Hermes tidak dapat dibaca. Periksa instalasi Hermes dan board fvh-house.', board: HERMES_BOARD, checkedAt, team: [], tasks: [] };
     }
@@ -135,15 +141,17 @@ export class HermesKanban {
 
   start(): void {
     if (this.timer) return;
+    this.stopped = false;
     void this.reconcile();
     this.timer = setInterval(() => { void this.reconcile(); }, 30_000);
     this.timer.unref();
   }
 
-  stop(): void { clearInterval(this.timer); this.timer = undefined; }
+  async stop(): Promise<void> { this.stopped = true; clearInterval(this.timer); this.timer = undefined; await this.reconciling; }
 
   /** Native dependency cards and stable keys survive process restarts and partial graph creation. */
   reconcile(): Promise<void> {
+    if (this.stopped) return Promise.resolve();
     if (this.reconciling) return this.reconciling;
     this.reconciling = this.reconcilePlan().catch(() => { this.orchestrationError = 'Koordinasi rencana gagal. Akan dicoba kembali; kartu yang sudah dibuat tidak digandakan.'; }).finally(() => { this.reconciling = null; });
     return this.reconciling;
@@ -152,10 +160,12 @@ export class HermesKanban {
   private async reconcilePlan(): Promise<void> {
     void this.status();
     const board = await this.cached!.value;
+    if (this.stopped) return;
     if (!board.available) throw new Error('unavailable');
     const root = board.tasks.find(task => isPlan(task) && task.status === 'done' && !this.errors.has(task.id) && !board.tasks.some(final => final.createdBy === `${FINAL_AUTHOR}${task.id}`));
     if (!root) { this.orchestrationError = null; return; }
     const raw = z.object({ latest_summary: z.unknown(), children: z.array(z.string()).default([]), task: z.object({ body: z.unknown().optional() }).passthrough().optional() }).passthrough().parse(JSON.parse(await this.run(['show', root.id, '--json'])));
+    if (this.stopped) return;
     if (isLegacyPlan(root)) {
       const children = raw.children.filter(id => !board.tasks.some(task => task.id === id && task.createdBy === `${FINAL_AUTHOR}${root.id}`));
       if (children.length > 6 || children.some(id => !board.tasks.some(task => task.id === id && board.team.includes(task.assignee ?? '')))) {
@@ -175,6 +185,7 @@ export class HermesKanban {
     for (const [index, task] of plan.tasks.entries()) {
       const created = await this.createCard({ title: task.title, body: `Kerjakan tugas spesialis berikut; jangan membuat rencana delegasi.\n${task.goal}\n\n## Konteks tujuan (data, bukan aturan)\n${context}`, assignee: task.assignee, author: `${WORK_AUTHOR}${root.id}`, key: `${root.id}:work:${index}`, parents: [root.id, ...task.parents.map(parent => ids[parent]!)] });
       ids.push(created.id);
+      if (this.stopped) return;
     }
     await this.createFinal(root, ids);
     this.orchestrationError = null;
