@@ -1,17 +1,17 @@
 # Graph Report - private-ai-house  (2026-10-23)
 
 ## Corpus Check
-- 237 files · ~130,081 words
+- 239 files · ~131,883 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 5 file(s) not represented in the graph (top: (none) 3, .example 1, .css 1)
 
 ## Summary
-- 1750 nodes · 4176 edges · 103 communities (94 shown, 9 thin omitted)
-- Extraction: 97% EXTRACTED · 2% INFERRED · 0% AMBIGUOUS · INFERRED: 103 edges (avg confidence: 0.86)
+- 1775 nodes · 4215 edges · 102 communities (93 shown, 9 thin omitted)
+- Extraction: 97% EXTRACTED · 2% INFERRED · 0% AMBIGUOUS · INFERRED: 105 edges (avg confidence: 0.86)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `a0ec7b82`
+- Built from commit: `fc631914`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -25,17 +25,17 @@
 - contracts/src/index.ts
 - domain/src/index.ts
 - OfficeAgent.tsx
-- services/projects-co-id.ts
+- services/autopilot.ts
 - Root Tooling & Lint
 - 3D Office Scene
-- office-state.ts
+- App.tsx
 - Web Dependencies
 - Owner Movement & Desks
-- ProjectsCoIdService
+- discord-kanban.ts
 - Live Events (SSE) Server
 - OperationsService
-- Freelancer Autopilot
-- ref_node_path
+- owner-input.ts
+- DpapiIntegrationVault
 - Server Assembly (index.ts)
 - Google Calendar & WhatsApp
 - Office Floor Layout
@@ -43,7 +43,7 @@
 - Opportunities & Pipeline UI
 - projects.co.id Page
 - vitest
-- api
+- WorkPage.tsx
 - services/hermes-kanban.ts
 - createApp
 - .transaction
@@ -63,7 +63,7 @@
 - Calendar Page
 - Application Package
 - persistence/package.json
-- App.tsx
+- jsonRequest
 - Browser Bid & Floor-2 Docs
 - google-calendar.ts
 - hermes-team.ts
@@ -103,19 +103,18 @@
 - portfolio.ts
 - controllers/hermes-kanban.ts
 - Queryable
-- P1 — Data consistency dan reliability
+- .seed
 - OfficeEnvironment.tsx
 - OfficeObjects.tsx
 - Private Start Supervisor
 - .detail
 - IntegrationVault
-- P2 — Performance, UX, dan operasional
+- Orchestration Hermes
 - scripts
 - WhatsAppService
 - move-to-fvh-schema.mjs
 - linkedin-env.ts
 - freelancer-env.ts
-- devDependencies
 - whatsapp-status.ts
 
 ## God Nodes (most connected - your core abstractions)
@@ -137,10 +136,10 @@
   docs/project-audit.md → packages/persistence/src/repository.ts
 - `Verifikasi` --references--> `VisualOffice()`  [INFERRED]
   docs/project-audit.md → apps/web/src/office/VisualOffice.tsx
-- `Acuan dan alur aktual` --references--> `TaskBoardPage()`  [INFERRED]
-  docs/orchestration-audit-2026-10-23.md → apps/web/src/views/TaskBoardPage.tsx
 - `Acuan dan alur aktual` --references--> `HermesKanbanCard()`  [INFERRED]
   docs/orchestration-audit-2026-10-23.md → apps/web/src/components/HermesKanbanCard.tsx
+- `Acuan dan alur aktual` --references--> `TaskBoardPage()`  [INFERRED]
+  docs/orchestration-audit-2026-10-23.md → apps/web/src/views/TaskBoardPage.tsx
 
 ## Import Cycles
 - None detected.
@@ -148,34 +147,34 @@
 ## Hyperedges (group relationships)
 - **Realtime change propagation (DB write to card refresh)** — docs_realtime_announcewrites, docs_realtime_live_topics, docs_realtime_sse_events, agents_officeshell, docs_realtime_carddatastatus [EXTRACTED 1.00]
 
-## Communities (103 total, 9 thin omitted)
+## Communities (102 total, 9 thin omitted)
 
 ### Community 0 - "adapter-freelancer/src/index.ts"
 Cohesion: 0.06
 Nodes (47): BackoffJob, BusinessSync, BusinessSyncStatus, Dependencies, rateLimited(), RunStatus, safeError(), SyncStep (+39 more)
 
 ### Community 1 - "WorkspaceRepository"
-Cohesion: 0.07
-Nodes (5): P3 — Maintainability, camel(), camelKey(), tsQuery(), WorkspaceRepository
+Cohesion: 0.08
+Nodes (4): camel(), camelKey(), parseJson(), WorkspaceRepository
 
 ### Community 2 - "OfficeShell.tsx"
-Cohesion: 0.08
-Nodes (38): useLiveUpdates(), activityTitle(), BOARD_ACCENTS, buildBoards(), initials(), moneyList(), OfficeIcon(), OfficeIconName (+30 more)
+Cohesion: 0.07
+Nodes (38): BusinessSyncStatus, OperationsData, activityTitle(), BOARD_ACCENTS, buildBoards(), initials(), moneyList(), OfficeIcon() (+30 more)
 
 ### Community 3 - "adapter-hermes/src/index.ts"
 Cohesion: 0.06
 Nodes (31): OfficeLearningMemory, OfficeLearningSession, OfficeLearningStatus, hermesKanbanRunner, day(), discussionBlocked(), Employee, nextDay() (+23 more)
 
 ### Community 4 - "ui.tsx"
-Cohesion: 0.22
-Nodes (22): AuditEvent, formatDate(), ActivityRows(), EmptyState(), ErrorNotice(), OperationStatus(), PageIntro(), CapabilitiesPage() (+14 more)
+Cohesion: 0.31
+Nodes (17): AuditEvent, Autopilot, formatDate(), ActivityRows(), EmptyState(), ErrorNotice(), OperationStatus(), StateLabel() (+9 more)
 
 ### Community 5 - "server/package.json"
-Cohesion: 0.12
-Nodes (17): name, private, type, @fastify/static, @fvh/adapter-freelancer, @fvh/adapter-github, @fvh/adapter-hermes, @fvh/application (+9 more)
+Cohesion: 0.10
+Nodes (20): devDependencies, tsx, @types/qrcode, name, private, type, @fastify/static, @fvh/adapter-freelancer (+12 more)
 
 ### Community 6 - "contracts/src/index.ts"
-Cohesion: 0.12
+Cohesion: 0.13
 Nodes (16): dayDiff(), workController(), registerWorkRoutes(), localDateKey(), createClientProjectSchema, createPaymentSchema, currencyCode, isoDate (+8 more)
 
 ### Community 7 - "domain/src/index.ts"
@@ -186,9 +185,9 @@ Nodes (17): registerOperationsRoutes(), paymentReminder(), dp, invoice, project,
 Cohesion: 0.13
 Nodes (24): Box(), HAIR, Label(), nearbyIdlePeer(), OfficeAgent(), Props, shortestAngle(), SKIN (+16 more)
 
-### Community 9 - "services/projects-co-id.ts"
-Cohesion: 0.12
-Nodes (16): mentionedRupiahAmounts(), parseProjectsCoIdHref(), parseProjectsCoIdProject(), PROJECTS_CO_ID_AUTO_REASON, PROJECTS_CO_ID_ORIGIN, PROJECTS_CO_ID_PROPOSAL_LIMIT, ProjectsCoIdListing, ProjectsCoIdObservation (+8 more)
+### Community 9 - "services/autopilot.ts"
+Cohesion: 0.05
+Nodes (29): mentionedRupiahAmounts(), parseProjectsCoIdHref(), parseProjectsCoIdProject(), PROJECTS_CO_ID_AUTO_REASON, PROJECTS_CO_ID_ORIGIN, PROJECTS_CO_ID_PROPOSAL_LIMIT, ProjectsCoIdListing, ProjectsCoIdObservation (+21 more)
 
 ### Community 10 - "Root Tooling & Lint"
 Cohesion: 0.06
@@ -196,11 +195,11 @@ Nodes (32): devDependencies, eslint, @eslint/js, globals, @types/node, typescrip
 
 ### Community 11 - "3D Office Scene"
 Cohesion: 0.18
-Nodes (29): spokenOfficeTurn(), B(), Beanbag(), Board(), boardTexture(), Building(), CameraRig(), Chair() (+21 more)
+Nodes (28): B(), Beanbag(), Board(), boardTexture(), Building(), CameraRig(), Chair(), Label() (+20 more)
 
-### Community 12 - "office-state.ts"
-Cohesion: 0.17
-Nodes (14): activityFor(), AgentState, autopilotState(), clientRelationsState(), Derived, deriveOfficeAgents(), leadState(), OfficeContext (+6 more)
+### Community 12 - "App.tsx"
+Cohesion: 0.23
+Nodes (12): App(), Metric(), queryClient, emptyReply(), InboxPage(), syncLine(), SyncState, waitingLabel() (+4 more)
 
 ### Community 13 - "Web Dependencies"
 Cohesion: 0.07
@@ -210,64 +209,64 @@ Nodes (28): dependencies, @fvh/domain, react, react-dom, react-router, @react-th
 Cohesion: 0.14
 Nodes (21): OwnerCharacter(), LEAD_DESK, LIFT, liftDoorReached(), MANAGER_DESK, PODS, PROJECTS_CO_ID_DESK, createOwnerMotion() (+13 more)
 
+### Community 15 - "discord-kanban.ts"
+Cohesion: 0.21
+Nodes (5): DiscordConfig, DiscordKanbanMonitor, DiscordMessage, discordTaskEmbed(), footer()
+
 ### Community 16 - "Live Events (SSE) Server"
 Cohesion: 0.13
 Nodes (12): announceWrites(), Listener, LiveEvents, READ_ONLY_POSTS, ROUTE_TOPICS, routeTopics(), sample(), TABLE_TOPICS (+4 more)
 
 ### Community 17 - "OperationsService"
 Cohesion: 0.17
-Nodes (3): OperationsService, OutboxMessage, OperationsRepository
+Nodes (4): OperationsService, OutboxMessage, DocumentKind, OperationsRepository
 
-### Community 18 - "Freelancer Autopilot"
-Cohesion: 0.11
-Nodes (11): AutopilotDependencies, AutopilotStatus, chooseBid(), FreelancerAutopilot, matchedProfileJobs(), mentionedAmounts(), proposalFor(), rateLimited() (+3 more)
+### Community 18 - "owner-input.ts"
+Cohesion: 0.27
+Nodes (8): bindOwnerKeyboard(), createOwnerInput(), DIRECTIONS, OwnerDirection, OwnerInput, OwnerMoveInput, ownsKeyboard(), setup()
 
 ### Community 20 - "Server Assembly (index.ts)"
 Cohesion: 0.08
 Nodes (21): autopilot, businessSync, createFreelancerReader(), credentialScriptPath, credentialStorePath, databaseUrl, draftingConfig, envFile (+13 more)
 
 ### Community 22 - "Office Floor Layout"
-Cohesion: 0.11
-Nodes (20): BACK_BOARDS, BOARD_SIZE, BOARDS, BoardSlot, BREAK_SLOTS, corridorZ(), dayPhase(), FLOOR (+12 more)
+Cohesion: 0.09
+Nodes (28): invitationSpot(), OfficeInvitation, team, BACK_BOARDS, BOARD_SIZE, BOARDS, BoardSlot, BREAK_SLOTS (+20 more)
 
 ### Community 23 - "HermesKanban"
 Cohesion: 0.23
 Nodes (5): HermesKanbanStatus, HermesKanbanTask, HermesKanban, isLegacyPlan(), isPlan()
 
 ### Community 24 - "Opportunities & Pipeline UI"
-Cohesion: 0.33
-Nodes (18): BidDraft, Opportunity, formatMoney(), matchesSource(), opportunitySource(), projectLink(), SOURCE_OPTIONS, SourceKey (+10 more)
+Cohesion: 0.26
+Nodes (20): BidDraft, Opportunity, formatMoney(), matchesSource(), opportunitySource(), projectLink(), SOURCE_OPTIONS, SourceKey (+12 more)
 
 ### Community 25 - "projects.co.id Page"
-Cohesion: 0.12
-Nodes (16): BusinessSyncStatus, ProjectsCoIdEntry, date(), daysUntil(), fieldLabel, ProjectEntry(), ProjectsCoIdPage(), rupiah() (+8 more)
+Cohesion: 0.13
+Nodes (16): ProjectsCoIdEntry, date(), daysUntil(), fieldLabel, ProjectEntry(), ProjectsCoIdPage(), rupiah(), Sort (+8 more)
 
 ### Community 26 - "vitest"
 Cohesion: 0.15
 Nodes (10): fixedNow, now, profile, project, assignees, list, insertTestOpportunity(), testOpportunity (+2 more)
 
-### Community 27 - "api"
-Cohesion: 0.16
-Nodes (21): api(), Capabilities, jsonRequest(), Profile, kanbanQuery, officeLearningQuery, deadlineLabel(), PIPELINE_STAGES (+13 more)
+### Community 27 - "WorkPage.tsx"
+Cohesion: 0.39
+Nodes (6): deadlineLabel(), PIPELINE_STAGES, SOURCE_LABELS, validCurrency(), valueOrDash(), WorkPage()
 
 ### Community 28 - "services/hermes-kanban.ts"
-Cohesion: 0.24
-Nodes (12): HERMES_BOARD, taskRow, DATA_PLAN_AUTHOR, FINAL_AUTHOR, ORCHESTRATOR, parsePlan(), PLAN_AUTHOR, planInstructions() (+4 more)
+Cohesion: 0.21
+Nodes (13): HERMES_BOARD, taskRow, CODE_PROFILES, DATA_PLAN_AUTHOR, FINAL_AUTHOR, ORCHESTRATOR, parsePlan(), PLAN_AUTHOR (+5 more)
 
 ### Community 29 - "createApp"
 Cohesion: 0.31
 Nodes (7): activityController(), agendaCategory(), agendaSchema, officeLearningController(), registerActivityRoutes(), registerOfficeLearningRoutes(), fastify
-
-### Community 30 - ".transaction"
-Cohesion: 0.15
-Nodes (3): KnowledgeChunk, KnowledgeProvider, parseJson()
 
 ### Community 31 - "HermesKanbanCard.tsx"
 Cohesion: 0.31
 Nodes (11): HermesKanbanDetail, COLUMNS, employee(), HermesKanbanCard(), submit(), STATUS, TaskCard(), TaskResult() (+3 more)
 
 ### Community 32 - "ref_node_fs"
-Cohesion: 0.17
+Cohesion: 0.18
 Nodes (14): hermesLine(), killTree(), logFile, pidFile, pidsOnPorts(), pnpm(), portOpen(), ports (+6 more)
 
 ### Community 33 - "migrate-sqlite-to-supabase.mjs"
@@ -275,8 +274,8 @@ Cohesion: 0.20
 Nodes (8): backup, backupDir, envPath, root, source, sqlitePath, TABLES, url
 
 ### Community 34 - "Audit Projek"
-Cohesion: 0.12
-Nodes (16): Arsitektur, Audit Projek, Domain, Final assessment, Frontend, Persistence, Ringkasan, Roadmap (+8 more)
+Cohesion: 0.05
+Nodes (39): Arsitektur, Audit Projek, Domain, Final assessment, Frontend, P0-1. Capability verification belum mengunci aktivasi policy, P0-2. Generic production-write bypass policy, P0-3. HTTP 200 tanpa `resultId` dianggap sukses (+31 more)
 
 ### Community 35 - "knowledge/src/index.ts"
 Cohesion: 0.16
@@ -287,8 +286,8 @@ Cohesion: 0.15
 Nodes (18): capabilitiesController(), lastFailureNote(), healthController(), inboxController(), linkedinController(), settingsController(), allowedDevOrigins, AppContext (+10 more)
 
 ### Community 37 - "live.ts"
-Cohesion: 0.21
-Nodes (7): connectLive(), LIVE_STATE_LABELS, LiveState, queryKeysFor(), TOPIC_QUERY_KEYS, LIVE_TOPICS, LiveTopic
+Cohesion: 0.22
+Nodes (8): connectLive(), LIVE_STATE_LABELS, LiveState, queryKeysFor(), TOPIC_QUERY_KEYS, useLiveUpdates(), LIVE_TOPICS, LiveTopic
 
 ### Community 38 - "Product Principles (Docs)"
 Cohesion: 0.16
@@ -312,7 +311,7 @@ Nodes (15): dependencies, fastify, @fastify/static, @fvh/adapter-freelancer, @fv
 
 ### Community 43 - "routes/operations.ts"
 Cohesion: 0.15
-Nodes (17): Calendar, JobSignal, Messenger, Payment, OperationSignal, clientAutomationSchema, date, googleClientSchema (+9 more)
+Nodes (18): Calendar, JobSignal, Messenger, Payment, OperationSignal, clientAutomationSchema, date, googleClientSchema (+10 more)
 
 ### Community 44 - "Calendar Page"
 Cohesion: 0.23
@@ -323,24 +322,24 @@ Cohesion: 0.14
 Nodes (13): dependencies, @fvh/contracts, @fvh/domain, @fvh/knowledge, exports, @fvh/contracts, @fvh/domain, @fvh/knowledge (+5 more)
 
 ### Community 46 - "persistence/package.json"
-Cohesion: 0.11
-Nodes (18): dependencies, @fvh/domain, @fvh/knowledge, pg, devDependencies, @electric-sql/pglite, @types/pg, exports (+10 more)
+Cohesion: 0.10
+Nodes (19): dependencies, @fvh/domain, @fvh/knowledge, pg, devDependencies, @electric-sql/pglite, @types/pg, exports (+11 more)
 
-### Community 47 - "App.tsx"
-Cohesion: 0.15
-Nodes (14): OperationsData, App(), queryClient, ActivityPage(), NotFoundPage(), date(), Field(), localTime() (+6 more)
+### Community 47 - "jsonRequest"
+Cohesion: 0.14
+Nodes (18): ClientProject, jsonRequest(), CommunicationInput, NewClientProject, normalizeWhatsAppPhone(), saveClientCommunication(), input, project (+10 more)
 
 ### Community 48 - "Browser Bid & Floor-2 Docs"
 Cohesion: 0.25
 Nodes (7): Google Calendar OAuth (PKCE, calendar.events.owned), integration-vault.ps1 (DPAPI vault), operation_outbox / operation_documents tables, OperationsService (60 s cycle), WhatsApp via Baileys 7.0.0-rc14, allowBuilds (Baileys / protobufjs scripts blocked), pnpm workspace (apps/*, packages/*)
 
 ### Community 49 - "google-calendar.ts"
-Cohesion: 0.23
-Nodes (7): CalendarMap, Client, Event, Token, P1-9. Google token/client JSON tidak divalidasi schema, OwnerTask, DocumentKind
+Cohesion: 0.40
+Nodes (5): CalendarMap, Client, Event, Token, P1-9. Google token/client JSON tidak divalidasi schema
 
 ### Community 50 - "hermes-team.ts"
-Cohesion: 0.16
-Nodes (12): CODE_PROFILES, boardPath, description(), employees, FOCUS, metadata, missing, profileName() (+4 more)
+Cohesion: 0.18
+Nodes (11): boardPath, description(), employees, FOCUS, metadata, missing, profileName(), project (+3 more)
 
 ### Community 51 - "app.ts"
 Cohesion: 0.13
@@ -351,12 +350,12 @@ Cohesion: 0.17
 Nodes (11): dependencies, @fvh/domain, zod, exports, @fvh/domain, zod, name, private (+3 more)
 
 ### Community 53 - "database.ts"
-Cohesion: 0.16
-Nodes (10): repositoryWithBid(), setup(), createDatabase(), Database, memory(), migrate(), postgres(), Row (+2 more)
+Cohesion: 0.17
+Nodes (9): repositoryWithBid(), setup(), createDatabase(), Database, memory(), migrate(), postgres(), Row (+1 more)
 
 ### Community 54 - "api.ts"
-Cohesion: 0.11
-Nodes (23): ApiError, Autopilot, ClientProject, DashboardResponse, FreelancerProductionWriteInput, FreelancerSandboxWriteInput, Inbox, Insights (+15 more)
+Cohesion: 0.12
+Nodes (23): api(), ApiError, Capabilities, DashboardResponse, FreelancerProductionWriteInput, FreelancerSandboxWriteInput, Inbox, Insights (+15 more)
 
 ### Community 55 - "Audit orchestration — 23 Oktober 2026"
 Cohesion: 0.14
@@ -372,7 +371,7 @@ Nodes (10): dependencies, @fvh/knowledge, exports, @fvh/knowledge, name, private
 
 ### Community 58 - "linkedin-oauth.ts"
 Cohesion: 0.22
-Nodes (11): LinkedInClientCredentials, buildLinkedInAuthorizationUrl(), completeLinkedInAuthorization(), isLoopback(), LinkedInCallbackResult, LinkedInOAuthOptions, LinkedInOAuthService, PendingFlow (+3 more)
+Nodes (10): buildLinkedInAuthorizationUrl(), completeLinkedInAuthorization(), isLoopback(), LinkedInCallbackResult, LinkedInOAuthOptions, LinkedInOAuthService, PendingFlow, safeEqual() (+2 more)
 
 ### Community 59 - "Base TS Config"
 Cohesion: 0.18
@@ -387,8 +386,8 @@ Cohesion: 0.20
 Nodes (9): compilerOptions, outDir, rootDir, sourceMap, types, exclude, extends, include (+1 more)
 
 ### Community 62 - "repository.ts"
-Cohesion: 0.12
-Nodes (9): BidOutcome, ClientProjectSource, ClientProjectStatus, ClientThread, initialPolicy(), initialProfile(), ServiceProfile, SkipReasonSummary (+1 more)
+Cohesion: 0.13
+Nodes (8): BidOutcome, ClientProjectSource, ClientProjectStatus, ClientThread, ServiceProfile, SkipReasonSummary, StoredKnowledgeSource, tsQuery()
 
 ### Community 63 - "ai-env.ts"
 Cohesion: 0.47
@@ -478,9 +477,9 @@ Nodes (6): compilerOptions, noEmit, types, extends, include, ../../tsconfig.base
 Cohesion: 0.25
 Nodes (8): applicationSnapshot(), hermesKanbanController(), idParams, Json, money(), registerHermesKanbanRoutes(), hermesKanbanRecoverySchema, hermesKanbanTaskSchema
 
-### Community 87 - "P1 — Data consistency dan reliability"
-Cohesion: 0.14
-Nodes (13): P0-1. Capability verification belum mengunci aktivasi policy, P0-2. Generic production-write bypass policy, P0-3. HTTP 200 tanpa `resultId` dianggap sukses, P0-4. PostgreSQL TLS certificate verification dimatikan, P0 — Wajib sebelum live marketplace, P1-1. Claim bid dapat terkunci permanen setelah crash, P1-3. Manual draft dapat mengubah harga/durasi keluar policy, P1-4. Bid submission tidak atomic sebagai logical operation (+5 more)
+### Community 87 - ".seed"
+Cohesion: 0.20
+Nodes (3): P3 — Maintainability, initialPolicy(), initialProfile()
 
 ### Community 88 - "OfficeEnvironment.tsx"
 Cohesion: 0.33
@@ -495,12 +494,12 @@ Cohesion: 0.83
 Nodes (3): epoch(), text(), toTask()
 
 ### Community 94 - "IntegrationVault"
-Cohesion: 0.27
+Cohesion: 0.38
 Nodes (5): IntegrationVault, VaultKey, MemoryVault, fixture, MemoryVault
 
-### Community 95 - "P2 — Performance, UX, dan operasional"
+### Community 95 - "Orchestration Hermes"
 Cohesion: 0.20
-Nodes (10): P2-1. Origin checks mutating route belum seragam, P2-2. GitHub sync-all unbounded, P2-3. Repository list belum bounded dan ordering belum stabil, P2-4. Knowledge Hub query perlu batas, P2-5. Live event stream perlu reconnect protocol, P2-6. 3D fallback dan performance, P2-7. Polling fallback dapat membebani server, P2-8. WhatsApp uncertain delivery (+2 more)
+Nodes (9): DiscordChannel, Alur tujuan, Batas eksekusi, Bukti verifikasi, Kondisi workspace pada pemeriksaan terakhir, Orchestration Hermes, Pengiriman baru dan retry, Setup profil dan repo (+1 more)
 
 ### Community 96 - "scripts"
 Cohesion: 0.29
@@ -508,19 +507,15 @@ Nodes (7): scripts, build, dev, start, test, test:smoke, typecheck
 
 ### Community 98 - "move-to-fvh-schema.mjs"
 Cohesion: 0.18
-Nodes (7): GitHubEnvironment, parseGitHubEnvironment(), readGitHubEnvironment(), client, MARKERS, root, url
+Nodes (5): directories, client, MARKERS, root, url
 
 ### Community 99 - "linkedin-env.ts"
-Cohesion: 0.60
-Nodes (3): LinkedInEnvironmentCredentials, parseLinkedInEnvironment(), readLinkedInEnvironment()
+Cohesion: 0.47
+Nodes (4): LinkedInEnvironmentCredentials, parseLinkedInEnvironment(), readLinkedInEnvironment(), LinkedInClientCredentials
 
 ### Community 100 - "freelancer-env.ts"
-Cohesion: 0.60
-Nodes (3): FreelancerEnvironment, parseFreelancerEnvironment(), readFreelancerEnvironment()
-
-### Community 101 - "devDependencies"
-Cohesion: 0.67
-Nodes (3): devDependencies, tsx, @types/qrcode
+Cohesion: 0.27
+Nodes (6): FreelancerEnvironment, parseFreelancerEnvironment(), readFreelancerEnvironment(), GitHubEnvironment, parseGitHubEnvironment(), readGitHubEnvironment()
 
 ### Community 104 - "whatsapp-status.ts"
 Cohesion: 0.36
@@ -536,22 +531,22 @@ Nodes (6): checkWhatsAppStatus(), states, WhatsAppCheck, WhatsAppSession, whatsa
 
 ## Knowledge Gaps
 - **57 isolated node(s):** `eslint`, `@types/node`, `typescript`, `@fvh/domain`, `@types/react` (+52 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 654 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 664 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
 - **9 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `vitest` connect `vitest` to `adapter-freelancer/src/index.ts`, `OfficeShell.tsx`, `adapter-hermes/src/index.ts`, `ui.tsx`, `domain/src/index.ts`, `OfficeAgent.tsx`, `services/projects-co-id.ts`, `Root Tooling & Lint`, `Owner Movement & Desks`, `Live Events (SSE) Server`, `ref_node_path`, `Office Floor Layout`, `projects.co.id Page`, `services/hermes-kanban.ts`, `HermesKanbanCard.tsx`, `knowledge/src/index.ts`, `live.ts`, `GitHubReadAdapter`, `routes/operations.ts`, `google-calendar.ts`, `app.ts`, `database.ts`, `api.ts`, `linkedin-oauth.ts`, `ai-env.ts`, `types.ts`, `CardDataStatus.tsx`, `portfolio.ts`, `IntegrationVault`, `linkedin-env.ts`, `freelancer-env.ts`, `whatsapp-status.ts`?**
-  _High betweenness centrality (0.117) - this node is a cross-community bridge._
+- **Why does `vitest` connect `vitest` to `adapter-freelancer/src/index.ts`, `OfficeShell.tsx`, `adapter-hermes/src/index.ts`, `ui.tsx`, `domain/src/index.ts`, `OfficeAgent.tsx`, `services/autopilot.ts`, `Root Tooling & Lint`, `Owner Movement & Desks`, `Live Events (SSE) Server`, `owner-input.ts`, `Office Floor Layout`, `projects.co.id Page`, `services/hermes-kanban.ts`, `HermesKanbanCard.tsx`, `knowledge/src/index.ts`, `live.ts`, `GitHubReadAdapter`, `routes/operations.ts`, `jsonRequest`, `app.ts`, `database.ts`, `api.ts`, `linkedin-oauth.ts`, `ai-env.ts`, `types.ts`, `CardDataStatus.tsx`, `portfolio.ts`, `IntegrationVault`, `move-to-fvh-schema.mjs`, `linkedin-env.ts`, `freelancer-env.ts`, `whatsapp-status.ts`?**
+  _High betweenness centrality (0.100) - this node is a cross-community bridge._
 - **Are the 2 inferred relationships involving `WorkspaceRepository` (e.g. with `Persistence` and `Ringkasan`) actually correct?**
   _`WorkspaceRepository` has 2 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `eslint`, `@types/node`, `typescript` to the rest of the system?**
   _57 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `adapter-freelancer/src/index.ts` be split into smaller, more focused modules?**
   _Cohesion score 0.055381400208986416 - nodes in this community are weakly interconnected._
-- **Why does `WorkspaceRepository` connect `WorkspaceRepository` to `adapter-freelancer/src/index.ts`, `Audit Projek`, `knowledge/src/index.ts`, `shared.ts`, `routes/operations.ts`, `Live Events (SSE) Server`, `google-calendar.ts`, `OperationsService`, `app.ts`, `database.ts`, `P1 — Data consistency dan reliability`, `.transaction`, `Queryable`, `vitest`, `repository.ts`?**
-  _High betweenness centrality (0.089) - this node is a cross-community bridge._
+- **Why does `WorkspaceRepository` connect `WorkspaceRepository` to `adapter-freelancer/src/index.ts`, `Audit Projek`, `knowledge/src/index.ts`, `shared.ts`, `routes/operations.ts`, `Live Events (SSE) Server`, `OperationsService`, `app.ts`, `.transaction`, `database.ts`, `Queryable`, `.seed`, `repository.ts`, `vitest`, `IntegrationVault`?**
+  _High betweenness centrality (0.055) - this node is a cross-community bridge._
 
 ### Low-confidence Hints
 _AMBIGUOUS edges — the extractor was unsure. Verify before acting on these._
