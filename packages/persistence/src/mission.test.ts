@@ -17,8 +17,11 @@ describe('mission persistence', () => {
     expect(await repository.createMission({ ...input, title: 'Changed title' })).toBeUndefined();
     expect(await repository.listMissions()).toEqual([first]);
     expect(await repository.createMission({ ...input, source: 'deadline' })).toBeDefined();
-    const edge = await repository.createMission({ ...input, sourceId: 'payload-edge', payload: { projectId: 'a'.repeat(2032) } });
-    expect(edge?.payload.projectId).toHaveLength(2032);
+    const edge = await repository.createMission({ ...input, sourceId: 'payload-edge', payload: { projectId: 'a'.repeat(2031) } });
+    expect(edge?.payload.projectId).toHaveLength(2031);
+    await expect(repository.createMission({ ...input, sourceId: 'payload-too-large', payload: { projectId: 'a'.repeat(2032) } })).rejects.toThrow();
+    await expect(repository.sql.query('UPDATE missions SET payload=$2::jsonb WHERE id=$1',
+      [edge!.id, JSON.stringify({ projectId: 'a'.repeat(2032) })])).rejects.toThrow(/check constraint/);
   });
 
   it('filters by status, source, assignee and inclusive due window', async () => {

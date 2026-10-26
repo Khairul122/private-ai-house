@@ -14,6 +14,7 @@ describe('mission contracts', () => {
     expect(listMissionsSchema.safeParse({ limit: 501 }).success).toBe(false);
     expect(createMissionSchema.safeParse({ ...input, payload: { token: 'secret' } }).success).toBe(false);
     expect(createMissionSchema.safeParse({ ...input, payload: { projectId: 'a'.repeat(1100), taskId: 'b'.repeat(1100) } }).success).toBe(false);
-    expect(createMissionSchema.safeParse({ ...input, payload: { projectId: 'a'.repeat(2032) } }).success).toBe(true);
+    expect(createMissionSchema.safeParse({ ...input, payload: { projectId: 'a'.repeat(2031) } }).success).toBe(true);
+    expect(createMissionSchema.safeParse({ ...input, payload: { projectId: 'a'.repeat(2032) } }).success).toBe(false);
   });
 });

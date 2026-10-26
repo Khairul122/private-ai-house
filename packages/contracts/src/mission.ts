@@ -15,7 +15,12 @@ export const missionPayloadSchema = z.object({
   paymentId: payloadIdentifier.optional(),
   taskId: payloadIdentifier.optional(),
   knowledgeSourceId: payloadIdentifier.optional(),
-}).strict().refine(value => new TextEncoder().encode(JSON.stringify(value)).length <= 2048, 'Payload maksimal 2 KiB.');
+}).strict().refine(value => {
+  const fieldCount = Object.values(value).filter(field => field !== undefined).length;
+  // PostgreSQL jsonb::text inserts one space after each colon and comma.
+  const jsonbTextBytes = new TextEncoder().encode(JSON.stringify(value)).length + (fieldCount ? 2 * fieldCount - 1 : 0);
+  return jsonbTextBytes <= 2048;
+}, 'Payload maksimal 2 KiB.');
 
 export const createMissionSchema = z.object({
   source: missionSourceSchema,

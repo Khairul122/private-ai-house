@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS missions (
   priority TEXT NOT NULL CHECK (priority IN ('low','normal','high','urgent')),
   due_at TIMESTAMPTZ,
   assigned_to TEXT,
-  payload JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(payload) = 'object' AND octet_length(payload::text) <= 4096),
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(payload) = 'object' AND octet_length(payload::text) <= 2048),
   blocker TEXT,
   error TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
