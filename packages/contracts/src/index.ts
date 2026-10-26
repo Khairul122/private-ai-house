@@ -120,3 +120,4 @@ export type UpdatePolicyInput = z.infer<typeof updatePolicySchema>;
 export type KnowledgeImportInput = z.infer<typeof knowledgeImportSchema>;
 export type ProposalDraftOutput = z.infer<typeof proposalDraftOutputSchema>;
 export * from './operations.js';
+export * from './mission.js';

@@ -331,6 +331,9 @@ importers:
 
   packages/persistence:
     dependencies:
+      '@fvh/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@fvh/domain':
         specifier: workspace:*
         version: link:../domain

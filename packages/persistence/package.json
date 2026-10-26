@@ -7,6 +7,7 @@
   },
   "dependencies": {
     "@fvh/domain": "workspace:*",
+    "@fvh/contracts": "workspace:*",
     "@fvh/knowledge": "workspace:*",
     "pg": "^8.23.1"
   },

@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { transitionPipeline } from '@fvh/domain';
-import type { AuditEvent, AutonomyPolicy, BidDraft, PipelineStatus, ProjectOpportunity } from '@fvh/domain';
+import { canTransitionMission, transitionPipeline } from '@fvh/domain';
+import type { AuditEvent, AutonomyPolicy, BidDraft, MissionItem, PipelineStatus, ProjectOpportunity } from '@fvh/domain';
 import { chooseProjectsCoIdBid, evaluatePolicy, projectsCoIdDraftPolicy, projectsCoIdSettings } from '@fvh/domain';
+import { createMissionSchema, listMissionsSchema, updateMissionStatusSchema } from '@fvh/contracts';
+import type { CreateMissionInput, ListMissionsInput, UpdateMissionStatusInput } from '@fvh/contracts';
 import type { KnowledgeChunk, KnowledgeProvider } from '@fvh/knowledge';
 import { createDatabase, type Database, type Queryable } from './database.js';
 
@@ -43,6 +45,17 @@ export type Payment = {
 const CLIENT_PROJECT_COLUMNS = 'id, title, client, source, external_project_id, status, deadline, value, currency, created_at';
 const PAYMENT_COLUMNS = 'id, project_id, amount, currency, status, due_date, received_at, note, created_at';
 const BID_RESULT_COLUMNS = 'project_id, bid_id, amount, currency, submitted_at, award_status, outcome, checked_at';
+const MISSION_COLUMNS = 'id, source, source_id, kind, title, status, priority, due_at, assigned_to, payload, blocker, error, created_at, updated_at';
+
+function mission(row: Record<string, unknown>): MissionItem {
+  const item = camel<MissionItem>([row])[0]!;
+  return {
+    ...item,
+    dueAt: item.dueAt ? new Date(item.dueAt).toISOString() : null,
+    createdAt: new Date(item.createdAt).toISOString(),
+    updatedAt: new Date(item.updatedAt).toISOString(),
+  };
+}
 
 export type StoredKnowledgeSource = {
   id: string;
@@ -118,6 +131,53 @@ export class WorkspaceRepository {
   /** Raw SQL access for tests and one-off tooling. */
   get sql(): Queryable {
     return this.database;
+  }
+
+  /** A source identity is created once. Duplicates return undefined without changing the stored item. */
+  async createMission(input: CreateMissionInput): Promise<MissionItem | undefined> {
+    const value = createMissionSchema.parse(input);
+    const [row] = await this.database.query(`INSERT INTO missions
+      (id, source, source_id, kind, title, status, priority, due_at, assigned_to, payload)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)
+      ON CONFLICT (source, source_id) DO NOTHING RETURNING ${MISSION_COLUMNS}`,
+    [randomUUID(), value.source, value.sourceId, value.kind, value.title, value.status, value.priority,
+      value.dueAt ? new Date(value.dueAt).toISOString() : null, value.assignedTo, JSON.stringify(value.payload)]);
+    return row ? mission(row) : undefined;
+  }
+
+  async listMissions(filters: ListMissionsInput = {}): Promise<MissionItem[]> {
+    const value = listMissionsSchema.parse(filters);
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    const add = (column: string, operator: string, input: string | undefined) => {
+      if (input === undefined) return;
+      params.push(input);
+      conditions.push(`${column} ${operator} $${params.length}`);
+    };
+    add('status', '=', value.status);
+    add('source', '=', value.source);
+    add('assigned_to', '=', value.assignedTo);
+    add('due_at', '>=', value.dueFrom ? new Date(value.dueFrom).toISOString() : undefined);
+    add('due_at', '<=', value.dueTo ? new Date(value.dueTo).toISOString() : undefined);
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    params.push(value.limit, value.offset);
+    const rows = await this.database.query(`SELECT ${MISSION_COLUMNS} FROM missions ${where}
+      ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
+      due_at ASC NULLS LAST, created_at ASC, id ASC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
+    return rows.map(mission);
+  }
+
+  async updateMissionStatus(id: string, input: UpdateMissionStatusInput): Promise<MissionItem | undefined> {
+    const value = updateMissionStatusSchema.parse(input);
+    const [current] = await this.database.query<{ status: MissionItem['status'] }>('SELECT status FROM missions WHERE id=$1', [id]);
+    if (!current) return undefined;
+    if (!canTransitionMission(current.status, value.status)) throw new Error('Transisi status mission tidak valid.');
+    const [row] = await this.database.query(`UPDATE missions SET status=$3, blocker=$4, error=$5, updated_at=now()
+      WHERE id=$1 AND status=$2 RETURNING ${MISSION_COLUMNS}`,
+    [id, current.status, value.status, value.status === 'blocked' ? value.blocker ?? null : null,
+      value.status === 'blocked' ? value.error ?? null : null]);
+    if (!row) throw new Error('Status mission berubah bersamaan.');
+    return mission(row);
   }
 
   private async seed() {
