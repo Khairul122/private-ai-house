@@ -26,6 +26,14 @@ export type MissionItem = {
   updatedAt: string;
 };
 
+export type MissionLease = {
+  missionId: string;
+  claimant: string;
+  leaseId: string;
+  claimedAt: string;
+  leaseUntil: string;
+};
+
 const transitions: Record<MissionStatus, readonly MissionStatus[]> = {
   queued: ['in_progress', 'blocked', 'canceled'],
   in_progress: ['blocked', 'completed', 'canceled'],

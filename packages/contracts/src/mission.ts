@@ -50,6 +50,20 @@ export const updateMissionStatusSchema = z.object({
   error: z.string().trim().min(1).max(500).nullable().optional(),
 }).strict().refine(value => value.status === 'blocked' || (value.blocker === undefined && value.error === undefined), 'Blocker dan error hanya untuk status blocked.');
 
+const claimant = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/, 'ID claimant tidak valid.');
+const leaseId = z.string().uuid();
+
+export const claimMissionSchema = z.object({
+  claimant,
+  leaseSeconds: z.number().int().min(1).max(86_400),
+}).strict();
+
+export const renewMissionLeaseSchema = claimMissionSchema.extend({ leaseId });
+export const releaseMissionLeaseSchema = z.object({ claimant, leaseId }).strict();
+
 export type CreateMissionInput = z.input<typeof createMissionSchema>;
 export type ListMissionsInput = z.input<typeof listMissionsSchema>;
 export type UpdateMissionStatusInput = z.input<typeof updateMissionStatusSchema>;
+export type ClaimMissionInput = z.input<typeof claimMissionSchema>;
+export type RenewMissionLeaseInput = z.input<typeof renewMissionLeaseSchema>;
+export type ReleaseMissionLeaseInput = z.input<typeof releaseMissionLeaseSchema>;

@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { canTransitionMission, transitionPipeline } from '@fvh/domain';
-import type { AuditEvent, AutonomyPolicy, BidDraft, MissionItem, PipelineStatus, ProjectOpportunity } from '@fvh/domain';
+import type { AuditEvent, AutonomyPolicy, BidDraft, MissionItem, MissionLease, PipelineStatus, ProjectOpportunity } from '@fvh/domain';
 import { chooseProjectsCoIdBid, evaluatePolicy, projectsCoIdDraftPolicy, projectsCoIdSettings } from '@fvh/domain';
-import { createMissionSchema, listMissionsSchema, updateMissionStatusSchema } from '@fvh/contracts';
-import type { CreateMissionInput, ListMissionsInput, UpdateMissionStatusInput } from '@fvh/contracts';
+import { claimMissionSchema, createMissionSchema, listMissionsSchema, releaseMissionLeaseSchema, renewMissionLeaseSchema, updateMissionStatusSchema } from '@fvh/contracts';
+import type { ClaimMissionInput, CreateMissionInput, ListMissionsInput, ReleaseMissionLeaseInput, RenewMissionLeaseInput, UpdateMissionStatusInput } from '@fvh/contracts';
 import type { KnowledgeChunk, KnowledgeProvider } from '@fvh/knowledge';
 import { createDatabase, type Database, type Queryable } from './database.js';
 
@@ -46,6 +46,7 @@ const CLIENT_PROJECT_COLUMNS = 'id, title, client, source, external_project_id, 
 const PAYMENT_COLUMNS = 'id, project_id, amount, currency, status, due_date, received_at, note, created_at';
 const BID_RESULT_COLUMNS = 'project_id, bid_id, amount, currency, submitted_at, award_status, outcome, checked_at';
 const MISSION_COLUMNS = 'id, source, source_id, kind, title, status, priority, due_at, assigned_to, payload, blocker, error, created_at, updated_at';
+const MISSION_LEASE_COLUMNS = 'mission_id, claimant, lease_id, claimed_at, lease_until';
 
 function mission(row: Record<string, unknown>): MissionItem {
   const item = camel<MissionItem>([row])[0]!;
@@ -55,6 +56,11 @@ function mission(row: Record<string, unknown>): MissionItem {
     createdAt: new Date(item.createdAt).toISOString(),
     updatedAt: new Date(item.updatedAt).toISOString(),
   };
+}
+
+function missionLease(row: Record<string, unknown>): MissionLease {
+  const lease = camel<MissionLease>([row])[0]!;
+  return { ...lease, claimedAt: new Date(lease.claimedAt).toISOString(), leaseUntil: new Date(lease.leaseUntil).toISOString() };
 }
 
 export type StoredKnowledgeSource = {
@@ -165,6 +171,44 @@ export class WorkspaceRepository {
       ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
       due_at ASC NULLS LAST, created_at ASC, id ASC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
     return rows.map(mission);
+  }
+
+  async getMissionLease(id: string): Promise<MissionLease | undefined> {
+    const [row] = await this.database.query(`SELECT ${MISSION_LEASE_COLUMNS} FROM mission_leases WHERE mission_id=$1`, [id]);
+    return row ? missionLease(row) : undefined;
+  }
+
+  async claimMission(id: string, input: ClaimMissionInput): Promise<{ outcome: 'claimed' | 'reclaimed'; lease: MissionLease } | undefined> {
+    const value = claimMissionSchema.parse(input);
+    return this.database.transaction(async tx => {
+      const [available] = await tx.query("SELECT id FROM missions WHERE id=$1 AND status IN ('queued','in_progress') FOR UPDATE", [id]);
+      if (!available) return undefined;
+      const leaseId = randomUUID();
+      const params = [id, value.claimant, leaseId, value.leaseSeconds];
+      const [reclaimed] = await tx.query(`UPDATE mission_leases SET claimant=$2, lease_id=$3,
+        claimed_at=clock_timestamp(), lease_until=clock_timestamp() + $4 * interval '1 second'
+        WHERE mission_id=$1 AND lease_until <= clock_timestamp() RETURNING ${MISSION_LEASE_COLUMNS}`, params);
+      if (reclaimed) return { outcome: 'reclaimed' as const, lease: missionLease(reclaimed) };
+      const [claimed] = await tx.query(`INSERT INTO mission_leases (mission_id, claimant, lease_id, claimed_at, lease_until)
+        VALUES ($1,$2,$3,clock_timestamp(),clock_timestamp() + $4 * interval '1 second')
+        ON CONFLICT (mission_id) DO NOTHING RETURNING ${MISSION_LEASE_COLUMNS}`, params);
+      return claimed ? { outcome: 'claimed' as const, lease: missionLease(claimed) } : undefined;
+    });
+  }
+
+  async renewMissionLease(id: string, input: RenewMissionLeaseInput): Promise<MissionLease | undefined> {
+    const value = renewMissionLeaseSchema.parse(input);
+    const [row] = await this.database.query(`UPDATE mission_leases SET lease_until=clock_timestamp() + $4 * interval '1 second'
+      WHERE mission_id=$1 AND claimant=$2 AND lease_id=$3 AND lease_until > clock_timestamp()
+      RETURNING ${MISSION_LEASE_COLUMNS}`, [id, value.claimant, value.leaseId, value.leaseSeconds]);
+    return row ? missionLease(row) : undefined;
+  }
+
+  async releaseMissionLease(id: string, input: ReleaseMissionLeaseInput): Promise<boolean> {
+    const value = releaseMissionLeaseSchema.parse(input);
+    const [row] = await this.database.query('DELETE FROM mission_leases WHERE mission_id=$1 AND claimant=$2 AND lease_id=$3 RETURNING mission_id',
+      [id, value.claimant, value.leaseId]);
+    return !!row;
   }
 
   async updateMissionStatus(id: string, input: UpdateMissionStatusInput): Promise<MissionItem | undefined> {

@@ -50,4 +50,63 @@ describe('mission persistence', () => {
     await expect(repository.updateMissionStatus(id, { status: 'queued' })).rejects.toThrow('Transisi status mission tidak valid.');
     expect(await repository.updateMissionStatus('missing', { status: 'queued' })).toBeUndefined();
   });
+
+  it('allows only one concurrent claimant and rejects repeated claims while active', async () => {
+    repository = await WorkspaceRepository.open();
+    const mission = await repository.createMission({ source: 'knowledge', sourceId: 'source-1', kind: 'review', title: 'Tinjau sumber', priority: 'normal' });
+    const claims = await Promise.all(Array.from({ length: 8 }, (_, index) =>
+      repository!.claimMission(mission!.id, { claimant: `worker-${index}`, leaseSeconds: 60 })));
+    const successes = claims.filter(claim => claim !== undefined);
+    expect(successes).toHaveLength(1);
+    expect(successes[0]?.outcome).toBe('claimed');
+    expect(await repository.getMissionLease(mission!.id)).toEqual(successes[0]?.lease);
+    expect(await repository.claimMission(mission!.id, { claimant: successes[0]!.lease.claimant, leaseSeconds: 60 })).toBeUndefined();
+    expect(await repository.claimMission(mission!.id, { claimant: 'worker-other', leaseSeconds: 60 })).toBeUndefined();
+    expect(await repository.listMissions()).toEqual([mission]);
+  });
+
+  it('reclaims an expired lease and fences the old worker from renew or release', async () => {
+    repository = await WorkspaceRepository.open();
+    const mission = await repository.createMission({ source: 'inbox', sourceId: 'thread-lease', kind: 'reply', title: 'Balas', priority: 'high' });
+    await repository.appendAudit({ type: 'mission.reviewed', resourceId: mission!.id, status: 'recorded', reason: 'Reviewed.', policyVersion: null, payloadHash: null });
+    const first = await repository.claimMission(mission!.id, { claimant: 'worker-a', leaseSeconds: 60 });
+    expect(first?.outcome).toBe('claimed');
+    await repository.sql.query('UPDATE mission_leases SET claimed_at=$2, lease_until=$3 WHERE mission_id=$1',
+      [mission!.id, '2020-01-01T00:00:00Z', '2020-01-01T00:01:00Z']);
+    expect(await repository.renewMissionLease(mission!.id, { claimant: 'worker-a', leaseId: first!.lease.leaseId, leaseSeconds: 60 })).toBeUndefined();
+    const second = await repository.claimMission(mission!.id, { claimant: 'worker-b', leaseSeconds: 60 });
+    expect(second?.outcome).toBe('reclaimed');
+    expect(second?.lease.claimant).toBe('worker-b');
+    expect(second?.lease.leaseId).not.toBe(first?.lease.leaseId);
+    expect(await repository.releaseMissionLease(mission!.id, { claimant: 'worker-a', leaseId: first!.lease.leaseId })).toBe(false);
+    expect(await repository.renewMissionLease(mission!.id, { claimant: 'worker-a', leaseId: first!.lease.leaseId, leaseSeconds: 60 })).toBeUndefined();
+    expect(await repository.getMissionLease(mission!.id)).toEqual(second?.lease);
+    expect((await repository.listAudit(5)).map(event => event.type)).toEqual(['mission.reviewed']);
+  });
+
+  it('renews only the active owner and releases only its current token', async () => {
+    repository = await WorkspaceRepository.open();
+    const mission = await repository.createMission({ source: 'payment', sourceId: 'pay-lease', kind: 'check', title: 'Cek', priority: 'normal' });
+    const first = await repository.claimMission(mission!.id, { claimant: 'worker-a', leaseSeconds: 5 });
+    const { leaseId } = first!.lease;
+    expect(await repository.renewMissionLease(mission!.id, { claimant: 'worker-b', leaseId, leaseSeconds: 60 })).toBeUndefined();
+    expect(await repository.releaseMissionLease(mission!.id, { claimant: 'worker-b', leaseId })).toBe(false);
+    const renewed = await repository.renewMissionLease(mission!.id, { claimant: 'worker-a', leaseId, leaseSeconds: 60 });
+    expect(Date.parse(renewed!.leaseUntil)).toBeGreaterThan(Date.parse(first!.lease.leaseUntil));
+    expect(renewed?.claimedAt).toBe(first?.lease.claimedAt);
+    expect(await repository.releaseMissionLease(mission!.id, { claimant: 'worker-a', leaseId })).toBe(true);
+    expect(await repository.getMissionLease(mission!.id)).toBeUndefined();
+    expect(await repository.releaseMissionLease(mission!.id, { claimant: 'worker-a', leaseId })).toBe(false);
+    expect((await repository.claimMission(mission!.id, { claimant: 'worker-b', leaseSeconds: 60 }))?.outcome).toBe('claimed');
+    expect(await repository.releaseMissionLease(mission!.id, { claimant: 'worker-a', leaseId })).toBe(false);
+  });
+
+  it('does not claim missing or terminal missions', async () => {
+    repository = await WorkspaceRepository.open();
+    expect(await repository.claimMission('missing', { claimant: 'worker-a', leaseSeconds: 60 })).toBeUndefined();
+    const mission = await repository.createMission({ source: 'deadline', sourceId: 'done', kind: 'review', title: 'Selesai', priority: 'low' });
+    await repository.updateMissionStatus(mission!.id, { status: 'canceled' });
+    expect(await repository.claimMission(mission!.id, { claimant: 'worker-a', leaseSeconds: 60 })).toBeUndefined();
+    expect(await repository.getMissionLease(mission!.id)).toBeUndefined();
+  });
 });
