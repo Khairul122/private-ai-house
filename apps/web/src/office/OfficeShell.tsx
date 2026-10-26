@@ -320,6 +320,7 @@ export default function OfficeShell() {
   };
   const toggleFollow = (id: string) => {
     const next = followId === id ? null : id;
+    if (next) setView('3d');
     if (next === 'owner') fly({ kind: 'owner' });
     else if (next && spots.has(next)) fly({ kind: 'agent', id: next });
     setFollowId(next);
@@ -454,6 +455,7 @@ export default function OfficeShell() {
           </div>
           <details className="vo3d-panel-disclosure"><summary>Gerakkan pemilik & kamera</summary>
           {webgl ? <OwnerControls input={ownerInput} moving={ownerMoving} /> : <p className="vo3d-owner-hint">Kontrol gerak tidak tersedia karena WebGL tidak aktif.</p>}
+          <p className="vo3d-owner-hint">Seret kiri untuk putar, seret kanan untuk geser, gulir untuk zoom. Di layar sentuh: satu jari putar, dua jari geser atau zoom. Kontrol manual berhenti mengikuti.</p>
           <div className="vo3d-owner-actions">
             <button type="button" disabled={!webgl} aria-pressed={followId === 'owner'} onClick={() => toggleFollow('owner')}>{followId === 'owner' ? 'Hentikan ikuti kamera' : 'Ikuti Owner'}</button>
             <button type="button" onClick={() => fly({ kind: 'overview' })}>Pusatkan kamera</button>
@@ -492,7 +494,9 @@ export default function OfficeShell() {
           </div>
           <p className="vo3d-owner-hint" role="status">{invitation?.id === selected.id ? 'Undangan aktif. Karyawan menuju tempat pertemuan; pekerjaan nyata selalu didahulukan.' : 'Panggilan berlaku untuk satu karyawan idle. Ngobrol dan agenda dikirim sebagai tugas Hermes setelah Anda menekan Kirim.'}</p>
           {interaction && <div className="vo3d-interaction"><HermesKanbanCard key={selected.id + interaction} employeeId={interaction === 'meeting' ? 'chief-of-staff' : selected.id} purpose={interaction} {...(interaction == 'meeting' ? { meetingWith: selected.name } : {})} /></div>}
-          <details className="vo3d-panel-disclosure"><summary>Kontrol kamera & perjalanan</summary><div className="vo3d-owner-actions">
+          <details className="vo3d-panel-disclosure"><summary>Kontrol kamera & perjalanan</summary>
+          <p className="vo3d-owner-hint">Seret kiri untuk putar, seret kanan untuk geser, gulir untuk zoom. Di layar sentuh: satu jari putar, dua jari geser atau zoom. Kontrol manual berhenti mengikuti.</p>
+          <div className="vo3d-owner-actions">
             <button type="button" disabled={!spots.has(selected.id)} aria-pressed={followId === selected.id} onClick={() => toggleFollow(selected.id)}>{followId === selected.id ? 'Hentikan ikuti kamera' : 'Ikuti kamera agen'}</button>
             <button type="button" onClick={openOwner}>Kembali ke Owner</button>
             <button type="button" onClick={() => ownerInput.stop()}>Hentikan perjalanan Owner</button>

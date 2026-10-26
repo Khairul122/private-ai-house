@@ -12,6 +12,7 @@ import { OfficeEnvironment } from './OfficeEnvironment.js';
 import OfficeObjects from './OfficeObjects.js';
 import { invitationSpot, type OfficeInvitation } from '../state/office-interaction.js';
 import { createOfficeLife, updateOfficeLife, type OfficeLife } from '../state/office-life.js';
+import { clampCameraPan, followCamera } from '../state/camera-motion.js';
 
 export type CameraCommand = { kind: 'overview' | 'zone' | 'agent' | 'board' | 'owner'; id?: string; n: number };
 /** Live summary drawn on a wall board; lines come from real API data. */
@@ -448,6 +449,7 @@ function CameraRig({ command, view, tour, spots, reducedMotion, followId, positi
   const { camera, gl, size } = useThree();
   const controls = useMemo(() => new OrbitControls(camera), [camera]);
   const fly = useRef<{ target: THREE.Vector3; position: THREE.Vector3; trackId: string | null; anchor: THREE.Vector3 } | null>(null);
+  const manual = useRef(false);
   const interact = useRef(onInteract);
   interact.current = onInteract;
   const aspect = size.width / Math.max(size.height, 1);
@@ -462,14 +464,13 @@ function CameraRig({ command, view, tour, spots, reducedMotion, followId, positi
     controls.target.set(-3, 0, 0);
     controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
     controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
-    const cancel = () => { fly.current = null; interact.current(); };
+    const cancel = () => { manual.current = true; fly.current = null; interact.current(); };
     controls.addEventListener('start', cancel);
     return () => { controls.removeEventListener('start', cancel); controls.dispose(); };
   }, [controls, gl]);
 
   useEffect(() => {
     controls.enableRotate = view === '3d';
-    controls.minPolarAngle = view === 'top' ? 0 : 0.25;
     controls.maxPolarAngle = view === 'top' ? 0.001 : 1.2;
   }, [controls, view]);
 
@@ -480,24 +481,27 @@ function CameraRig({ command, view, tour, spots, reducedMotion, followId, positi
     if (command.kind === 'zone') target = zoneTarget(command.id) ?? target;
     if (command.kind === 'agent' && command.id) {
       const spot = positions.get(command.id) ?? spots.get(command.id);
-      if (spot) target = { x: spot.x, z: spot.z, dist: 13 * fit };
+      if (spot) target = { x: spot.x, z: spot.z, dist: 11 };
     }
     if (command.kind === 'owner') {
       const owner = positions.get('owner') ?? OWNER_SPOT;
-      target = { x: owner.x, z: owner.z, dist: 13 * fit };
+      target = { x: owner.x, z: owner.z, dist: 11 };
     }
     if (command.kind === 'zone') target.dist *= fit;
     const direction = view === 'top' ? new THREE.Vector3(0, 1, 0.001) : new THREE.Vector3(0.62, 0.72, 1).normalize();
-    if (view === '3d' && command.kind === 'owner') direction.set(1, 1, 1).normalize();
-    let goal = { target: new THREE.Vector3(target.x, 0, target.z), position: new THREE.Vector3(target.x, 0, target.z).addScaledVector(direction, target.dist) };
+    const character = command.kind === 'owner' || command.kind === 'agent';
+    if (view === '3d' && character) direction.set(0.65, 0.8, 1).normalize();
+    const focus = new THREE.Vector3(target.x, character ? 1.2 : 0, target.z);
+    let goal = { target: focus, position: focus.clone().addScaledVector(direction, target.dist) };
     const board = command.kind === 'board' && view === '3d' ? BOARDS.find((slot) => slot.id === command.id) : undefined;
     if (board) {
       // Face the board square-on from slightly above so its text is readable.
       // Boards open alongside a card on the right, so aim right of the board to keep it in the free left area.
       const [nx, nz] = board.normal;
-      const focus = new THREE.Vector3(board.x + nz * 4.5, board.y, board.z - nx * 4.5);
-      goal = { target: focus, position: focus.clone().add(new THREE.Vector3(nx * 9 * fit, 2.5, nz * 9 * fit)) };
+      const boardFocus = new THREE.Vector3(board.x + nz * 4.5, board.y, board.z - nx * 4.5);
+      goal = { target: boardFocus, position: boardFocus.clone().add(new THREE.Vector3(nx * 9 * fit, 2.5, nz * 9 * fit)) };
     }
+    manual.current = false;
     if (reducedMotion) { controls.target.copy(goal.target); camera.position.copy(goal.position); fly.current = null; }
     else fly.current = { ...goal, trackId: followId, anchor: goal.target.clone() };
     // spots intentionally omitted: re-run only on explicit commands, not on every state poll.
@@ -513,27 +517,20 @@ function CameraRig({ command, view, tour, spots, reducedMotion, followId, positi
         goal.position.x += dx; goal.position.z += dz;
         goal.anchor.copy(tracked);
       }
-      const k = 1 - Math.exp(-dt * 3.5);
+      const k = 1 - Math.exp(-Math.min(dt, 0.1) * 3.5);
       controls.target.lerp(goal.target, k);
       camera.position.lerp(goal.position, k);
-      if (camera.position.distanceTo(goal.position) < 0.05) fly.current = null;
-    } else if (followId) {
+      if (camera.position.distanceTo(goal.position) < 0.05 && controls.target.distanceTo(goal.target) < 0.05) fly.current = null;
+    } else if (followId && !manual.current) {
       const tracked = positions.get(followId);
-      if (tracked) {
-        const k = reducedMotion ? 1 : 1 - Math.exp(-dt * 4);
-        const dx = (tracked.x - controls.target.x) * k;
-        const dy = (0.9 - controls.target.y) * k;
-        const dz = (tracked.z - controls.target.z) * k;
-        controls.target.x += dx; controls.target.y += dy; controls.target.z += dz;
-        camera.position.x += dx; camera.position.y += dy; camera.position.z += dz;
-      }
+      if (tracked) followCamera(camera.position, controls.target, tracked, dt, reducedMotion);
     }
-    controls.autoRotate = tour && !followId && !reducedMotion && view === '3d';
+    controls.enableDamping = !fly.current && (!followId || manual.current);
+    controls.minPolarAngle = view === 'top' || fly.current ? 0 : 0.25;
+    controls.autoRotate = tour && !followId && !manual.current && !reducedMotion && view === '3d';
     controls.autoRotateSpeed = 0.7;
-    // Keep panning on the building.
-    controls.target.x = THREE.MathUtils.clamp(controls.target.x, FLOOR.minX - 4, FLOOR.maxX + 4);
-    controls.target.z = THREE.MathUtils.clamp(controls.target.z, FLOOR.minZ - 4, FLOOR.maxZ + 4);
     controls.update();
+    clampCameraPan(camera.position, controls.target, command.kind === 'board' && view === '3d' ? 4 : 0);
   });
   return null;
 }
