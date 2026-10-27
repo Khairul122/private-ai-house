@@ -13,6 +13,20 @@ export function registerOperationsRoutes(app:FastifyInstance, options:{repositor
   const {repository:repo,operations:ops,whatsapp,google}=options;
   const parse=<T,>(schema:z.ZodType<T>,body:unknown)=>schema.parse(body);
   const id=(params:unknown)=>z.object({id:z.string().min(1).max(150)}).parse(params).id;
+  const messageStatus=z.object({messages:z.object({lastRunAt:z.string().nullable(),ok:z.boolean().nullable(),selfId:z.string().nullable()})});
+  const boardStatus=z.object({available:z.boolean(),reason:z.string(),checkedAt:z.string(),tasks:z.array(z.object({id:z.string(),title:z.string(),status:z.string(),goalStatus:z.string().optional()}))});
+  ops.dailyPriority.setSources({
+    messageStatus:async()=>{
+      const response=await app.inject({method:'GET',url:'/api/business-sync'});
+      if(response.statusCode!==200) throw new Error('Status sinkronisasi tidak tersedia.');
+      return messageStatus.safeParse(response.json()).data?.messages ?? null;
+    },
+    kanban:async()=>{
+      const response=await app.inject({method:'GET',url:'/api/hermes-kanban'});
+      if(response.statusCode!==200) throw new Error('Status papan tugas tidak tersedia.');
+      return boardStatus.safeParse(response.json()).data ?? null;
+    },
+  });
   app.addHook('onRequest',async(req,reply)=>{
     if(!req.url.startsWith('/api/operations')) return;
     reply.header('Cache-Control','no-store');
@@ -21,6 +35,11 @@ export function registerOperationsRoutes(app:FastifyInstance, options:{repositor
   app.get('/api/operations',async()=>{
     const [clients,notes,tasks,invoices,identity,briefings,messages,projects,payments]=await Promise.all([ops.store.list<ClientAutomation>('client'),ops.store.list<ProgressNote>('progress'),ops.store.list<OwnerTask>('task'),ops.store.list<Invoice>('invoice'),ops.store.get<InvoiceIdentity>('identity','business'),ops.store.list<TeamBriefing>('briefing'),ops.store.messages(),repo.listClientProjects(),repo.listPayments()]);
     return {clients,notes,tasks,invoices,identity,briefings:briefings.slice(0,50),messages,projects,payments,runtime:ops.status(),whatsapp:whatsapp?{...whatsapp.status(),qr:undefined}:null,google:google?.status() ?? null};
+  });
+  app.get('/api/operations/daily-priority',async()=>({day:ops.dailyPriority.day(),summary:await ops.dailyPriority.get(),job:ops.status().jobs['chief-of-staff'] ?? null}));
+  app.post('/api/operations/daily-priority/refresh',async()=>{
+    const summary=await ops.job('chief-of-staff','Memperbarui prioritas harian atas permintaan pemilik.',()=>ops.dailyPriority.refresh(true));
+    return {day:ops.dailyPriority.day(),summary,job:ops.status().jobs['chief-of-staff'] ?? null};
   });
   app.put('/api/operations/clients',async(req,reply)=>{
     const input=parse(clientAutomationSchema,req.body);
