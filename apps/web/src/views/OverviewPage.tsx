@@ -1,10 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { api, type AuditEvent, type Autopilot, type ClientProject, type Inbox, type Opportunity, type Policy, type Work } from '../api/api.js';
+import { api, type AuditEvent, type Autopilot, type Opportunity, type Policy } from '../api/api.js';
 import { StateLabel, EmptyState, ErrorNotice, LoadingPanel, PageIntro, Metric, ActivityRows, OperationStatus } from '../components/ui.js';
-import { deadlineLabel, formatDate, formatMoney } from '../components/format.js';
-
-const WORK_SOURCE: Record<ClientProject['source'], string> = { freelancer: 'Freelancer', direct: 'Klien langsung', linkedin: 'LinkedIn', projects_co_id: 'projects.co.id', other: 'Lainnya' };
+import { formatMoney } from '../components/format.js';
+import DailyPriorityCard from '../components/DailyPriorityCard.js';
 
 export default function OverviewPage() {
   const query = useQuery({ queryKey: ['dashboard'], queryFn: () => api<{
@@ -14,33 +13,12 @@ export default function OverviewPage() {
   }>('/dashboard'), refetchInterval: 10_000 });
   const projects = useQuery({ queryKey: ['projects', 'overview'], queryFn: () => api<Opportunity[]>('/projects'), refetchInterval: 10_000 });
   const operation = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 10_000 });
-  const inbox = useQuery({ queryKey: ['inbox'], queryFn: () => api<Inbox>('/inbox'), refetchInterval: 10_000 });
-  const work = useQuery({ queryKey: ['work'], queryFn: () => api<Work>('/work'), refetchInterval: 10_000 });
   const data = query.isError ? undefined : query.data;
   const opportunities = projects.isError ? undefined : projects.data;
-  const inboxData = inbox.isError ? undefined : inbox.data;
-  const workData = work.isError ? undefined : work.data;
-  const messagesKnown = Boolean(inboxData?.sync?.ok === true && inboxData.sync.lastRunAt);
-  const dueProjects = workData?.projects.filter((project) => project.status === 'active' && project.daysToDeadline !== null && project.daysToDeadline <= 2) ?? [];
-  const needsReply = messagesKnown ? inboxData?.needsReply ?? [] : [];
-  const followUps = messagesKnown ? inboxData?.followUps ?? [] : [];
-  const attentionEmpty = messagesKnown && workData && !needsReply.length && !followUps.length && !dueProjects.length;
 
   return <>
-    <PageIntro eyebrow="Ringkasan bisnis" title="Hari ini di kantor" description="Mulai dari pesan masuk dan tenggat proyek. Status operasi, peluang, dan jejak keputusan ada di bawah." action={<Link to="/opportunities" className="button button-primary">Tinjau peluang</Link>} />
-    <section className="activity-preview card-section" aria-labelledby="overview-attention-title">
-      <div className="section-heading"><div><p className="eyebrow">Tindakan pemilik</p><h2 id="overview-attention-title">Perlu Anda cek</h2></div></div>
-      {inbox.isPending && <LoadingPanel label="Membaca pesan dan tindak lanjut bid..." />}
-      {inbox.isError && <ErrorNotice message="Pesan dan tindak lanjut bid tidak tersedia. Buka kotak masuk untuk mencoba lagi." onRetry={() => inbox.refetch()} />}
-      {inboxData && !messagesKnown && <div className="notice notice-warning" role="status">Status pesan tidak diketahui. {inboxData.sync?.ok === false ? 'Sinkronisasi terakhir gagal.' : 'Sinkronisasi berhasil belum tercatat.'} <Link to="/inbox">Periksa kotak masuk</Link>.</div>}
-      {messagesKnown && <p className="form-help">Pesan Freelancer terakhir disinkronkan {formatDate(inboxData?.sync?.lastRunAt ?? '')}.</p>}
-      {needsReply.length > 0 && <div><h3>Pesan masuk menunggu balasan ({needsReply.length})</h3><ul className="deadlines-list">{needsReply.slice(0, 3).map((thread) => <li className="deadline-item" key={thread.threadId}><div><strong>{thread.projectTitle ?? 'Percakapan tanpa proyek tersinkron'}</strong><div className="item-sub">Freelancer · {thread.preview}</div></div><div className="item-aside"><span className="item-sub">{formatDate(thread.lastMessageAt)}</span></div></li>)}</ul><Link className="text-link" to="/inbox">Lihat semua pesan</Link></div>}
-      {work.isPending && <LoadingPanel label="Membaca tenggat proyek klien..." />}
-      {work.isError && <ErrorNotice message="Tenggat proyek tidak tersedia. Buka proyek dan pendapatan untuk mencoba lagi." onRetry={() => work.refetch()} />}
-      {dueProjects.length > 0 && <div><h3>Tenggat lewat atau dalam 2 hari ({dueProjects.length})</h3><ul className="deadlines-list">{dueProjects.slice(0, 3).map((project) => <li className="deadline-item" key={project.id}><div><strong>{project.title}</strong><div className="item-sub">{project.client} · {WORK_SOURCE[project.source]}</div></div><div className="item-aside"><strong className="is-late">{deadlineLabel(project.daysToDeadline)}</strong><span className="item-sub">{project.deadline ?? 'Tanggal tidak tersedia'}</span></div></li>)}</ul><Link className="text-link" to="/work">Lihat semua proyek</Link></div>}
-      {followUps.length > 0 && <div><h3>Bid tanpa percakapan selama 3 hari atau lebih ({followUps.length})</h3><ul className="deadlines-list">{followUps.slice(0, 3).map((bid) => <li className="deadline-item" key={bid.projectId}><div><Link className="item-link" to={`/opportunities?project=${encodeURIComponent(bid.projectId)}`}>{bid.title}</Link><div className="item-sub">Freelancer · bid dikirim {formatDate(bid.submittedAt)}</div></div><div className="item-aside"><strong>{bid.daysSinceBid} hari</strong></div></li>)}</ul><Link className="text-link" to="/inbox">Lihat semua tindak lanjut</Link></div>}
-      {attentionEmpty && <EmptyState title="Belum ada tindakan dari pesan, bid, atau tenggat" description="Sinkronisasi pesan berhasil. Tidak ada balasan, tindak lanjut bid, atau tenggat proyek tercatat yang perlu dicek saat ini." />}
-    </section>
+    <PageIntro eyebrow="Ringkasan bisnis" title="Hari ini di kantor" description="Prioritas harian dari data tersimpan, status operasi, peluang, dan jejak keputusan." action={<Link to="/opportunities" className="button button-primary">Tinjau peluang</Link>} />
+    <DailyPriorityCard />
     {operation.isError
       ? <ErrorNotice message="Status operasi tidak tersedia. Data lama tidak ditampilkan sebagai status live." onRetry={() => operation.refetch()} />
       : <OperationStatus data={operation.data} />}

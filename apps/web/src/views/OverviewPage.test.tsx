@@ -2,15 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
-import type { ClientProject, Inbox, Work } from '../api/api.js';
+import type { DailyPrioritySummary } from '../../../server/src/models/daily-priority-types.js';
 import OverviewPage from './OverviewPage.js';
 
-const project: ClientProject = {
-  id: 'project-1', title: 'Situs klien', client: 'Klien A', source: 'direct', externalProjectId: null,
-  status: 'active', deadline: '2026-10-20', value: null, currency: 'IDR', createdAt: '2026-10-18T00:00:00Z', daysToDeadline: 0,
+const capturedAt = '2026-10-27T01:00:00Z';
+const available = { state: 'available' as const, observedAt: capturedAt, reason: null };
+const summary: DailyPrioritySummary = {
+  day: '2026-10-27', revision: 1, capturedAt, state: 'complete',
+  sources: { messages: available, projects: available, tasks: available, invoices: available, payments: available, kanban: available, reports: available },
+  reports: [{ id: '2:2026-10-27T01', floor: 2, createdAt: capturedAt, state: 'reviewed' }],
+  items: [{ id: 'messages:501', source: 'messages', sourceId: '501', kind: 'reply', title: 'Balas percakapan #501', reason: 'Pesan terakhir dari klien.', decision: 'Periksa dan balas.', href: '/inbox', observedAt: capturedAt, dueAt: null, rule: 'reply_waiting' }],
 };
 
-function render(inbox: Inbox, projects: ClientProject[]) {
+function render(priority: { day: string; summary: DailyPrioritySummary | null; job: { busy: boolean; error: string | null } | null }) {
   const client = new QueryClient();
   client.setQueryData(['dashboard'], {
     counts: { openProjects: 0, drafts: 0, submittedBids: 0, knowledgeSources: 0 },
@@ -18,32 +22,27 @@ function render(inbox: Inbox, projects: ClientProject[]) {
     activity: [], externalWrites: false,
   });
   client.setQueryData(['projects', 'overview'], []);
-  client.setQueryData(['autopilot'], {
-    state: 'paused', lastRunAt: null, nextRunAt: null, lastMessage: 'Automasi dijeda.', lastImported: 0, lastSubmitted: 0, specializations: [],
-  });
-  client.setQueryData(['inbox'], inbox);
-  client.setQueryData(['work'], { projects, payments: [], income: { month: '2026-10', received: [], expected: [] }, dueSoon: 1 } satisfies Work);
+  client.setQueryData(['autopilot'], { state: 'paused', lastRunAt: null, nextRunAt: null, lastMessage: 'Automasi dijeda.', lastImported: 0, lastSubmitted: 0, specializations: [] });
+  client.setQueryData(['daily-priority'], priority);
   return renderToStaticMarkup(<QueryClientProvider client={client}><MemoryRouter><OverviewPage /></MemoryRouter></QueryClientProvider>);
 }
 
-describe('tablet overview', () => {
-  it('does not treat failed message sync as an empty inbox', () => {
-    const html = render({ sync: { lastRunAt: '2026-10-19T00:00:00Z', ok: false, error: 'gagal' }, needsReply: [], followUps: [] }, []);
-    expect(html).toContain('Status pesan tidak diketahui');
-    expect(html).not.toContain('Belum ada tindakan dari pesan, bid, atau tenggat');
+describe('daily priority in overview', () => {
+  it('marks failed sources and does not show an invented empty or live message status', () => {
+    const partial: DailyPrioritySummary = { ...summary, state: 'partial', items: [], sources: { ...summary.sources, messages: { state: 'failed', observedAt: capturedAt, reason: 'Sinkronisasi gagal.' } } };
+    const html = render({ day: partial.day, summary: partial, job: null });
+    expect(html).toContain('Sebagian sumber gagal');
+    expect(html).toContain('Sinkronisasi gagal.');
+    expect(html).toContain('Belum ada tindakan dari sumber yang terbaca');
+    expect(html).not.toContain('Balas percakapan');
   });
 
-  it('shows only recorded actions, source, and a link to their detail', () => {
-    const html = render({
-      sync: { lastRunAt: '2026-10-20T00:00:00Z', ok: true, error: null },
-      needsReply: [{ threadId: '42', projectId: null, projectTitle: 'Aplikasi klien', preview: 'Butuh revisi', lastMessageAt: '2026-10-20T01:00:00Z', waitingHours: 2 }],
-      followUps: [],
-    }, [project, { ...project, id: 'project-2', title: 'Proyek bulan depan', daysToDeadline: 12 }]);
-    expect(html).toContain('Aplikasi klien');
-    expect(html).toContain('Butuh revisi');
-    expect(html).toContain('Klien langsung');
-    expect(html).toContain('Situs klien');
-    expect(html).not.toContain('Proyek bulan depan');
-    expect(html).toContain('href="/work"');
+  it('shows stored action, reason, decision, source link and labeled AI review', () => {
+    const html = render({ day: summary.day, summary, job: null });
+    expect(html).toContain('Balas percakapan #501');
+    expect(html).toContain('Pesan terakhir dari klien.');
+    expect(html).toContain('Keputusan Anda: Periksa dan balas.');
+    expect(html).toContain('href="/inbox"');
+    expect(html).toContain('tinjauan Hermes adalah saran AI');
   });
 });

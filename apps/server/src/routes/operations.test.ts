@@ -35,4 +35,18 @@ describe('operations API',()=>{
     expect((await app.inject({method:'POST',url:'/api/operations/progress',headers,payload:{projectId:project.id,text:'Modul selesai diuji.'}})).statusCode).toBe(201);
     const snapshot=(await app.inject('/api/operations')).json();expect(snapshot.tasks).toHaveLength(1);expect(snapshot.notes).toHaveLength(1);expect(snapshot.clients).toEqual([]);expect(snapshot.messages).toEqual([]);
   });
+  it('serves a saved WIB summary and makes explicit refresh a new revision without external writes',async()=>{
+    await setup();
+    const initial=await app.inject('/api/operations/daily-priority');
+    expect(initial.statusCode).toBe(200);
+    expect(initial.json().summary).toBeNull();
+    expect((await app.inject({method:'POST',url:'/api/operations/daily-priority/refresh'})).statusCode).toBe(403);
+    const first=await app.inject({method:'POST',url:'/api/operations/daily-priority/refresh',headers});
+    expect(first.statusCode).toBe(200);
+    expect(first.json().summary).toMatchObject({revision:1,day:first.json().day,state:'partial'});
+    const second=await app.inject({method:'POST',url:'/api/operations/daily-priority/refresh',headers});
+    expect(second.statusCode).toBe(200);
+    expect(second.json().summary.revision).toBe(2);
+    expect((await app.inject('/api/operations/daily-priority')).json().summary.revision).toBe(2);
+  });
 });

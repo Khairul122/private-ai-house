@@ -1,19 +1,24 @@
 import { invoiceBalance, toMinor, type ClientAutomation, type Invoice, type OwnerTask, type ProgressNote, type TeamBriefing } from '@fvh/domain';
 import { OperationsRepository, type WorkspaceRepository } from '@fvh/persistence';
 import { paymentReminder } from './payment-reminders.js';
+import { DailyPriorityService } from './daily-priority.js';
 
 export type JobSignal = { busy:boolean; lastRunAt:string|null; error:string|null; reason:string };
 type Messenger = { status():{state:string}; send(phone:string,text:string):Promise<string> };
 type Calendar = {status():{connected:boolean}; sync(tasks:OwnerTask[]):Promise<number>; fail():void};
 export class OperationsService {
   readonly store:OperationsRepository;
+  readonly dailyPriority:DailyPriorityService;
   private timer:ReturnType<typeof setInterval>|null=null;
   private running=false;
   private stopping=false;
   private active:Promise<void>|null=null;
   private reviewTask:Promise<void>|null=null;
   private jobs:Record<string,JobSignal>={};
-  constructor(private options:{repository:WorkspaceRepository;messenger?:Messenger;calendar?:Calendar;review?:(facts:string[])=>Promise<string>;now?:()=>Date}) { this.store=new OperationsRepository(options.repository.sql); }
+  constructor(private options:{repository:WorkspaceRepository;messenger?:Messenger;calendar?:Calendar;review?:(facts:string[])=>Promise<string>;now?:()=>Date}) {
+    this.store=new OperationsRepository(options.repository.sql);
+    this.dailyPriority=new DailyPriorityService({repository:options.repository,now:()=>this.now()});
+  }
   status() { return {running:this.running,jobs:this.jobs}; }
   private now() {return this.options.now?.() ?? new Date();}
   async job<T>(id:string,reason:string,run:()=>Promise<T>):Promise<T> {
@@ -49,7 +54,9 @@ export class OperationsService {
       await this.job('operations-cycle','Memeriksa pekerjaan operasional.',()=>this.collect());
       if(this.options.messenger?.status().state==='connected') await this.deliver();
     } catch { /* Each job records a safe failure state; no provider payload is logged. */ }
-    finally {this.running=false;}
+    try { await this.job('chief-of-staff','Menyusun prioritas harian dari data tersimpan.',()=>this.dailyPriority.refresh()); }
+    catch { /* The previous snapshot stays visible with a failed job signal. */ }
+    this.running=false;
   }
   private async collect() {
     const repo=this.options.repository;
