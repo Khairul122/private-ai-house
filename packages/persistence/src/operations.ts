@@ -5,33 +5,6 @@ import type { Queryable } from './database.js';
 type DocumentKind = 'client' | 'progress' | 'task' | 'invoice' | 'identity' | 'briefing' | 'calendar-map';
 export class OperationsRepository {
   constructor(private readonly sql: Queryable) {}
-  async dailyPriority<T>(day: string): Promise<T | null> {
-    return (await this.sql.query<{ document: T }>('SELECT document FROM daily_priorities WHERE day=$1', [day]))[0]?.document ?? null;
-  }
-  async dailyPriorityMission(sourceId: string): Promise<{ id: string; status: string } | null> {
-    return (await this.sql.query<{ id: string; status: string }>("SELECT id,status FROM missions WHERE source='client_operations' AND source_id=$1", [sourceId]))[0] ?? null;
-  }
-  async saveDailyPriorityWithLease<T extends { day: string; revision: number }>(missionId: string, claimant: string, leaseId: string, document: T): Promise<boolean> {
-    // Lock mission, then lease, before writing; an expired claimant cannot replace a newer result.
-    const rows = await this.sql.query<{ saved: boolean }>(`WITH locked_mission AS (
-      SELECT id FROM missions WHERE id=$1 AND status='in_progress' FOR UPDATE
-    ), valid AS (
-      SELECT mission_id FROM mission_leases
-      WHERE mission_id IN (SELECT id FROM locked_mission) AND claimant=$2 AND lease_id=$3 AND lease_until>clock_timestamp()
-      FOR UPDATE
-    ), saved AS (
-      INSERT INTO daily_priorities(day,revision,document)
-      SELECT $4::date,$5,$6::jsonb FROM valid
-      ON CONFLICT(day) DO UPDATE SET revision=excluded.revision,document=excluded.document,updated_at=now()
-      WHERE daily_priorities.revision < excluded.revision
-      RETURNING day
-    ), completed AS (
-      UPDATE missions SET status='completed',updated_at=now()
-      WHERE id=$1 AND status='in_progress' AND EXISTS (SELECT 1 FROM saved)
-      RETURNING id
-    ) SELECT EXISTS(SELECT 1 FROM completed) AS saved`, [missionId, claimant, leaseId, document.day, document.revision, JSON.stringify(document)]);
-    return rows[0]?.saved ?? false;
-  }
   async list<T>(kind: DocumentKind): Promise<T[]> {
     return (await this.sql.query<{ document: T }>('SELECT document FROM operation_documents WHERE kind=$1 ORDER BY updated_at DESC,id', [kind])).map((r) => r.document);
   }

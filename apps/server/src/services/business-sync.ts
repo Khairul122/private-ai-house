@@ -163,7 +163,7 @@ export class BusinessSync {
         threadId: String(message.threadId), projectId: message.projectId, lastSenderId: message.senderId,
         lastMessageAt: message.createdAt, preview: message.message.slice(0, 200), syncedAt: lastRunAt,
       })));
-      if (changed.length && selfId && this.dependencies.captureMessages) await this.dependencies.captureMessages(changed, selfId, lastRunAt);
+      if (messages.length && selfId && this.dependencies.captureMessages) await this.dependencies.captureMessages(messages, selfId, lastRunAt);
       for (const message of changed) if (message.threadUpdated !== undefined) this.known.set(message.threadId, message.threadUpdated);
     } catch (error) {
       failure ??= error;

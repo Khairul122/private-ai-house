@@ -68,7 +68,7 @@ describe('BusinessSync', () => {
     await sync.syncMessages();
     await sync.syncMessages();
     expect(captureMessages).toHaveBeenCalledTimes(2);
-    expect(captureMessages).toHaveBeenLastCalledWith([latest], '7');
+    expect(captureMessages).toHaveBeenLastCalledWith([latest], '7', expect.any(String));
     expect(sync.getStatus().messages).toMatchObject({ ok: true, threads: 0 });
     await repository.close();
   });
