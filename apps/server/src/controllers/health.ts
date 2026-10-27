@@ -3,7 +3,7 @@ import type { AppContext } from './shared.js';
 export function healthController({ options, repository, now, draftingMode, threadProjectIds }: AppContext) {
   return {
     health: async () => ({
-      ok: true, mode: 'local', database: 'supabase', ai: draftingMode, liveWrites: (await options.autopilot?.getStatus())?.state === 'running',
+      ok: true, mode: 'local', database: 'postgres', ai: draftingMode, liveWrites: (await options.autopilot?.getStatus())?.state === 'running',
       manualProductionWritesConfigured: (options.getCredentialStatus?.() ?? options.credentialStatus)?.freelancerAccessTokenConfigured ?? false,
       autopilot: (await options.autopilot?.getStatus())?.state ?? 'unavailable',
     }),

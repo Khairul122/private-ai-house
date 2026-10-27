@@ -1,3 +1,5 @@
+SET search_path TO fvh;
+
 CREATE TABLE IF NOT EXISTS office_learning_state (
   id TEXT PRIMARY KEY CHECK (id = 'office'),
   document JSONB NOT NULL,

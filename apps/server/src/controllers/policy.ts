@@ -9,7 +9,7 @@ export function policyController({ options, repository, now }: AppContext) {
   return {
     get: async () => await repository.getPolicy(),
 
-    presets: async () => ({ groups: CODING_KEYWORD_GROUPS, keywords: CODING_KEYWORDS, searchTermsPerCycle: 8, supportedBids: 'Harga tetap, USD', storage: 'supabase' }),
+    presets: async () => ({ groups: CODING_KEYWORD_GROUPS, keywords: CODING_KEYWORDS, searchTermsPerCycle: 8, supportedBids: 'Harga tetap, USD', storage: 'postgres' }),
 
     update: async (request: FastifyRequest, reply: FastifyReply) => {
       const parsed = parseBody(updatePolicySchema, request.body);

@@ -76,7 +76,7 @@ export function capabilitiesController({ options, repository, now, draftingMode,
       };
       const credentialStatus = options.getCredentialStatus?.() ?? options.credentialStatus;
       return await Promise.all([
-        probe('supabase', 'Supabase (Postgres)', async () => {
+        probe('database', 'Database (PostgreSQL)', async () => {
           const [row] = await repository.sql.query<{ projects: number; chunks: number }>('SELECT (SELECT COUNT(*) FROM projects)::int AS projects, (SELECT COUNT(*) FROM knowledge_chunks)::int AS chunks');
           return { ok: true, status: 200, detail: `Query berhasil di schema fvh: ${row?.projects ?? 0} proyek, ${row?.chunks ?? 0} potongan knowledge.` };
         }),
