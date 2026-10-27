@@ -153,7 +153,12 @@ export type BusinessSyncStatus = {
 
 export type Inbox = {
   sync: SyncRun | null;
-  needsReply: Array<{ threadId: string; projectId: string | null; projectTitle: string | null; preview: string; lastMessageAt: string; waitingHours: number }>;
+  needsReply: Array<{ threadId: string; projectId: string | null; projectTitle: string | null; preview: string; lastMessageAt: string; waitingHours: number;
+    analysis: null | { id: string; status: 'queued' | 'running' | 'succeeded' | 'blocked'; finishedAt: string | null; error: string | null;
+      source: { threadId: string; messageId: string; sourceVersion: string; completeness: 'complete' | 'truncated' | 'unknown'; completenessReason: string | null; linkStatus: 'verified' | 'unlinked' | 'ambiguous'; clientProjectId: string | null };
+      result: null | { classification: 'feature' | 'bug' | 'question' | 'scope_change' | 'unknown'; summary: string; summaryQuote: string;
+        requirements: Array<{ id: string; text: string; evidenceRef: { threadId: string; messageId: string; sourceVersion: string; quote: string } }>;
+        questions: string[]; replyDraft: string } } }>;
   followUps: Array<{ projectId: string; title: string; submittedAt: string; daysSinceBid: number }>;
 };
 

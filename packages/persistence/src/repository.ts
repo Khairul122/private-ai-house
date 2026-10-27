@@ -31,6 +31,16 @@ export type BidOutcome = {
 
 export type SkipReasonSummary = { reason: string; total: number; recent: number };
 export type ClientThread = { threadId: string; projectId: string | null; lastSenderId: string; lastMessageAt: string; preview: string; syncedAt: string };
+export type InboxSnapshot = {
+  sourceVersion: string; source: 'freelancer'; threadId: string; messageId: string; senderId: string;
+  externalProjectId: string | null; opportunityId: string | null; clientProjectId: string | null;
+  linkStatus: 'verified' | 'unlinked' | 'ambiguous'; content: string;
+  completeness: 'complete' | 'truncated' | 'unknown'; completenessReason: string | null;
+  createdAt: string; capturedAt: string;
+};
+export type InboxAnalysis = { id: string; sourceVersion: string; missionId: string; contractVersion: string;
+  status: 'queued' | 'running' | 'succeeded' | 'blocked'; cardId: string | null;
+  startedAt: string | null; finishedAt: string | null; resultJson: unknown; error: string | null };
 export type ClientProjectSource = 'freelancer' | 'direct' | 'linkedin' | 'projects_co_id' | 'other';
 export type ClientProjectStatus = 'active' | 'delivered' | 'closed';
 export type ClientProject = {
@@ -508,6 +518,69 @@ export class WorkspaceRepository {
 
   async listClientThreads(): Promise<ClientThread[]> {
     return camel<ClientThread>(await this.database.query('SELECT thread_id, project_id, last_sender_id, last_message_at, preview, synced_at FROM client_threads ORDER BY last_message_at DESC'));
+  }
+
+  /** Snapshot precedes its mission and analysis in one transaction, including after a process crash. */
+  async enqueueInboxAnalysis(snapshot: InboxSnapshot): Promise<InboxAnalysis> {
+    const sourceId = `inbox-analysis:v1:${snapshot.sourceVersion}`;
+    return this.database.transaction(async tx => {
+      await tx.query(`INSERT INTO inbox_message_snapshots (source_version, source, thread_id, message_id, sender_id,
+        external_project_id, opportunity_id, client_project_id, link_status, content, completeness,
+        completeness_reason, created_at, captured_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT DO NOTHING`,
+      [snapshot.sourceVersion, snapshot.source, snapshot.threadId, snapshot.messageId, snapshot.senderId,
+        snapshot.externalProjectId, snapshot.opportunityId, snapshot.clientProjectId, snapshot.linkStatus,
+        snapshot.content, snapshot.completeness, snapshot.completenessReason, snapshot.createdAt, snapshot.capturedAt]);
+      await tx.query(`INSERT INTO missions (id,source,source_id,kind,title,status,priority,due_at,assigned_to,payload)
+        VALUES ($1,'inbox',$2,'inbox_analysis','Analisis pesan klien','queued','normal',NULL,'fvh-client-relations',$3::jsonb)
+        ON CONFLICT (source,source_id) DO NOTHING`, [randomUUID(), sourceId, JSON.stringify({ threadId: snapshot.threadId })]);
+      const [mission] = await tx.query<{ id: string }>("SELECT id FROM missions WHERE source='inbox' AND source_id=$1", [sourceId]);
+      if (!mission) throw new Error('Mission analisis tidak tersimpan.');
+      await tx.query(`INSERT INTO inbox_message_analyses (id,source_version,mission_id,contract_version,status)
+        VALUES ($1,$2,$3,'v1','queued') ON CONFLICT (source_version) DO NOTHING`, [randomUUID(), snapshot.sourceVersion, mission.id]);
+      const [row] = await tx.query(`SELECT * FROM inbox_message_analyses WHERE source_version=$1`, [snapshot.sourceVersion]);
+      return camel<InboxAnalysis>([row!])[0]!;
+    });
+  }
+
+  async listPendingInboxAnalyses(limit = 20): Promise<Array<{ analysis: InboxAnalysis; snapshot: InboxSnapshot }>> {
+    const rows = await this.database.query<{ analysis: Record<string, unknown>; snapshot: Record<string, unknown> }>(`
+      SELECT to_jsonb(a) AS analysis, to_jsonb(s) AS snapshot FROM inbox_message_analyses a
+      JOIN inbox_message_snapshots s ON s.source_version=a.source_version
+      WHERE a.status IN ('queued','running') ORDER BY s.captured_at ASC LIMIT $1`, [limit]);
+    return rows.map(row => ({ analysis: camel<InboxAnalysis>([row.analysis])[0]!, snapshot: camel<InboxSnapshot>([row.snapshot])[0]! }));
+  }
+
+  async listInboxAnalyses(threadIds: string[]): Promise<Array<{ analysis: InboxAnalysis; snapshot: InboxSnapshot }>> {
+    if (!threadIds.length) return [];
+    const rows = await this.database.query<{ analysis: Record<string, unknown>; snapshot: Record<string, unknown> }>(`
+      SELECT to_jsonb(a) AS analysis, to_jsonb(s) AS snapshot FROM inbox_message_analyses a
+      JOIN inbox_message_snapshots s ON s.source_version=a.source_version
+      WHERE s.thread_id=ANY($1::text[]) ORDER BY s.created_at DESC,s.captured_at DESC`, [threadIds]);
+    return rows.map(row => ({ analysis: camel<InboxAnalysis>([row.analysis])[0]!, snapshot: camel<InboxSnapshot>([row.snapshot])[0]! }));
+  }
+
+  /** The lease check and write share a transaction. An expired or replaced worker cannot publish. */
+  async writeInboxAnalysisWithLease(input: { id: string; missionId: string; claimant: string; leaseId: string;
+    status: 'running' | 'succeeded' | 'blocked'; cardId?: string | null; result?: unknown; error?: string | null }): Promise<boolean> {
+    return this.database.transaction(async tx => {
+      const [lease] = await tx.query(`SELECT mission_id FROM mission_leases WHERE mission_id=$1 AND claimant=$2
+        AND lease_id=$3 AND lease_until>clock_timestamp() FOR UPDATE`, [input.missionId, input.claimant, input.leaseId]);
+      if (!lease) return false;
+      const terminal = input.status !== 'running';
+      const [row] = await tx.query(`UPDATE inbox_message_analyses SET status=$3, card_id=COALESCE($4,card_id),
+        started_at=COALESCE(started_at,clock_timestamp()), finished_at=CASE WHEN $5 THEN clock_timestamp() ELSE finished_at END,
+        result_json=$6::jsonb,error=$7 WHERE id=$1 AND mission_id=$2 AND status IN ('queued','running')
+        AND EXISTS (SELECT 1 FROM mission_leases WHERE mission_id=$2 AND claimant=$8 AND lease_id=$9
+          AND lease_until>clock_timestamp()) RETURNING id`,
+      [input.id, input.missionId, input.status, input.cardId ?? null, terminal,
+        input.result === undefined ? null : JSON.stringify(input.result), input.error ?? null, input.claimant, input.leaseId]);
+      if (!row) return false;
+      await tx.query(`UPDATE missions SET status=$2,blocker=$3,error=$3,updated_at=clock_timestamp()
+        WHERE id=$1 AND status IN ('queued','in_progress')`, [input.missionId,
+        input.status === 'running' ? 'in_progress' : input.status === 'succeeded' ? 'completed' : 'blocked', input.error ?? null]);
+      return true;
+    });
   }
 
   async listClientProjects(): Promise<ClientProject[]> {

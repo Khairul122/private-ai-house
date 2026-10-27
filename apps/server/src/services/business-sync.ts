@@ -18,6 +18,7 @@ export type ThreadReadOptions = { fromUpdatedTime?: number; known: ReadonlyMap<n
 
 type Dependencies = {
   repository: WorkspaceRepository;
+  captureMessages?: (messages: FreelancerLatestMessage[], selfId: string) => Promise<void>;
   readOwnBids: (ids: string[]) => Promise<FreelancerBidStatus[]>;
   readSelfId?: () => Promise<string>;
   readThreads?: (selfId: string, options: ThreadReadOptions) => Promise<FreelancerLatestMessage[]>;
@@ -161,6 +162,7 @@ export class BusinessSync {
         threadId: String(message.threadId), projectId: message.projectId, lastSenderId: message.senderId,
         lastMessageAt: message.createdAt, preview: message.message.slice(0, 200), syncedAt: lastRunAt,
       })));
+      if (selfId && messages.length) await this.dependencies.captureMessages?.(messages, selfId);
       for (const message of changed) if (message.threadUpdated !== undefined) this.known.set(message.threadId, message.threadUpdated);
     } catch (error) {
       failure ??= error;

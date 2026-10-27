@@ -36,7 +36,7 @@ describe('tablet overview', () => {
   it('shows only recorded actions, source, and a link to their detail', () => {
     const html = render({
       sync: { lastRunAt: '2026-10-20T00:00:00Z', ok: true, error: null },
-      needsReply: [{ threadId: '42', projectId: null, projectTitle: 'Aplikasi klien', preview: 'Butuh revisi', lastMessageAt: '2026-10-20T01:00:00Z', waitingHours: 2 }],
+      needsReply: [{ threadId: '42', projectId: null, projectTitle: 'Aplikasi klien', preview: 'Butuh revisi', lastMessageAt: '2026-10-20T01:00:00Z', waitingHours: 2, analysis: null }],
       followUps: [],
     }, [project, { ...project, id: 'project-2', title: 'Proyek bulan depan', daysToDeadline: 12 }]);
     expect(html).toContain('Aplikasi klien');

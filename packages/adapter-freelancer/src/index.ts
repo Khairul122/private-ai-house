@@ -33,7 +33,7 @@ export type FreelancerProfile = {
 export type FreelancerProjectsResult = { projects: ProjectOpportunity[]; skipped: number };
 export type FreelancerBidStatus = { bidId: string; projectId: string; awardStatus: string | null; retracted: boolean };
 /** `threadUpdated` is the thread's raw `time_updated`, used only to detect changed threads between syncs. */
-export type FreelancerLatestMessage = { threadId: number; projectId: string | null; messageId: number; senderId: string; message: string; createdAt: string; threadUpdated?: number | undefined };
+export type FreelancerLatestMessage = { threadId: number; projectId: string | null; messageId: number; senderId: string; message: string; completeness?: 'complete' | 'truncated' | 'unknown'; completenessReason?: string | null; createdAt: string; threadUpdated?: number | undefined };
 /** Last rate-limit headers seen on any Freelancer read; numbers only. */
 export type FreelancerRateLimit = { limit: number | null; remaining: number | null; status: number; seenAt: string };
 
@@ -244,7 +244,10 @@ function parseLatestMessage(latest: JsonRecord, info: ThreadInfo): FreelancerLat
   const createdMs = createdEpoch !== undefined ? (createdEpoch > 1_000_000_000_000 ? createdEpoch : createdEpoch * 1_000) : Date.parse(text(latest.created_at) ?? '');
   if (messageId === undefined || !Number.isSafeInteger(messageId) || messageId < 1 || !senderId || !content || !Number.isFinite(createdMs) || Math.abs(createdMs) > 8.64e15) return undefined;
   return {
-    threadId: info.threadId, projectId: info.projectId, messageId, senderId, message: content.slice(0, 4_000), createdAt: new Date(createdMs).toISOString(),
+    threadId: info.threadId, projectId: info.projectId, messageId, senderId, message: content.slice(0, 4_000),
+    completeness: content.length > 4_000 ? 'truncated' : 'complete',
+    completenessReason: content.length > 4_000 ? 'Teks dibatasi 4.000 karakter saat dibaca.' : null,
+    createdAt: new Date(createdMs).toISOString(),
     ...(info.updated !== undefined ? { threadUpdated: info.updated } : {}),
   };
 }

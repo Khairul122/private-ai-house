@@ -1314,3 +1314,8 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .vo3d-interaction :is(input, select, textarea, fieldset) { min-width: 0; max-width: 100%; }
 .vo3d-interaction .form-card { padding: 12px; }
 .vo3d-interaction button { min-height: 44px; }
+.inbox-message { min-width: 0; overflow-wrap: anywhere; }
+.inbox-analysis { margin-top: 0.75rem; max-width: 68ch; font-size: 14px; line-height: 1.5; }
+.inbox-analysis > * + * { margin-top: 0.5rem; }
+.inbox-analysis ul { margin: 0.35rem 0 0; padding-left: 1.25rem; }
+.inbox-analysis-quote { margin: 0.4rem 0; padding: 0.45rem 0.8rem; border-left: 2px solid currentColor; white-space: pre-wrap; overflow-wrap: anywhere; }

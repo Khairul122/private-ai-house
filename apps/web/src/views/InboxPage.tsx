@@ -30,6 +30,28 @@ function emptyReply(state: SyncState) {
   return { title: 'Tidak ada pesan yang menunggu balasan', description: 'Semua pesan terakhir sudah dibalas atau tidak ada pesan baru sejak sinkronisasi terakhir.' };
 }
 
+const classificationLabel = { feature: 'Permintaan fitur', bug: 'Laporan bug', question: 'Pertanyaan', scope_change: 'Perubahan lingkup', unknown: 'Belum dapat diklasifikasi' } as const;
+
+function AnalysisView({ analysis }: { analysis: Inbox['needsReply'][number]['analysis'] }) {
+  if (!analysis) return <p className="form-help">Analisis belum tersedia. Preview lama tidak membuktikan pesan lengkap.</p>;
+  const { source, result } = analysis;
+  return <div className="inbox-analysis" aria-label="Saran analisis pesan">
+    <p className="form-help">Sumber: Freelancer, thread {source.threadId}, pesan {source.messageId}. {source.completeness === 'complete' ? 'Teks teramati lengkap.' : `Sumber ${source.completeness === 'truncated' ? 'terpotong' : 'belum terbukti lengkap'}${source.completenessReason ? `: ${source.completenessReason}` : '.'}`}</p>
+    {source.linkStatus !== 'verified' && <p className="form-help">Proyek aktif belum terhubung secara pasti. Hubungan proyek perlu diperiksa.</p>}
+    {analysis.status === 'queued' && <p className="form-help">Analisis menunggu giliran.</p>}
+    {analysis.status === 'running' && <p className="form-help">Kartu Client Relations dibuat; hasil analisis belum tersedia.</p>}
+    {analysis.status === 'blocked' && <p className="form-help" role="status">Analisis terhenti: {analysis.error ?? 'Alasan tidak tersedia'}.</p>}
+    {analysis.status === 'succeeded' && result && <>
+      <p className="form-help">Saran AI · {classificationLabel[result.classification]} · hasil {analysis.finishedAt ? formatDate(analysis.finishedAt) : 'waktu tidak tersedia'}</p>
+      <p>{result.summary}</p>
+      <blockquote className="inbox-analysis-quote">“{result.summaryQuote}” <span className="form-help">(pesan {source.messageId})</span></blockquote>
+      {result.requirements.length > 0 && <div><strong>Kebutuhan yang disarankan</strong><ul>{result.requirements.map(item => <li key={item.id}>{item.text} <span className="form-help">Bukti: “{item.evidenceRef.quote}”</span></li>)}</ul></div>}
+      {result.questions.length > 0 && <div><strong>Perlu diklarifikasi</strong><ul>{result.questions.map((question, index) => <li key={`${index}:${question}`}>{question}</li>)}</ul></div>}
+      <div><strong>Draf balasan lokal · periksa sebelum digunakan</strong><blockquote className="inbox-analysis-quote">{result.replyDraft}</blockquote></div>
+    </>}
+  </div>;
+}
+
 export default function InboxPage() {
   const inbox = useQuery({ queryKey: ['inbox'], queryFn: () => api<Inbox>('/inbox'), refetchInterval: 10_000 });
   if (inbox.isPending) return <LoadingPanel label="Memuat kotak masuk..." />;
@@ -40,7 +62,7 @@ export default function InboxPage() {
   const syncMessage = syncLine(state, sync);
   const empty = emptyReply(state);
   return <>
-    <PageIntro eyebrow="Freelancer" title="Kotak masuk Freelancer" description="Fokus utama: pesan yang perlu dibalas. Server memeriksa pesan setiap menit selama aktif." action={<a className="button button-primary" href="https://www.freelancer.com/messages" target="_blank" rel="noreferrer">Buka pesan Freelancer</a>} />
+    <PageIntro eyebrow="Freelancer" title="Kotak masuk Freelancer" description="Pesan terakhir yang teramati per thread. Server memeriksa pesan setiap menit selama aktif; pesan di antara pemeriksaan dapat terlewat." action={<a className="button button-primary" href="https://www.freelancer.com/messages" target="_blank" rel="noreferrer">Buka pesan Freelancer</a>} />
     <section className="card-summary-grid" aria-label="Ringkasan kotak masuk">
       <Metric label="Menunggu balasan" value={synced ? needsReply.length : 'Tidak diketahui'} note={synced ? 'Pesan terakhir berasal dari akun lain' : 'Bergantung pada sinkronisasi pesan'} tone="primary" />
       <Metric label="Bid perlu ditinjau" value={followUps.length} note="Minimal 3 hari tanpa percakapan" />
@@ -57,7 +79,7 @@ export default function InboxPage() {
         <a className="text-link" style={{ display: 'inline-flex', alignItems: 'center', minHeight: 44 }} href="https://www.freelancer.com/messages" target="_blank" rel="noreferrer">Buka Freelancer</a>
       </div>
       {needsReply.length ? <ul className="deadlines-list">{needsReply.map((thread) => <li className="deadline-item" key={thread.threadId}>
-        <div><strong>{thread.projectTitle ?? 'Percakapan tanpa proyek tersinkron'}</strong><div className="item-sub">{thread.preview}</div></div>
+        <div className="inbox-message"><strong>{thread.projectTitle ?? 'Percakapan tanpa proyek tersinkron'}</strong><div className="item-sub">{thread.preview}</div><AnalysisView analysis={thread.analysis} /></div>
         <div className="item-aside"><strong className={thread.waitingHours >= 24 ? 'is-late' : ''}>{waitingLabel(thread.waitingHours)}</strong><div className="item-sub">{formatDate(thread.lastMessageAt)}</div></div>
       </li>)}</ul>
         : <EmptyState title={empty.title} description={empty.description} action={<>

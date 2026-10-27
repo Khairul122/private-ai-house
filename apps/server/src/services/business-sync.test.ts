@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { FreelancerPartialReadError, FreelancerReadError, type FreelancerLatestMessage } from '@fvh/adapter-freelancer';
 import { WorkspaceRepository } from '@fvh/persistence';
 import type { ThreadReadOptions } from './business-sync.js';
@@ -55,6 +55,21 @@ describe('BusinessSync', () => {
     fail = true;
     await sync.syncMessages('incremental');
     expect(sync.getStatus()).toMatchObject({ step: null, messages: { ok: false, error: 'HTTP 429 [redacted]' } });
+    await repository.close();
+  });
+
+  it('passes repeated source snapshots to the idempotent analysis intake', async () => {
+    const repository = await WorkspaceRepository.open();
+    const captureMessages = vi.fn(async () => undefined);
+    const latest = { threadId: 501, projectId: '71', messageId: 901, senderId: '42', message: 'Tambahkan ekspor CSV.',
+      completeness: 'complete' as const, createdAt: '2026-10-27T10:00:00.000Z', threadUpdated: 100 };
+    const sync = new BusinessSync({ repository, readOwnBids: async () => [], readSelfId: async () => '7',
+      readThreads: async () => [latest], captureMessages });
+    await sync.syncMessages();
+    await sync.syncMessages();
+    expect(captureMessages).toHaveBeenCalledTimes(2);
+    expect(captureMessages).toHaveBeenLastCalledWith([latest], '7');
+    expect(sync.getStatus().messages).toMatchObject({ ok: true, threads: 0 });
     await repository.close();
   });
 
