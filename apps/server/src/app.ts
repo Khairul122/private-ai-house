@@ -11,6 +11,7 @@ import type { CredentialStatus, FreelancerVerification } from './lib/credential-
 import type { LinkedInOAuthService } from './services/linkedin-oauth.js';
 import type { FreelancerAutopilot } from './services/autopilot.js';
 import type { BusinessSync } from './services/business-sync.js';
+import type { MessageAnalysisService } from './services/message-analysis.js';
 import { OperationsService } from './services/operations.js';
 import type { WhatsAppService } from './services/whatsapp.js';
 import type { GoogleCalendarService } from './services/google-calendar.js';
@@ -27,6 +28,7 @@ import { registerFreelancerRoutes } from './routes/freelancer.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerHermesKanbanRoutes } from './routes/hermes-kanban.js';
 import { registerInboxRoutes } from './routes/inbox.js';
+import { registerDailyPriorityRoutes } from './routes/daily-priority.js';
 import { registerKnowledgeRoutes } from './routes/knowledge.js';
 import { registerLinkedInRoutes } from './routes/linkedin.js';
 import { registerOperationsRoutes } from './routes/operations.js';
@@ -58,6 +60,7 @@ export type AppOptions = {
   readFreelancerProjects?: (query: string, limit: number) => Promise<{ projects: ProjectOpportunity[]; skipped: number }>;
   autopilot?: FreelancerAutopilot;
   businessSync?: BusinessSync;
+  messageAnalysis?: MessageAnalysisService;
   linkedinOAuth?: Pick<LinkedInOAuthService, 'redirectUri' | 'start' | 'handleCallback' | 'close'>;
   disconnectLinkedIn?: () => Promise<void>;
   syncLinkedIn?: () => Promise<{ sourceId: string; chunks: number }>;
@@ -139,6 +142,7 @@ export async function createApp(options: AppOptions = {}): Promise<FastifyInstan
   registerHermesKanbanRoutes(app, options.hermesKanban, now);
   registerOfficeLearningRoutes(app, options.officeLearning);
   registerInboxRoutes(app, ctx);
+  registerDailyPriorityRoutes(app, ctx);
   registerWorkRoutes(app, ctx);
   registerCapabilitiesRoutes(app, ctx);
   registerFreelancerRoutes(app, ctx);

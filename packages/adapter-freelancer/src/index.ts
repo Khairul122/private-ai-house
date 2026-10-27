@@ -33,7 +33,13 @@ export type FreelancerProfile = {
 export type FreelancerProjectsResult = { projects: ProjectOpportunity[]; skipped: number };
 export type FreelancerBidStatus = { bidId: string; projectId: string; awardStatus: string | null; retracted: boolean };
 /** `threadUpdated` is the thread's raw `time_updated`, used only to detect changed threads between syncs. */
-export type FreelancerLatestMessage = { threadId: number; projectId: string | null; messageId: number; senderId: string; message: string; createdAt: string; threadUpdated?: number | undefined };
+export type FreelancerLatestMessage = {
+  threadId: number; projectId: string | null; messageId: number; senderId: string; message: string; createdAt: string;
+  threadUpdated?: number | undefined;
+  /** True when the adapter cut the text; the API message length before the cut. */
+  messageTruncated?: boolean | undefined;
+  messageLength?: number | undefined;
+};
 /** Last rate-limit headers seen on any Freelancer read; numbers only. */
 export type FreelancerRateLimit = { limit: number | null; remaining: number | null; status: number; seenAt: string };
 
@@ -245,6 +251,7 @@ function parseLatestMessage(latest: JsonRecord, info: ThreadInfo): FreelancerLat
   if (messageId === undefined || !Number.isSafeInteger(messageId) || messageId < 1 || !senderId || !content || !Number.isFinite(createdMs) || Math.abs(createdMs) > 8.64e15) return undefined;
   return {
     threadId: info.threadId, projectId: info.projectId, messageId, senderId, message: content.slice(0, 4_000), createdAt: new Date(createdMs).toISOString(),
+    messageTruncated: content.length > 4_000, messageLength: content.length,
     ...(info.updated !== undefined ? { threadUpdated: info.updated } : {}),
   };
 }

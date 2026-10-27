@@ -28,7 +28,7 @@ function render(inbox: Inbox, projects: ClientProject[]) {
 
 describe('tablet overview', () => {
   it('does not treat failed message sync as an empty inbox', () => {
-    const html = render({ sync: { lastRunAt: '2026-10-19T00:00:00Z', ok: false, error: 'gagal' }, needsReply: [], followUps: [] }, []);
+    const html = render({ sync: { lastRunAt: '2026-10-19T00:00:00Z', ok: false, error: 'gagal' }, needsReply: [], followUps: [], messageIntel: { available: false, reason: 'Hermes belum aktif', counts: { snapshots: 0, analyzable: 0, succeeded: 0, blocked: 0 } } }, []);
     expect(html).toContain('Status pesan tidak diketahui');
     expect(html).not.toContain('Belum ada tindakan dari pesan, bid, atau tenggat');
   });
@@ -36,8 +36,9 @@ describe('tablet overview', () => {
   it('shows only recorded actions, source, and a link to their detail', () => {
     const html = render({
       sync: { lastRunAt: '2026-10-20T00:00:00Z', ok: true, error: null },
-      needsReply: [{ threadId: '42', projectId: null, projectTitle: 'Aplikasi klien', preview: 'Butuh revisi', lastMessageAt: '2026-10-20T01:00:00Z', waitingHours: 2 }],
+      needsReply: [{ threadId: '42', projectId: null, projectTitle: 'Aplikasi klien', preview: 'Butuh revisi', lastMessageAt: '2026-10-20T01:00:00Z', waitingHours: 2, snapshot: null }],
       followUps: [],
+      messageIntel: { available: false, reason: 'Hermes belum aktif', counts: { snapshots: 0, analyzable: 0, succeeded: 0, blocked: 0 } },
     }, [project, { ...project, id: 'project-2', title: 'Proyek bulan depan', daysToDeadline: 12 }]);
     expect(html).toContain('Aplikasi klien');
     expect(html).toContain('Butuh revisi');

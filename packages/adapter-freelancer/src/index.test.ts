@@ -60,8 +60,8 @@ describe('FreelancerReadAdapter', () => {
     const adapter = new FreelancerReadAdapter({ token: 'test-token-value-1234', fetcher });
 
     await expect(adapter.readLatestThreadMessages('7', 5)).resolves.toEqual([
-      { threadId: 501, projectId: '77', messageId: 5010, senderId: '42', message: 'Halo 501', createdAt: new Date(1_760_000_000_000).toISOString() },
-      { threadId: 502, projectId: null, messageId: 5020, senderId: '42', message: 'Halo 502', createdAt: new Date(1_760_000_000_000).toISOString() },
+      { threadId: 501, projectId: '77', messageId: 5010, senderId: '42', message: 'Halo 501', createdAt: new Date(1_760_000_000_000).toISOString(), messageLength: 8, messageTruncated: false },
+      { threadId: 502, projectId: null, messageId: 5020, senderId: '42', message: 'Halo 502', createdAt: new Date(1_760_000_000_000).toISOString(), messageLength: 8, messageTruncated: false },
     ]);
   });
 
@@ -84,8 +84,8 @@ describe('FreelancerReadAdapter', () => {
     const messages = await adapter.readUpdatedThreads('7', { fromUpdatedTime: 1_759_999_880, known: new Map([[602, 1_760_000_000], [603, 1_760_000_100]]) });
 
     expect(messages).toEqual([
-      { threadId: 601, projectId: '40123456', messageId: 9001, senderId: '31001', message: 'Kapan bisa mulai?', createdAt: new Date(1_760_000_300_000).toISOString(), threadUpdated: 1_760_000_300 },
-      { threadId: 602, projectId: '40123457', messageId: 9002, senderId: '31002', message: 'Sudah saya kirim file.', createdAt: new Date(1_760_000_200_000).toISOString(), threadUpdated: 1_760_000_200 },
+      { threadId: 601, projectId: '40123456', messageId: 9001, senderId: '31001', message: 'Kapan bisa mulai?', createdAt: new Date(1_760_000_300_000).toISOString(), threadUpdated: 1_760_000_300, messageLength: 17, messageTruncated: false },
+      { threadId: 602, projectId: '40123457', messageId: 9002, senderId: '31002', message: 'Sudah saya kirim file.', createdAt: new Date(1_760_000_200_000).toISOString(), threadUpdated: 1_760_000_200, messageLength: 22, messageTruncated: false },
     ]);
     expect(urls).toHaveLength(2);
     expect(Object.fromEntries(urls[0]!.searchParams)).toMatchObject({ 'members[]': '7', limit: '30', last_message: 'true', unread_count: 'true', from_updated_time: '1759999880' });

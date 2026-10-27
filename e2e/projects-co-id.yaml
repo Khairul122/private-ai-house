@@ -1,0 +1,7 @@
+url: "http://127.0.0.1:3001/projects-co-id"
+name: "ProjectsCoId Listing Flow"
+---
+- launchApp
+- assertVisible:
+    text: "Peluang dan draf Rupiah"
+- takeScreenshot: "08-projects-co-id-screen"

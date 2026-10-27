@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, jsonRequest, type AuditEvent, type Autopilot, type Capabilities } from '../api/api.js';
 import { EmptyState, StateLabel, ErrorNotice, LoadingPanel, PageIntro, OperationStatus } from '../components/ui.js';
@@ -25,7 +25,7 @@ function HealthCard() {
     <p className="form-help">Pemeriksaan ini hanya mengirim permintaan baca. Tidak ada bid atau pesan yang dikirim. Status di bawah adalah hasil tes terakhir, bukan klaim koneksi.</p>
     {checkAll.isError && <ErrorNotice message={checkAll.error instanceof Error ? checkAll.error.message : 'Pemeriksaan gagal.'} onRetry={() => checkAll.mutate()} />}
     {!checkAll.isError && (checkAll.isPending && !results.length
-      ? <p role="status">Memeriksa Supabase, Freelancer, GitHub, LinkedIn, Hermes, dan autopilot...</p>
+      ? <p role="status">Memeriksa Database (PostgreSQL), Freelancer, GitHub, LinkedIn, Hermes, dan autopilot...</p>
       : !results.length
         ? <EmptyState title="Belum ada hasil pemeriksaan" description="Status integrasi di bawah berasal dari konfigurasi tersimpan. Tekan periksa untuk menguji permintaan baca yang sebenarnya." action={<button type="button" className="button button-secondary" onClick={() => checkAll.mutate()}>Jalankan pemeriksaan</button>} />
         : <>
