@@ -737,6 +737,22 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .vo3d-sheet-body .is-late { color: var(--late); }
 .vo3d-sheet-body .is-ok { color: var(--ok); }
 
+/* Analisis pesan klien: blok di bawah baris pesan, hanya dari analisis tersimpan. */
+.message-intel { flex: 1 0 100%; display: grid; gap: 8px; margin-top: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-muted); }
+.message-intel-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.message-intel-status { font-size: 12px; font-weight: 700; }
+.message-intel-status[data-tone='ok'] { color: var(--ok); }
+.message-intel-status[data-tone='warn'] { color: var(--late); }
+.message-intel .message-intel-note { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.message-intel .message-intel-note strong { color: var(--ink); }
+.message-intel-list { display: grid; gap: 6px; margin: 4px 0 0; padding-left: 18px; font-size: 13px; line-height: 1.5; }
+.message-intel-quote { display: block; margin-top: 2px; padding-left: 8px; border-left: 2px solid var(--line); color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.message-intel-draft { margin: 6px 0 0; padding: 10px; border: 1px dashed var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.message-intel-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.message-intel-actions .button { min-height: 44px; font-size: 12px; }
+.message-intel-summary { align-items: center; margin-top: 0; }
+.message-intel-summary > .form-help { flex: 1 1 320px; margin: 0; }
+
 /* Alasan dilewati: bilah proporsional dari data nyata */
 .reason-list { display: grid; margin: 0; padding: 0; list-style: none; }
 .reason-item { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(80px, 1fr) 104px; align-items: center; border-top: 1px solid var(--line); }

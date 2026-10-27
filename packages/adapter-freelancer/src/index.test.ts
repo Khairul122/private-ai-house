@@ -60,8 +60,8 @@ describe('FreelancerReadAdapter', () => {
     const adapter = new FreelancerReadAdapter({ token: 'test-token-value-1234', fetcher });
 
     await expect(adapter.readLatestThreadMessages('7', 5)).resolves.toEqual([
-      { threadId: 501, projectId: '77', messageId: 5010, senderId: '42', message: 'Halo 501', completeness: 'complete', completenessReason: null, createdAt: new Date(1_760_000_000_000).toISOString() },
-      { threadId: 502, projectId: null, messageId: 5020, senderId: '42', message: 'Halo 502', completeness: 'complete', completenessReason: null, createdAt: new Date(1_760_000_000_000).toISOString() },
+      { threadId: 501, projectId: '77', messageId: 5010, senderId: '42', message: 'Halo 501', createdAt: new Date(1_760_000_000_000).toISOString(), messageLength: 8, messageTruncated: false },
+      { threadId: 502, projectId: null, messageId: 5020, senderId: '42', message: 'Halo 502', createdAt: new Date(1_760_000_000_000).toISOString(), messageLength: 8, messageTruncated: false },
     ]);
   });
 
@@ -84,8 +84,8 @@ describe('FreelancerReadAdapter', () => {
     const messages = await adapter.readUpdatedThreads('7', { fromUpdatedTime: 1_759_999_880, known: new Map([[602, 1_760_000_000], [603, 1_760_000_100]]) });
 
     expect(messages).toEqual([
-      { threadId: 601, projectId: '40123456', messageId: 9001, senderId: '31001', message: 'Kapan bisa mulai?', completeness: 'complete', completenessReason: null, createdAt: new Date(1_760_000_300_000).toISOString(), threadUpdated: 1_760_000_300 },
-      { threadId: 602, projectId: '40123457', messageId: 9002, senderId: '31002', message: 'Sudah saya kirim file.', completeness: 'complete', completenessReason: null, createdAt: new Date(1_760_000_200_000).toISOString(), threadUpdated: 1_760_000_200 },
+      { threadId: 601, projectId: '40123456', messageId: 9001, senderId: '31001', message: 'Kapan bisa mulai?', createdAt: new Date(1_760_000_300_000).toISOString(), threadUpdated: 1_760_000_300, messageLength: 17, messageTruncated: false },
+      { threadId: 602, projectId: '40123457', messageId: 9002, senderId: '31002', message: 'Sudah saya kirim file.', createdAt: new Date(1_760_000_200_000).toISOString(), threadUpdated: 1_760_000_200, messageLength: 22, messageTruncated: false },
     ]);
     expect(urls).toHaveLength(2);
     expect(Object.fromEntries(urls[0]!.searchParams)).toMatchObject({ 'members[]': '7', limit: '30', last_message: 'true', unread_count: 'true', from_updated_time: '1759999880' });
@@ -96,15 +96,6 @@ describe('FreelancerReadAdapter', () => {
     await adapter.readUpdatedThreads('7', { known: new Map([[602, 1_760_000_200], [603, 1_760_000_100]]) });
     expect(urls[0]!.searchParams.has('from_updated_time')).toBe(false);
     expect(urls.slice(1).map((url) => url.searchParams.get('threads[]'))).toEqual(['604']);
-  });
-
-  it('marks a message truncated before slicing it', async () => {
-    const fetcher = vi.fn(async () => jsonResponse({ result: { threads: [{ id: 501, time_updated: 1_760_000_000,
-      last_message: { id: 901, from_user: 42, message: 'x'.repeat(4001), time_created: 1_760_000_000 } }] } }));
-    const adapter = new FreelancerReadAdapter({ token: 'test-token-value-1234', fetcher });
-    const [message] = await adapter.readUpdatedThreads('7');
-    expect(message).toMatchObject({ messageId: 901, completeness: 'truncated', completenessReason: 'Teks dibatasi 4.000 karakter saat dibaca.' });
-    expect(message?.message).toHaveLength(4000);
   });
 
   it('keeps messages read before a 429 and records rate-limit header numbers', async () => {

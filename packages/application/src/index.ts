@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { evaluatePolicy, scoreProject } from '@fvh/domain';
 import type { AutonomyPolicy, ProjectOpportunity } from '@fvh/domain';
 export * from './drafting.js';
+export * from './message-analysis.js';
 
 export function hashPayload(payload: unknown): string {
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');

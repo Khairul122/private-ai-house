@@ -1,6 +1,7 @@
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { api, type Inbox } from '../api/api.js';
+import { api, jsonRequest, type Inbox, type MessageAnalysis, type MessageSnapshotView } from '../api/api.js';
 import { formatDate } from '../components/format.js';
 import { EmptyState, ErrorNotice, LoadingPanel, PageIntro, Metric } from '../components/ui.js';
 
@@ -30,39 +31,143 @@ function emptyReply(state: SyncState) {
   return { title: 'Tidak ada pesan yang menunggu balasan', description: 'Semua pesan terakhir sudah dibalas atau tidak ada pesan baru sejak sinkronisasi terakhir.' };
 }
 
-const classificationLabel = { feature: 'Permintaan fitur', bug: 'Laporan bug', question: 'Pertanyaan', scope_change: 'Perubahan lingkup', unknown: 'Belum dapat diklasifikasi' } as const;
+const CLASSIFICATION_LABEL: Record<NonNullable<MessageAnalysis['classification']>, string> = {
+  feature: 'Permintaan fitur',
+  bug: 'Laporan masalah',
+  question: 'Pertanyaan',
+  scope_change: 'Perubahan lingkup',
+  unknown: 'Belum dapat diklasifikasi',
+};
 
-function AnalysisView({ analysis }: { analysis: Inbox['needsReply'][number]['analysis'] }) {
-  if (!analysis) return <p className="form-help">Analisis belum tersedia. Preview lama tidak membuktikan pesan lengkap.</p>;
-  const { source, result } = analysis;
-  return <div className="inbox-analysis" aria-label="Saran analisis pesan">
-    <p className="form-help">Sumber: Freelancer, thread {source.threadId}, pesan {source.messageId}. {source.completeness === 'complete' ? 'Teks teramati lengkap.' : `Sumber ${source.completeness === 'truncated' ? 'terpotong' : 'belum terbukti lengkap'}${source.completenessReason ? `: ${source.completenessReason}` : '.'}`}</p>
-    {source.linkStatus !== 'verified' && <p className="form-help">Proyek aktif belum terhubung secara pasti. Hubungan proyek perlu diperiksa.</p>}
-    {analysis.status === 'queued' && <p className="form-help">Analisis menunggu giliran.</p>}
-    {analysis.status === 'running' && <p className="form-help">Kartu Client Relations dibuat; hasil analisis belum tersedia.</p>}
-    {analysis.status === 'blocked' && <p className="form-help" role="status">Analisis terhenti: {analysis.error ?? 'Alasan tidak tersedia'}.</p>}
-    {analysis.status === 'succeeded' && result && <>
-      <p className="form-help">Saran AI · {classificationLabel[result.classification]} · hasil {analysis.finishedAt ? formatDate(analysis.finishedAt) : 'waktu tidak tersedia'}</p>
-      <p>{result.summary}</p>
-      <blockquote className="inbox-analysis-quote">“{result.summaryQuote}” <span className="form-help">(pesan {source.messageId})</span></blockquote>
-      {result.requirements.length > 0 && <div><strong>Kebutuhan yang disarankan</strong><ul>{result.requirements.map(item => <li key={item.id}>{item.text} <span className="form-help">Bukti: “{item.evidenceRef.quote}”</span></li>)}</ul></div>}
-      {result.questions.length > 0 && <div><strong>Perlu diklarifikasi</strong><ul>{result.questions.map((question, index) => <li key={`${index}:${question}`}>{question}</li>)}</ul></div>}
-      <div><strong>Draf balasan lokal · periksa sebelum digunakan</strong><blockquote className="inbox-analysis-quote">{result.replyDraft}</blockquote></div>
+/** Server treats a `running` row older than this as abandoned, so the UI may offer a retry then. */
+const STALE_RUN_MS = 10 * 60_000;
+
+/**
+ * Why the server would refuse to analyse this message. Mirrors the server rules so the
+ * UI never offers a button that can only produce a blocked row.
+ */
+function snapshotProblem(snapshot: MessageSnapshotView, available: boolean): string | null {
+  if (!available) return 'Hermes belum aktif, jadi analisis pesan tidak tersedia.';
+  if (snapshot.completeness !== 'complete') {
+    return snapshot.completenessReason ?? 'Kelengkapan teks pesan tidak dapat dipastikan, jadi analisis tidak dijalankan.';
+  }
+  if (snapshot.linkStatus === 'ambiguous') return 'Pesan cocok dengan lebih dari satu proyek aktif, jadi analisis dihentikan agar tidak salah konteks.';
+  if (snapshot.linkStatus === 'unlinked') return 'Pesan belum tertaut ke satu proyek aktif, jadi analisis tidak dijalankan.';
+  return null;
+}
+
+function staleRun(analysis: MessageAnalysis) {
+  return analysis.status === 'running' && Date.now() - Date.parse(analysis.startedAt) >= STALE_RUN_MS;
+}
+
+type MessageIntelProps = {
+  snapshot: MessageSnapshotView | null;
+  available: boolean;
+  busy: boolean;
+  busyVersion: string | null;
+  onAnalyze: (sourceVersion: string) => void;
+};
+
+function MessageIntel({ snapshot, available, busy, busyVersion, onAnalyze }: MessageIntelProps) {
+  const [copyState, setCopyState] = useState<'idle' | 'ok' | 'error'>('idle');
+  if (!snapshot) {
+    return <div className="message-intel">
+      <p className="message-intel-note">Belum ada salinan lengkap pesan ini. Analisis hanya memakai teks lengkap dari sinkronisasi setelah fitur ini aktif, bukan cuplikan 200 karakter. Tunggu pemeriksaan pesan berikutnya (±1 menit) lalu perbarui.</p>
+    </div>;
+  }
+  const problem = snapshotProblem(snapshot, available);
+  const analysis = snapshot.analysis;
+  const running = analysis?.status === 'running' || analysis?.status === 'queued';
+  const pending = busy && busyVersion === snapshot.sourceVersion;
+  const canAnalyze = problem === null && (!analysis || analysis.status === 'blocked' || staleRun(analysis));
+
+  const copy = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyState('ok');
+    } catch {
+      setCopyState('error');
+    }
+  };
+
+  return <div className="message-intel">
+    <div className="message-intel-head">
+      <strong className="message-intel-status" data-tone={analysis?.status === 'succeeded' ? 'ok' : analysis?.status === 'blocked' ? 'warn' : undefined}>
+        {analysis ? ({ queued: 'Menunggu antrean analisis', running: 'Sedang dianalisis', succeeded: 'Analisis selesai', blocked: 'Analisis diblokir' })[analysis.status] : 'Belum dianalisis'}
+      </strong>
+      {snapshot.completeness !== 'complete' && <span className="state-label">Teks tidak lengkap</span>}
+      {snapshot.linkStatus !== 'linked' && <span className="state-label">{snapshot.linkStatus === 'ambiguous' ? 'Proyek ambigu' : 'Belum tertaut proyek'}</span>}
+      {snapshot.linkStatus === 'linked' && <span className="item-sub">Tertaut ke proyek aktif</span>}
+    </div>
+
+    {running && <p className="message-intel-note" role="status">Analisis berjalan sejak {formatDate(analysis.startedAt)}; biasanya 40–95 detik. Halaman ini akan memperbarui sendiri.</p>}
+
+    {analysis?.status === 'succeeded' ? <>
+      <p className="message-intel-note"><strong>{analysis.classification ? CLASSIFICATION_LABEL[analysis.classification] : 'Tanpa klasifikasi'}</strong>{analysis.summary ? ` — ${analysis.summary}` : ''}</p>
+      {analysis.requirements.length > 0 && <div>
+        <p className="message-intel-note">Kebutuhan yang disebut klien:</p>
+        <ul className="message-intel-list">
+          {analysis.requirements.map((requirement) => <li key={requirement.id}>
+            {requirement.text}
+            <q className="message-intel-quote">{requirement.quote}</q>
+          </li>)}
+        </ul>
+      </div>}
+      {analysis.questions.length > 0 && <div>
+        <p className="message-intel-note">Pertanyaan yang perlu dijawab:</p>
+        <ul className="message-intel-list">{analysis.questions.map((question) => <li key={question}>{question}</li>)}</ul>
+      </div>}
+      {analysis.replyDraft && <div>
+        <p className="message-intel-note"><strong>Draf balasan — belum dikirim dan belum disetujui.</strong> Periksa isinya sebelum mengirim lewat Freelancer.</p>
+        <pre className="message-intel-draft">{analysis.replyDraft}</pre>
+        <div className="message-intel-actions">
+          <button type="button" className="button button-secondary" onClick={() => void copy(analysis.replyDraft ?? '')}>Salin draf</button>
+          {copyState === 'ok' && <span className="message-intel-note" role="status">Draf disalin.</span>}
+          {copyState === 'error' && <span className="message-intel-note" role="status">Tidak dapat menyalin otomatis; pilih teks draf secara manual.</span>}
+        </div>
+      </div>}
+    </> : <>
+      {analysis?.status === 'blocked' && <p className="message-intel-note">{analysis.error ?? 'Analisis diblokir tanpa alasan tersimpan.'}</p>}
+      {problem && analysis?.status !== 'blocked' && <p className="message-intel-note">{problem}</p>}
+      {canAnalyze && <>
+        <p className="message-intel-note">Hermes menulis ringkasan dan draf balasan dari teks pesan ini. Tidak ada balasan yang dikirim otomatis; biaya dan waktu model dipakai hanya saat Anda menekan tombol.</p>
+        <div className="message-intel-actions">
+          <button type="button" className="button button-secondary" disabled={busy || running} onClick={() => onAnalyze(snapshot.sourceVersion)}>
+            {pending ? 'Menganalisis… (±40–95 detik)' : analysis?.status === 'blocked' ? 'Coba analisis ulang' : 'Analisis pesan'}
+          </button>
+          {analysis && staleRun(analysis) && <span className="message-intel-note">Analisis sebelumnya tampak berhenti; jalankan ulang bila perlu.</span>}
+        </div>
+      </>}
+      {!canAnalyze && !problem && running && <p className="message-intel-note">Tunggu hingga analisis selesai sebelum menjalankannya lagi.</p>}
     </>}
   </div>;
 }
 
 export default function InboxPage() {
+  const queryClient = useQueryClient();
   const inbox = useQuery({ queryKey: ['inbox'], queryFn: () => api<Inbox>('/inbox'), refetchInterval: 10_000 });
+  const analyze = useMutation({
+    mutationFn: (body: { sourceVersion?: string; limit?: number }) => api<{ analyses: MessageAnalysis[]; counts: Inbox['messageIntel']['counts'] }>('/inbox/analyze', jsonRequest('POST', body)),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['inbox'] }),
+        queryClient.invalidateQueries({ queryKey: ['activity'] }),
+      ]);
+    },
+  });
+
   if (inbox.isPending) return <LoadingPanel label="Memuat kotak masuk..." />;
   if (inbox.isError) return <ErrorNotice message="Kotak masuk belum dapat dimuat." onRetry={() => inbox.refetch()} />;
-  const { sync, needsReply, followUps } = inbox.data;
+  const { sync, needsReply, followUps, messageIntel } = inbox.data;
   const state = syncState(sync);
   const synced = state === 'synced';
   const syncMessage = syncLine(state, sync);
   const empty = emptyReply(state);
+  const busy = analyze.isPending;
+  const busyVersion = busy ? analyze.variables?.sourceVersion ?? null : null;
+  const analyzeError = analyze.isError ? (analyze.error instanceof Error ? analyze.error.message : 'Analisis pesan gagal.') : null;
   return <>
-    <PageIntro eyebrow="Freelancer" title="Kotak masuk Freelancer" description="Pesan terakhir yang teramati per thread. Server memeriksa pesan setiap menit selama aktif; pesan di antara pemeriksaan dapat terlewat." action={<a className="button button-primary" href="https://www.freelancer.com/messages" target="_blank" rel="noreferrer">Buka pesan Freelancer</a>} />
+    <PageIntro eyebrow="Freelancer" title="Kotak masuk Freelancer" description="Fokus utama: pesan yang perlu dibalas. Server memeriksa pesan setiap menit selama aktif." action={<a className="button button-primary" href="https://www.freelancer.com/messages" target="_blank" rel="noreferrer">Buka pesan Freelancer</a>} />
     <section className="card-summary-grid" aria-label="Ringkasan kotak masuk">
       <Metric label="Menunggu balasan" value={synced ? needsReply.length : 'Tidak diketahui'} note={synced ? 'Pesan terakhir berasal dari akun lain' : 'Bergantung pada sinkronisasi pesan'} tone="primary" />
       <Metric label="Bid perlu ditinjau" value={followUps.length} note="Minimal 3 hari tanpa percakapan" />
@@ -73,14 +178,25 @@ export default function InboxPage() {
     </div>
     {state === 'failed' ? <ErrorNotice message={syncMessage} onRetry={() => void inbox.refetch()} /> : <p className="form-help">{syncMessage}</p>}
 
+    <div className="card-toolbar message-intel-summary">
+      <p className="form-help">
+        {messageIntel.available
+          ? `Analisis pesan: ${messageIntel.counts.snapshots} pesan klien tersimpan · ${messageIntel.counts.analyzable} siap dianalisis · ${messageIntel.counts.succeeded} selesai · ${messageIntel.counts.blocked} diblokir.`
+          : `Analisis pesan tidak tersedia: ${messageIntel.reason ?? 'Hermes belum aktif'}. Pesan tetap disimpan tanpa dianalisis.`}
+      </p>
+      {messageIntel.available && messageIntel.counts.analyzable > 0 && <button type="button" className="button button-secondary" disabled={busy} onClick={() => analyze.mutate({ limit: 1 })}>{busy && busyVersion === null ? 'Menganalisis… (±40–95 detik)' : `Analisis pesan tertunda (${messageIntel.counts.analyzable})`}</button>}
+    </div>
+    {analyzeError && <ErrorNotice message={analyzeError} onRetry={() => analyze.mutate(analyze.variables ?? { limit: 1 })} />}
+
     <section className="activity-preview card-section" aria-labelledby="needs-reply-title">
       <div className="section-heading">
         <div><p className="eyebrow">Pesan terakhir dari akun lain</p><h2 id="needs-reply-title">Menunggu balasan ({synced ? needsReply.length : 'Tidak diketahui'})</h2></div>
         <a className="text-link" style={{ display: 'inline-flex', alignItems: 'center', minHeight: 44 }} href="https://www.freelancer.com/messages" target="_blank" rel="noreferrer">Buka Freelancer</a>
       </div>
       {needsReply.length ? <ul className="deadlines-list">{needsReply.map((thread) => <li className="deadline-item" key={thread.threadId}>
-        <div className="inbox-message"><strong>{thread.projectTitle ?? 'Percakapan tanpa proyek tersinkron'}</strong><div className="item-sub">{thread.preview}</div><AnalysisView analysis={thread.analysis} /></div>
+        <div><strong>{thread.projectTitle ?? 'Percakapan tanpa proyek tersinkron'}</strong><div className="item-sub">{thread.preview}</div></div>
         <div className="item-aside"><strong className={thread.waitingHours >= 24 ? 'is-late' : ''}>{waitingLabel(thread.waitingHours)}</strong><div className="item-sub">{formatDate(thread.lastMessageAt)}</div></div>
+        <MessageIntel snapshot={thread.snapshot} available={messageIntel.available} busy={busy} busyVersion={busyVersion} onAnalyze={(sourceVersion) => analyze.mutate({ sourceVersion })} />
       </li>)}</ul>
         : <EmptyState title={empty.title} description={empty.description} action={<>
           <a className="button button-secondary" href="https://www.freelancer.com/messages" target="_blank" rel="noreferrer">Buka pesan Freelancer</a>

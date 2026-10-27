@@ -151,15 +151,59 @@ export type BusinessSyncStatus = {
   messages: SyncRun & { threads: number; selfId: string | null };
 };
 
+export type MessageAnalysis = {
+  sourceVersion: string;
+  contractVersion: string;
+  status: 'queued' | 'running' | 'succeeded' | 'blocked';
+  classification: 'feature' | 'bug' | 'question' | 'scope_change' | 'unknown' | null;
+  summary: string | null;
+  requirements: Array<{ id: string; text: string; quote: string }>;
+  questions: string[];
+  replyDraft: string | null;
+  error: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+};
+
+export type MessageSnapshotView = {
+  sourceVersion: string;
+  messageId: string;
+  capturedAt: string;
+  completeness: 'complete' | 'truncated' | 'unknown';
+  completenessReason: string | null;
+  linkStatus: 'linked' | 'unlinked' | 'ambiguous';
+  clientProjectId: string | null;
+  analysis: MessageAnalysis | null;
+};
+
 export type Inbox = {
   sync: SyncRun | null;
-  needsReply: Array<{ threadId: string; projectId: string | null; projectTitle: string | null; preview: string; lastMessageAt: string; waitingHours: number;
-    analysis: null | { id: string; status: 'queued' | 'running' | 'succeeded' | 'blocked'; finishedAt: string | null; error: string | null;
-      source: { threadId: string; messageId: string; sourceVersion: string; completeness: 'complete' | 'truncated' | 'unknown'; completenessReason: string | null; linkStatus: 'verified' | 'unlinked' | 'ambiguous'; clientProjectId: string | null };
-      result: null | { classification: 'feature' | 'bug' | 'question' | 'scope_change' | 'unknown'; summary: string; summaryQuote: string;
-        requirements: Array<{ id: string; text: string; evidenceRef: { threadId: string; messageId: string; sourceVersion: string; quote: string } }>;
-        questions: string[]; replyDraft: string } } }>;
+  needsReply: Array<{
+    threadId: string; projectId: string | null; projectTitle: string | null; preview: string; lastMessageAt: string;
+    waitingHours: number; snapshot: MessageSnapshotView | null;
+  }>;
   followUps: Array<{ projectId: string; title: string; submittedAt: string; daysSinceBid: number }>;
+  messageIntel: {
+    available: boolean;
+    reason: string | null;
+    counts: { snapshots: number; analyzable: number; succeeded: number; blocked: number };
+  };
+};
+
+export type DailyPriority = {
+  day: string;
+  generatedAt: string;
+  actions: Array<{
+    id: string;
+    kind: 'payment_due' | 'project_deadline' | 'mission_due' | 'message_waiting' | 'bid_follow_up';
+    title: string;
+    reason: string;
+    dueAt: string | null;
+    linkTo: string;
+    source: string;
+  }>;
+  currencyTotals: Array<{ currency: string; amount: number; payments: number }>;
+  sources: Array<{ name: string; status: 'ok' | 'failed' | 'unknown'; lastRunAt: string | null; note: string | null }>;
 };
 
 export type ClientProject = {
