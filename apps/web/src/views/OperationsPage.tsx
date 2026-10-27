@@ -27,7 +27,7 @@ export default function OperationsPage() {
   const [editingTask,setEditingTask]=useState<string|null>(null);
   const client=useQueryClient();
   const query=useQuery({queryKey:['operations'],queryFn:()=>api<OperationsData>('/operations'),refetchInterval:5000});
-  const qr=useQuery({queryKey:['operations-qr'],queryFn:checkWhatsAppStatus,refetchInterval:tab==='WhatsApp'?2000:5000,networkMode:'always'});
+  const qr=useQuery({queryKey:['operations-qr'],queryFn:checkWhatsAppStatus,enabled:Boolean(query.data?.whatsapp),refetchInterval:tab==='WhatsApp'?2000:5000,networkMode:'always'});
   const refreshClients=async()=>{await Promise.all([client.invalidateQueries({queryKey:['operations']}),client.invalidateQueries({queryKey:['work']})]);};
   const run=async(path:string,method:'POST'|'PUT',body?:unknown)=>{
     setBusy(true);setNotice(null);

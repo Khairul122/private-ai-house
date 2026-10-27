@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { canTransitionMission, transitionPipeline } from '@fvh/domain';
-import type { AuditEvent, AutonomyPolicy, BidDraft, MissionItem, MissionLease, PipelineStatus, ProjectOpportunity } from '@fvh/domain';
+import type { AuditEvent, AutonomyPolicy, BidDraft, DailyPriority, MissionItem, MissionLease, PipelineStatus, ProjectOpportunity } from '@fvh/domain';
 import { chooseProjectsCoIdBid, evaluatePolicy, projectsCoIdDraftPolicy, projectsCoIdSettings } from '@fvh/domain';
 import { claimMissionSchema, createMissionSchema, listMissionsSchema, releaseMissionLeaseSchema, renewMissionLeaseSchema, updateMissionStatusSchema } from '@fvh/contracts';
 import type { ClaimMissionInput, CreateMissionInput, ListMissionsInput, ReleaseMissionLeaseInput, RenewMissionLeaseInput, UpdateMissionStatusInput } from '@fvh/contracts';
 import type { KnowledgeChunk, KnowledgeProvider } from '@fvh/knowledge';
 import { createDatabase, type Database, type Queryable } from './database.js';
+import type { MessageAnalysis, MessageSnapshot } from './message-intel.js';
 
 export type ServiceProfile = {
   primaryField: string;
@@ -47,6 +48,8 @@ const PAYMENT_COLUMNS = 'id, project_id, amount, currency, status, due_date, rec
 const BID_RESULT_COLUMNS = 'project_id, bid_id, amount, currency, submitted_at, award_status, outcome, checked_at';
 const MISSION_COLUMNS = 'id, source, source_id, kind, title, status, priority, due_at, assigned_to, payload, blocker, error, created_at, updated_at';
 const MISSION_LEASE_COLUMNS = 'mission_id, claimant, lease_id, claimed_at, lease_until';
+const MESSAGE_ANALYSIS_COLUMNS =
+  'analysis_id, source_version, contract_version, status, classification, summary, requirements, questions, reply_draft, error, started_at, finished_at, updated_at';
 
 function mission(row: Record<string, unknown>): MissionItem {
   const item = camel<MissionItem>([row])[0]!;
@@ -61,6 +64,25 @@ function mission(row: Record<string, unknown>): MissionItem {
 function missionLease(row: Record<string, unknown>): MissionLease {
   const lease = camel<MissionLease>([row])[0]!;
   return { ...lease, claimedAt: new Date(lease.claimedAt).toISOString(), leaseUntil: new Date(lease.leaseUntil).toISOString() };
+}
+
+function jsonArray(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') return JSON.parse(value) as unknown[];
+  return [];
+}
+
+function messageAnalysisRow(row: Record<string, unknown> | undefined): MessageAnalysis | undefined {
+  if (!row) return undefined;
+  const item = camel<MessageAnalysis>([row])[0]!;
+  return {
+    ...item,
+    requirements: jsonArray(item.requirements) as MessageAnalysis['requirements'],
+    questions: jsonArray(item.questions) as string[],
+    startedAt: new Date(item.startedAt).toISOString(),
+    finishedAt: item.finishedAt ? new Date(item.finishedAt).toISOString() : null,
+    updatedAt: new Date(item.updatedAt).toISOString(),
+  };
 }
 
 export type StoredKnowledgeSource = {
@@ -173,6 +195,12 @@ export class WorkspaceRepository {
     return rows.map(mission);
   }
 
+  /** One mission per (source, source_id); used to reuse the mission already created for a source version. */
+  async getMissionBySource(source: MissionItem['source'], sourceId: string): Promise<MissionItem | undefined> {
+    const [row] = await this.database.query(`SELECT ${MISSION_COLUMNS} FROM missions WHERE source = $1 AND source_id = $2`, [source, sourceId]);
+    return row ? mission(row) : undefined;
+  }
+
   async getMissionLease(id: string): Promise<MissionLease | undefined> {
     const [row] = await this.database.query(`SELECT ${MISSION_LEASE_COLUMNS} FROM mission_leases WHERE mission_id=$1`, [id]);
     return row ? missionLease(row) : undefined;
@@ -222,6 +250,99 @@ export class WorkspaceRepository {
       value.status === 'blocked' ? value.error ?? null : null]);
     if (!row) throw new Error('Status mission berubah bersamaan.');
     return mission(row);
+  }
+
+  /** Stores the summary for its WIB day; regenerating the same day replaces it instead of adding a row. */
+  async saveDailyPriority(summary: DailyPriority): Promise<DailyPriority> {
+    const [row] = await this.database.query<{ summary: unknown }>(`INSERT INTO daily_priorities (day, summary, generated_at)
+      VALUES ($1, $2::jsonb, $3) ON CONFLICT (day) DO UPDATE SET summary = excluded.summary,
+      generated_at = excluded.generated_at, updated_at = now() RETURNING summary`,
+    [summary.day, JSON.stringify(summary), summary.generatedAt]);
+    const value = row!.summary;
+    return (typeof value === 'string' ? JSON.parse(value) : value) as DailyPriority;
+  }
+
+  async getDailyPriority(day: string): Promise<DailyPriority | undefined> {
+    const [row] = await this.database.query<{ summary: unknown }>('SELECT summary FROM daily_priorities WHERE day = $1', [day]);
+    if (!row) return undefined;
+    const value = row.summary;
+    return (typeof value === 'string' ? JSON.parse(value) : value) as DailyPriority;
+  }
+
+  /** Same source version is stored once; a re-sync with identical content adds nothing. */
+  async upsertMessageSnapshots(rows: MessageSnapshot[]): Promise<number> {
+    if (!rows.length) return 0;
+    let inserted = 0;
+    await this.database.transaction(async (tx) => {
+      for (const row of rows) {
+        const result = await tx.query(`INSERT INTO message_snapshots
+          (id, thread_id, message_id, sender_id, project_id, client_project_id, link_status, body, completeness, completeness_reason, source_version, captured_at, synced_at)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT (source_version) DO NOTHING RETURNING id`,
+        [row.id, row.threadId, row.messageId, row.senderId, row.projectId, row.clientProjectId, row.linkStatus, row.body,
+          row.completeness, row.completenessReason, row.sourceVersion, row.capturedAt, row.syncedAt]);
+        inserted += result.length;
+      }
+    });
+    return inserted;
+  }
+
+  async listMessageSnapshots(limit = 50): Promise<MessageSnapshot[]> {
+    return camel<MessageSnapshot>(await this.database.query(`SELECT id, thread_id, message_id, sender_id, project_id, client_project_id,
+      link_status, body, completeness, completeness_reason, source_version, captured_at, synced_at
+      FROM message_snapshots ORDER BY captured_at DESC, id ASC LIMIT $1`, [limit]));
+  }
+
+  async getMessageSnapshot(sourceVersion: string): Promise<MessageSnapshot | undefined> {
+    const [row] = await this.database.query(`SELECT id, thread_id, message_id, sender_id, project_id, client_project_id,
+      link_status, body, completeness, completeness_reason, source_version, captured_at, synced_at
+      FROM message_snapshots WHERE source_version = $1`, [sourceVersion]);
+    return row ? camel<MessageSnapshot>([row])[0] : undefined;
+  }
+
+  /** Stored counts only; no derived `analyzable` guess beyond the explicit completeness and link rules. */
+  async messageIntelCounts(): Promise<{ snapshots: number; analyzable: number; succeeded: number; blocked: number }> {
+    const [row] = await this.database.query<{ snapshots: number; analyzable: number; succeeded: number; blocked: number }>(`
+      SELECT (SELECT COUNT(*) FROM message_snapshots)::int AS snapshots,
+        (SELECT COUNT(*) FROM message_snapshots s LEFT JOIN message_analyses a ON a.source_version = s.source_version
+          WHERE a.analysis_id IS NULL AND s.completeness = 'complete' AND s.link_status = 'linked')::int AS analyzable,
+        (SELECT COUNT(*) FROM message_analyses WHERE status = 'succeeded')::int AS succeeded,
+        (SELECT COUNT(*) FROM message_analyses WHERE status = 'blocked')::int AS blocked`);
+    return row ?? { snapshots: 0, analyzable: 0, succeeded: 0, blocked: 0 };
+  }
+
+  /** Only complete, project-linked snapshots without any stored analysis are eligible for automatic analysis. */
+  async listAnalyzableSnapshots(limit = 3): Promise<MessageSnapshot[]> {
+    return camel<MessageSnapshot>(await this.database.query(`SELECT s.id, s.thread_id, s.message_id, s.sender_id, s.project_id,
+      s.client_project_id, s.link_status, s.body, s.completeness, s.completeness_reason, s.source_version, s.captured_at, s.synced_at
+      FROM message_snapshots s LEFT JOIN message_analyses a ON a.source_version = s.source_version
+      WHERE a.analysis_id IS NULL AND s.completeness = 'complete' AND s.link_status = 'linked'
+      ORDER BY s.captured_at ASC, s.id ASC LIMIT $1`, [limit]));
+  }
+
+  async getMessageAnalysis(sourceVersion: string): Promise<MessageAnalysis | undefined> {
+    const [row] = await this.database.query(`SELECT ${MESSAGE_ANALYSIS_COLUMNS} FROM message_analyses WHERE source_version = $1`, [sourceVersion]);
+    return messageAnalysisRow(row);
+  }
+
+  async listMessageAnalyses(sourceVersions: string[]): Promise<MessageAnalysis[]> {
+    if (!sourceVersions.length) return [];
+    const rows = await this.database.query(`SELECT ${MESSAGE_ANALYSIS_COLUMNS} FROM message_analyses WHERE source_version = ANY($1::text[])`, [sourceVersions]);
+    return rows.map((row) => messageAnalysisRow(row)!);
+  }
+
+  async saveMessageAnalysis(analysis: MessageAnalysis): Promise<MessageAnalysis> {
+    const [row] = await this.database.query(`INSERT INTO message_analyses
+      (analysis_id, source_version, contract_version, status, classification, summary, requirements, questions, reply_draft, error, started_at, finished_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9,$10,$11,$12)
+      ON CONFLICT (source_version) DO UPDATE SET status = excluded.status, classification = excluded.classification,
+        summary = excluded.summary, requirements = excluded.requirements, questions = excluded.questions,
+        reply_draft = excluded.reply_draft, error = excluded.error, started_at = excluded.started_at,
+        finished_at = excluded.finished_at, updated_at = now()
+      RETURNING ${MESSAGE_ANALYSIS_COLUMNS}`,
+    [analysis.analysisId, analysis.sourceVersion, analysis.contractVersion, analysis.status, analysis.classification, analysis.summary,
+      JSON.stringify(analysis.requirements), JSON.stringify(analysis.questions), analysis.replyDraft, analysis.error,
+      analysis.startedAt, analysis.finishedAt]);
+    return messageAnalysisRow(row)!;
   }
 
   private async seed() {

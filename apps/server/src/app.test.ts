@@ -7,7 +7,7 @@ import { insertTestOpportunity, testOpportunity } from './test-fixtures.js';
 
 const fixedNow = new Date('2026-10-14T04:00:00.000Z');
 let repository: WorkspaceRepository;
-let app: ReturnType<typeof createApp>;
+let app: Awaited<ReturnType<typeof createApp>>;
 
 beforeEach(async () => {
   repository = await WorkspaceRepository.open();
@@ -429,7 +429,14 @@ describe('local API', () => {
 describe('business operations API', () => {
   it('reports an empty inbox without inventing threads when message sync is unavailable', async () => {
     const inbox = await app.inject({ method: 'GET', url: '/api/inbox' });
-    expect(inbox.json()).toEqual({ sync: null, needsReply: [], followUps: [] });
+    expect(inbox.json()).toEqual({
+      sync: null, needsReply: [], followUps: [],
+      messageIntel: {
+        available: false,
+        reason: expect.any(String),
+        counts: { snapshots: 0, analyzable: 0, succeeded: 0, blocked: 0 },
+      },
+    });
     const insights = (await app.inject({ method: 'GET', url: '/api/insights/bids' })).json();
     expect(insights.outcomes).toEqual({ submitted: 0, won: 0, lost: 0, pending: 0, withConversation: 0, winRate: null });
   });

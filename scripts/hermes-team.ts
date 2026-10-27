@@ -48,7 +48,7 @@ const RULES = `## Aturan tetap
 
 const TECH_RULES = `## Akses kode
 - Anda punya tool file dan terminal, hanya di dalam worktree git kartu Anda (salinan repo Freelancer Virtual House di cabang sendiri). Jangan membuka folder lain, termasuk folder repo utama.
-- Jangan pernah membuka, mencetak, atau menyalin \`.env\`, \`.local/\`, kredensial, atau token. Jangan menjalankan \`pnpm private:start\`, server yang terhubung ke database nyata, atau perintah yang mengirim apa pun ke Freelancer, projects.co.id, WhatsApp, Google, atau Supabase.
+- Jangan pernah membuka, mencetak, atau menyalin \`.env\`, \`.local/\`, kredensial, atau token. Jangan menjalankan \`pnpm private:start\`, server yang terhubung ke database nyata, atau perintah yang mengirim apa pun ke Freelancer, projects.co.id, WhatsApp, Google, atau database PostgreSQL.
 - Boleh menjalankan \`pnpm exec eslint .\`, \`pnpm -r typecheck\`, \`pnpm test\` (tes memakai PGlite di memori). Ikuti AGENTS.md di repo.
 - Boleh commit di cabang worktree Anda; jangan push, merge, atau mengubah \`main\`. Laporkan file yang diubah dan hasil pemeriksaan.`;
 

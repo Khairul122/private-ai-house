@@ -1,4 +1,4 @@
--- Postgres (Supabase). Additive only: IF NOT EXISTS, no DROP/ALTER on tables holding data.
+-- Postgres. Additive only: IF NOT EXISTS, no DROP/ALTER on tables holding data.
 -- Own schema so nothing mixes with other projects in the same database.
 CREATE SCHEMA IF NOT EXISTS fvh;
 SET search_path TO fvh;

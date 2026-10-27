@@ -1,4 +1,4 @@
-﻿import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { api, type AuditEvent, type Autopilot, type BusinessSyncStatus, type Capabilities, type Inbox, type Policy, type Profile, type Work } from '../api/api.js';
 import { deriveOfficeAgents, summarize, STATE_COLORS, STATE_LABELS } from '../state/office-state.js';
@@ -94,7 +94,7 @@ export default function AgentsPage() {
     },
     {
       id: 'knowledge-curator', name: 'Knowledge Curator', dept: 'Knowledge Hub', role: 'Kurator Pengetahuan & Kode',
-      task: 'Menyinkronkan repositori GitHub dan catatan lokal ke Supabase (pencarian teks Postgres) untuk dijadikan bukti klaim proposal.',
+      task: 'Menyinkronkan repositori GitHub dan catatan lokal ke database PostgreSQL (pencarian teks Postgres) untuk dijadikan bukti klaim proposal.',
       boundary: 'Read-only lokal; memindai & mengecualikan token/kredensial sebelum pengindeksan.',
       metric: counts ? `${counts.knowledgeSources} sumber pengetahuan diindeks` : 'Jumlah sumber tidak tersedia',
       to: '/knowledge',

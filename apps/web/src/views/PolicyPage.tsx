@@ -50,7 +50,7 @@ export default function PolicyPage() {
       requireSpecializationMatch: value.requireSpecializationMatch ?? true,
       ...(extendValidity ? { validityDays } : {}),
     })),
-    onSuccess: async (value) => { queryClient.setQueryData(['policy'], value); setDraft(null); setListText({}); setExtendValidity(false); setNotice({ text: `Kebijakan versi ${value.version} tersimpan di Supabase. ${value.state === 'paused' ? 'Automasi tetap dijeda.' : value.state === 'active' ? 'Berlaku pada pemeriksaan autopilot berikutnya.' : 'Periksa batas lalu aktifkan kebijakan.'}`, error: false }); await refresh(); },
+    onSuccess: async (value) => { queryClient.setQueryData(['policy'], value); setDraft(null); setListText({}); setExtendValidity(false); setNotice({ text: `Kebijakan versi ${value.version} tersimpan di database. ${value.state === 'paused' ? 'Automasi tetap dijeda.' : value.state === 'active' ? 'Berlaku pada pemeriksaan autopilot berikutnya.' : 'Periksa batas lalu aktifkan kebijakan.'}`, error: false }); await refresh(); },
     onError: (error) => setNotice({ text: error instanceof Error ? error.message : 'Policy tidak dapat disimpan.', error: true }),
   });
   const activate = useMutation({

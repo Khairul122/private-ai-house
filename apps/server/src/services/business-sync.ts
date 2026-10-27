@@ -22,6 +22,8 @@ type Dependencies = {
   readSelfId?: () => Promise<string>;
   readThreads?: (selfId: string, options: ThreadReadOptions) => Promise<FreelancerLatestMessage[]>;
   readRateLimit?: () => FreelancerRateLimit | null;
+  /** Stores inbound message snapshots for the inbox analysis; never sends anything. */
+  captureMessages?: (messages: FreelancerLatestMessage[], selfId: string, syncedAt: string) => Promise<number>;
   now?: () => Date;
   /** Base intervals: outcomes 5 min, incremental messages 1 min, full message sweep 30 min. */
   intervals?: Partial<{ outcomes: number; messages: number; sweep: number }>;
@@ -161,6 +163,7 @@ export class BusinessSync {
         threadId: String(message.threadId), projectId: message.projectId, lastSenderId: message.senderId,
         lastMessageAt: message.createdAt, preview: message.message.slice(0, 200), syncedAt: lastRunAt,
       })));
+      if (changed.length && selfId && this.dependencies.captureMessages) await this.dependencies.captureMessages(changed, selfId, lastRunAt);
       for (const message of changed) if (message.threadUpdated !== undefined) this.known.set(message.threadId, message.threadUpdated);
     } catch (error) {
       failure ??= error;

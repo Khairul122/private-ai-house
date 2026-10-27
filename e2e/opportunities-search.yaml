@@ -1,0 +1,12 @@
+url: "http://127.0.0.1:3001/opportunities"
+name: "Opportunities Search Flow"
+---
+- launchApp
+- assertVisible:
+    text: "Peluang proyek"
+- inputText:
+    css: "input[type='search']"
+    text: "typescript"
+- assertVisible:
+    css: ".filter-bar"
+- takeScreenshot: "07-opportunities-search-results"

@@ -5,6 +5,7 @@ import fastifyStatic from '@fastify/static';
 import { FreelancerProductionWriteAdapter, FreelancerReadAdapter, FreelancerReadError, FreelancerSandboxWriteAdapter } from '@fvh/adapter-freelancer';
 import { HermesCliDraftingAdapter } from '@fvh/adapter-hermes';
 import { OFFICE_ROSTER } from '@fvh/domain';
+import { UnavailableMessageAnalysisAdapter } from '@fvh/application';
 import { createDatabase, WorkspaceRepository } from '@fvh/persistence';
 import { deleteLinkedInAccessToken, getFreelancerAccessToken, getLinkedInAccessToken, getLinkedInClientCredentials, readCredentialStatus, storeLinkedInAccessToken } from './lib/credential-store.js';
 import { LinkedInOAuthService } from './services/linkedin-oauth.js';
@@ -16,6 +17,7 @@ import { readLinkedInProfile, syncLinkedInProfile } from './lib/linkedin-api.js'
 import { createApp } from './app.js';
 import { FreelancerAutopilot } from './services/autopilot.js';
 import { BusinessSync } from './services/business-sync.js';
+import { MessageAnalysisService, captureMessageSnapshots } from './services/message-analysis.js';
 import { OperationsService } from './services/operations.js';
 import { OperationsRepository } from '@fvh/persistence';
 import { DpapiIntegrationVault } from './lib/integration-vault.js';
@@ -75,7 +77,7 @@ const linkedinOAuth = new LinkedInOAuthService({
 const envFile = join(projectRoot, '.env');
 const envValues = existsSync(envFile) ? parseEnv(readFileSync(envFile, 'utf8')) : {};
 const databaseUrl = (process.env.DATABASE_URL ?? envValues.DATABASE_URL)?.trim();
-if (!databaseUrl) throw new Error('DATABASE_URL belum diatur di .env (connection string Postgres Supabase).');
+if (!databaseUrl) throw new Error('DATABASE_URL belum diatur di .env (connection string PostgreSQL).');
 const live = new LiveEvents();
 // Every repository (and OperationsRepository via repository.sql) writes through this one wrapper.
 const repository = await WorkspaceRepository.open(announceWrites(await createDatabase(databaseUrl), live));
@@ -85,6 +87,8 @@ const businessSync = new BusinessSync({
   readOwnBids: async (bidIds) => (await createFreelancerReader()).readOwnBids(bidIds),
   readSelfId: async () => (await (await createFreelancerReader()).readOwnProfile()).id,
   readThreads: async (selfId, options) => (await createFreelancerReader()).readUpdatedThreads(selfId, { limit: 30, ...options }),
+  // Exact message text is stored even while Hermes is off; only the analysis step needs the model.
+  captureMessages: (messages, selfId, syncedAt) => captureMessageSnapshots(repository, messages, selfId, syncedAt),
 });
 const draftingConfig = readDraftingEnvironment(projectRoot);
 const hermesEnabled = draftingConfig.valid && draftingConfig.mode === 'hermes' && draftingConfig.consent;
@@ -121,6 +125,11 @@ const draftingReason = !draftingConfig.valid
     : !draftingConfig.consent
       ? 'Hermes sudah dipilih, tetapi persetujuan pengiriman data belum diberikan. Tidak ada draf sintetis yang digunakan.'
       : 'Hermes belum tersedia. Periksa instalasi profile private-ai-house dan jalankan ulang server.';
+const messageAnalysis = new MessageAnalysisService({
+  repository,
+  analyze: drafting ?? new UnavailableMessageAnalysisAdapter(),
+  available: hermesEnabled,
+});
 const webBuild = resolve(projectRoot, 'apps/web/dist');
 const integrationVault = new DpapiIntegrationVault(dataDirectory,resolve(projectRoot,'apps/server/src/lib/integration-vault.ps1'));
 const whatsapp = new WhatsAppService(integrationVault);
@@ -128,8 +137,8 @@ const googleCalendar = new GoogleCalendarService(integrationVault,new Operations
 const operations = new OperationsService({repository,messenger:whatsapp,calendar:googleCalendar,...(drafting?{review:(facts:string[])=>drafting.reviewOperations(facts)}:{})});
 const hasWebBuild = existsSync(webBuild);
 const hermesKanban = hermesEnabled ? new HermesKanban(hermesKanbanRunner(draftingConfig.executable)) : undefined;
-const discordMonitor = hermesKanban && envValues.DISCORD_BOT_TOKEN && envValues.DISCORD_GUILD_ID && envValues.DISCORD_APPLICATION_ID
-  ? new DiscordKanbanMonitor({ token: envValues.DISCORD_BOT_TOKEN, guildId: envValues.DISCORD_GUILD_ID, applicationId: envValues.DISCORD_APPLICATION_ID, categoryName: 'mission-control', channelName: 'monitoring-kartu' }, hermesKanban)
+const discordMonitor = envValues.DISCORD_BOT_TOKEN && envValues.DISCORD_GUILD_ID && envValues.DISCORD_APPLICATION_ID
+  ? new DiscordKanbanMonitor({ token: envValues.DISCORD_BOT_TOKEN, guildId: envValues.DISCORD_GUILD_ID, applicationId: envValues.DISCORD_APPLICATION_ID, categoryName: 'mission-control', channelName: 'papan-tugas', calendarChannelName: 'kalender' }, hermesKanban, () => operations.store.list('task'))
   : undefined;
 let discussionActive = false;
 const officeLearning = drafting ? new OfficeLearningService({
@@ -173,6 +182,7 @@ const app = await createApp({
   freelancerBidCapability: bidCapability,
   autopilot,
   businessSync,
+  messageAnalysis,
   verifyFreelancerSandboxWrite: async (input) => {
     const token = freelancerEnvironment.sandboxToken;
     if (!token) throw new Error('Freelancer sandbox token is not configured.');

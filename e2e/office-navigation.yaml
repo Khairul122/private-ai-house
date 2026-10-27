@@ -1,0 +1,36 @@
+url: "http://127.0.0.1:3001"
+name: "Office Workspace Navigation"
+---
+- launchApp
+- assertVisible:
+    css: ".vo3d-root"
+- openLink:
+    link: "http://127.0.0.1:3001/overview"
+- assertVisible:
+    text: "Hari ini di kantor"
+- takeScreenshot: "01-overview-screen"
+- openLink:
+    link: "http://127.0.0.1:3001/opportunities"
+- assertVisible:
+    text: "Peluang proyek"
+- takeScreenshot: "02-opportunities-screen"
+- openLink:
+    link: "http://127.0.0.1:3001/pipeline"
+- assertVisible:
+    text: "Pipeline penawaran"
+- takeScreenshot: "03-pipeline-screen"
+- openLink:
+    link: "http://127.0.0.1:3001/policy"
+- assertVisible:
+    text: "Batas automasi Anda"
+- takeScreenshot: "04-policy-screen"
+- openLink:
+    link: "http://127.0.0.1:3001/work"
+- assertVisible:
+    text: "Proyek & pendapatan"
+- takeScreenshot: "05-work-screen"
+- openLink:
+    link: "http://127.0.0.1:3001/capabilities"
+- assertVisible:
+    text: "Status integrasi"
+- takeScreenshot: "06-capabilities-screen"

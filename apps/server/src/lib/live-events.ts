@@ -87,6 +87,8 @@ export const TABLE_TOPICS: Record<string, LiveTopic[]> = {
   bid_drafts: ['pipeline', 'projects-co-id'],
   bid_results: ['pipeline', 'dashboard', 'inbox'],
   client_threads: ['inbox'],
+  message_snapshots: ['inbox'],
+  message_analyses: ['inbox'],
   client_projects: ['work', 'operations'],
   payments: ['work', 'operations'],
   autonomy_policies: ['policy', 'dashboard', 'autopilot', 'projects-co-id'],
