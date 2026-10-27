@@ -122,3 +122,4 @@ export type ProposalDraftOutput = z.infer<typeof proposalDraftOutputSchema>;
 export * from './operations.js';
 export * from './mission.js';
 export * from './message-analysis.js';
+export * from './candidate-task.js';

@@ -7,6 +7,7 @@ import type { ClaimMissionInput, CreateMissionInput, ListMissionsInput, ReleaseM
 import type { KnowledgeChunk, KnowledgeProvider } from '@fvh/knowledge';
 import { createDatabase, type Database, type Queryable } from './database.js';
 import type { MessageAnalysis, MessageSnapshot } from './message-intel.js';
+import type { CandidateTask } from './candidate-task.js';
 
 export type ServiceProfile = {
   primaryField: string;
@@ -32,16 +33,6 @@ export type BidOutcome = {
 
 export type SkipReasonSummary = { reason: string; total: number; recent: number };
 export type ClientThread = { threadId: string; projectId: string | null; lastSenderId: string; lastMessageAt: string; preview: string; syncedAt: string };
-export type InboxSnapshot = {
-  sourceVersion: string; source: 'freelancer'; threadId: string; messageId: string; senderId: string;
-  externalProjectId: string | null; opportunityId: string | null; clientProjectId: string | null;
-  linkStatus: 'verified' | 'unlinked' | 'ambiguous'; content: string;
-  completeness: 'complete' | 'truncated' | 'unknown'; completenessReason: string | null;
-  createdAt: string; capturedAt: string;
-};
-export type InboxAnalysis = { id: string; sourceVersion: string; missionId: string; contractVersion: string;
-  status: 'queued' | 'running' | 'succeeded' | 'blocked'; cardId: string | null;
-  startedAt: string | null; finishedAt: string | null; resultJson: unknown; error: string | null };
 export type ClientProjectSource = 'freelancer' | 'direct' | 'linkedin' | 'projects_co_id' | 'other';
 export type ClientProjectStatus = 'active' | 'delivered' | 'closed';
 export type ClientProject = {
@@ -60,6 +51,8 @@ const MISSION_COLUMNS = 'id, source, source_id, kind, title, status, priority, d
 const MISSION_LEASE_COLUMNS = 'mission_id, claimant, lease_id, claimed_at, lease_until';
 const MESSAGE_ANALYSIS_COLUMNS =
   'analysis_id, source_version, contract_version, status, classification, summary, requirements, questions, reply_draft, error, started_at, finished_at, updated_at';
+const CANDIDATE_COLUMNS =
+  'id, source_version, client_project_id, project_title, classification, title, objective, requirements, acceptance_criteria, questions, dependencies, scope_status, scope_note, analysis_mission_id, converted_mission_id, created_at, updated_at, confirmed_at, converted_at';
 
 function mission(row: Record<string, unknown>): MissionItem {
   const item = camel<MissionItem>([row])[0]!;
@@ -92,6 +85,22 @@ function messageAnalysisRow(row: Record<string, unknown> | undefined): MessageAn
     startedAt: new Date(item.startedAt).toISOString(),
     finishedAt: item.finishedAt ? new Date(item.finishedAt).toISOString() : null,
     updatedAt: new Date(item.updatedAt).toISOString(),
+  };
+}
+
+function candidateRow(row: Record<string, unknown> | undefined): CandidateTask | undefined {
+  if (!row) return undefined;
+  const item = camel<CandidateTask>([row])[0]!;
+  return {
+    ...item,
+    requirements: jsonArray(item.requirements) as CandidateTask['requirements'],
+    acceptanceCriteria: jsonArray(item.acceptanceCriteria) as CandidateTask['acceptanceCriteria'],
+    questions: jsonArray(item.questions) as string[],
+    dependencies: jsonArray(item.dependencies) as string[],
+    createdAt: new Date(item.createdAt).toISOString(),
+    updatedAt: new Date(item.updatedAt).toISOString(),
+    confirmedAt: item.confirmedAt ? new Date(item.confirmedAt).toISOString() : null,
+    convertedAt: item.convertedAt ? new Date(item.convertedAt).toISOString() : null,
   };
 }
 
@@ -353,6 +362,67 @@ export class WorkspaceRepository {
       JSON.stringify(analysis.requirements), JSON.stringify(analysis.questions), analysis.replyDraft, analysis.error,
       analysis.startedAt, analysis.finishedAt]);
     return messageAnalysisRow(row)!;
+  }
+
+  /** One candidate per message version; a second create returns the stored row instead of duplicating work. */
+  async createCandidateTask(candidate: CandidateTask): Promise<{ candidate: CandidateTask; created: boolean }> {
+    const [row] = await this.database.query(`INSERT INTO candidate_tasks
+      (id, source_version, client_project_id, project_title, classification, title, objective, requirements,
+        acceptance_criteria, questions, dependencies, scope_status, scope_note, analysis_mission_id, converted_mission_id,
+        created_at, updated_at, confirmed_at, converted_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11::jsonb,$12,$13,$14,$15,$16,$17,$18,$19)
+      ON CONFLICT (source_version) DO NOTHING RETURNING ${CANDIDATE_COLUMNS}`,
+    [candidate.id, candidate.sourceVersion, candidate.clientProjectId, candidate.projectTitle, candidate.classification,
+      candidate.title, candidate.objective, JSON.stringify(candidate.requirements), JSON.stringify(candidate.acceptanceCriteria),
+      JSON.stringify(candidate.questions), JSON.stringify(candidate.dependencies), candidate.scopeStatus, candidate.scopeNote,
+      candidate.analysisMissionId, candidate.convertedMissionId, candidate.createdAt, candidate.updatedAt,
+      candidate.confirmedAt, candidate.convertedAt]);
+    if (row) return { candidate: candidateRow(row)!, created: true };
+    const existing = await this.getCandidateTaskBySourceVersion(candidate.sourceVersion);
+    if (!existing) throw new Error('Calon tugas tidak tersimpan.');
+    return { candidate: existing, created: false };
+  }
+
+  async getCandidateTask(id: string): Promise<CandidateTask | undefined> {
+    const [row] = await this.database.query(`SELECT ${CANDIDATE_COLUMNS} FROM candidate_tasks WHERE id = $1`, [id]);
+    return candidateRow(row);
+  }
+
+  async getCandidateTaskBySourceVersion(sourceVersion: string): Promise<CandidateTask | undefined> {
+    const [row] = await this.database.query(`SELECT ${CANDIDATE_COLUMNS} FROM candidate_tasks WHERE source_version = $1`, [sourceVersion]);
+    return candidateRow(row);
+  }
+
+  async listCandidateTasks(limit = 50): Promise<CandidateTask[]> {
+    const rows = await this.database.query(`SELECT ${CANDIDATE_COLUMNS} FROM candidate_tasks
+      ORDER BY CASE scope_status WHEN 'needs_confirmation' THEN 0 WHEN 'confirmed' THEN 1 WHEN 'converted' THEN 2 ELSE 3 END,
+      created_at DESC, id ASC LIMIT $1`, [limit]);
+    return rows.map((row) => candidateRow(row)!);
+  }
+
+  /** Only a candidate that still waits for its scope decision can be confirmed. */
+  async confirmCandidateTask(id: string, input: { now: string; title?: string | undefined; objective?: string | undefined }): Promise<CandidateTask | undefined> {
+    const [row] = await this.database.query(`UPDATE candidate_tasks SET scope_status = 'confirmed',
+      title = COALESCE($2, title), objective = COALESCE($3, objective), confirmed_at = $4, updated_at = now()
+      WHERE id = $1 AND scope_status = 'needs_confirmation' RETURNING ${CANDIDATE_COLUMNS}`,
+    [id, input.title ?? null, input.objective ?? null, input.now]);
+    return candidateRow(row);
+  }
+
+  async rejectCandidateTask(id: string, input: { now: string; reason: string }): Promise<CandidateTask | undefined> {
+    const [row] = await this.database.query(`UPDATE candidate_tasks SET scope_status = 'rejected', scope_note = $2,
+      updated_at = now() WHERE id = $1 AND scope_status IN ('needs_confirmation','confirmed') RETURNING ${CANDIDATE_COLUMNS}`,
+    [id, input.reason]);
+    return candidateRow(row);
+  }
+
+  /** Records the mission this candidate became; converting twice is refused by the status guard. */
+  async markCandidateConverted(id: string, input: { now: string; missionId: string }): Promise<CandidateTask | undefined> {
+    const [row] = await this.database.query(`UPDATE candidate_tasks SET scope_status = 'converted',
+      converted_mission_id = $2, converted_at = $3, updated_at = now()
+      WHERE id = $1 AND scope_status = 'confirmed' RETURNING ${CANDIDATE_COLUMNS}`,
+    [id, input.missionId, input.now]);
+    return candidateRow(row);
   }
 
   private async seed() {
@@ -639,69 +709,6 @@ export class WorkspaceRepository {
 
   async listClientThreads(): Promise<ClientThread[]> {
     return camel<ClientThread>(await this.database.query('SELECT thread_id, project_id, last_sender_id, last_message_at, preview, synced_at FROM client_threads ORDER BY last_message_at DESC'));
-  }
-
-  /** Snapshot precedes its mission and analysis in one transaction, including after a process crash. */
-  async enqueueInboxAnalysis(snapshot: InboxSnapshot): Promise<InboxAnalysis> {
-    const sourceId = `inbox-analysis:v1:${snapshot.sourceVersion}`;
-    return this.database.transaction(async tx => {
-      await tx.query(`INSERT INTO inbox_message_snapshots (source_version, source, thread_id, message_id, sender_id,
-        external_project_id, opportunity_id, client_project_id, link_status, content, completeness,
-        completeness_reason, created_at, captured_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT DO NOTHING`,
-      [snapshot.sourceVersion, snapshot.source, snapshot.threadId, snapshot.messageId, snapshot.senderId,
-        snapshot.externalProjectId, snapshot.opportunityId, snapshot.clientProjectId, snapshot.linkStatus,
-        snapshot.content, snapshot.completeness, snapshot.completenessReason, snapshot.createdAt, snapshot.capturedAt]);
-      await tx.query(`INSERT INTO missions (id,source,source_id,kind,title,status,priority,due_at,assigned_to,payload)
-        VALUES ($1,'inbox',$2,'inbox_analysis','Analisis pesan klien','queued','normal',NULL,'fvh-client-relations',$3::jsonb)
-        ON CONFLICT (source,source_id) DO NOTHING`, [randomUUID(), sourceId, JSON.stringify({ threadId: snapshot.threadId })]);
-      const [mission] = await tx.query<{ id: string }>("SELECT id FROM missions WHERE source='inbox' AND source_id=$1", [sourceId]);
-      if (!mission) throw new Error('Mission analisis tidak tersimpan.');
-      await tx.query(`INSERT INTO inbox_message_analyses (id,source_version,mission_id,contract_version,status)
-        VALUES ($1,$2,$3,'v1','queued') ON CONFLICT (source_version) DO NOTHING`, [randomUUID(), snapshot.sourceVersion, mission.id]);
-      const [row] = await tx.query(`SELECT * FROM inbox_message_analyses WHERE source_version=$1`, [snapshot.sourceVersion]);
-      return camel<InboxAnalysis>([row!])[0]!;
-    });
-  }
-
-  async listPendingInboxAnalyses(limit = 20): Promise<Array<{ analysis: InboxAnalysis; snapshot: InboxSnapshot }>> {
-    const rows = await this.database.query<{ analysis: Record<string, unknown>; snapshot: Record<string, unknown> }>(`
-      SELECT to_jsonb(a) AS analysis, to_jsonb(s) AS snapshot FROM inbox_message_analyses a
-      JOIN inbox_message_snapshots s ON s.source_version=a.source_version
-      WHERE a.status IN ('queued','running') ORDER BY s.captured_at ASC LIMIT $1`, [limit]);
-    return rows.map(row => ({ analysis: camel<InboxAnalysis>([row.analysis])[0]!, snapshot: camel<InboxSnapshot>([row.snapshot])[0]! }));
-  }
-
-  async listInboxAnalyses(threadIds: string[]): Promise<Array<{ analysis: InboxAnalysis; snapshot: InboxSnapshot }>> {
-    if (!threadIds.length) return [];
-    const rows = await this.database.query<{ analysis: Record<string, unknown>; snapshot: Record<string, unknown> }>(`
-      SELECT to_jsonb(a) AS analysis, to_jsonb(s) AS snapshot FROM inbox_message_analyses a
-      JOIN inbox_message_snapshots s ON s.source_version=a.source_version
-      WHERE s.thread_id=ANY($1::text[]) ORDER BY s.created_at DESC,s.captured_at DESC`, [threadIds]);
-    return rows.map(row => ({ analysis: camel<InboxAnalysis>([row.analysis])[0]!, snapshot: camel<InboxSnapshot>([row.snapshot])[0]! }));
-  }
-
-  /** The lease check and write share a transaction. An expired or replaced worker cannot publish. */
-  async writeInboxAnalysisWithLease(input: { id: string; missionId: string; claimant: string; leaseId: string;
-    status: 'running' | 'succeeded' | 'blocked'; cardId?: string | null; result?: unknown; error?: string | null }): Promise<boolean> {
-    return this.database.transaction(async tx => {
-      const [lease] = await tx.query(`SELECT mission_id FROM mission_leases WHERE mission_id=$1 AND claimant=$2
-        AND lease_id=$3 AND lease_until>clock_timestamp() FOR UPDATE`, [input.missionId, input.claimant, input.leaseId]);
-      if (!lease) return false;
-      const terminal = input.status !== 'running';
-      const [row] = await tx.query(`UPDATE inbox_message_analyses SET status=$3, card_id=COALESCE($4,card_id),
-        started_at=COALESCE(started_at,clock_timestamp()), finished_at=CASE WHEN $5 THEN clock_timestamp() ELSE finished_at END,
-        result_json=$6::jsonb,error=$7 WHERE id=$1 AND mission_id=$2 AND status IN ('queued','running')
-        AND EXISTS (SELECT 1 FROM mission_leases WHERE mission_id=$2 AND claimant=$8 AND lease_id=$9
-          AND lease_until>clock_timestamp()) RETURNING id`,
-      [input.id, input.missionId, input.status, input.cardId ?? null, terminal,
-        input.result === undefined ? null : JSON.stringify(input.result), input.error ?? null, input.claimant, input.leaseId]);
-      if (!row) return false;
-      await tx.query(`UPDATE missions SET status=$2,blocker=$3,error=$3,updated_at=clock_timestamp()
-        WHERE id=$1 AND status IN ('queued','in_progress')`, [input.missionId,
-        input.status === 'running' ? 'in_progress' : input.status === 'succeeded' ? 'completed' : 'blocked', input.error ?? null]);
-      return true;
-    });
   }
 
   async listClientProjects(): Promise<ClientProject[]> {

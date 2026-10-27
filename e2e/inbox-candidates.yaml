@@ -1,0 +1,20 @@
+url: "http://127.0.0.1:3001"
+name: "Inbox Candidates and Daily Priority"
+---
+- launchApp
+- assertVisible:
+    css: ".vo3d-app"
+- openLink:
+    link: "http://127.0.0.1:3001/inbox"
+- assertVisible:
+    css: "#needs-reply-title"
+- assertVisible:
+    css: "#candidate-title"
+- takeScreenshot: "01-inbox-candidates"
+- openLink:
+    link: "http://127.0.0.1:3001/overview"
+- assertVisible:
+    text: "Prioritas hari ini"
+- assertVisible:
+    css: "#daily-priority-title"
+- takeScreenshot: "02-overview-daily-priority"

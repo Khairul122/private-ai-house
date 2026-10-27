@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { api, jsonRequest, type Inbox, type MessageAnalysis, type MessageSnapshotView } from '../api/api.js';
+import { api, jsonRequest, type CandidateTask, type Inbox, type MessageAnalysis, type MessageSnapshotView } from '../api/api.js';
 import { formatDate } from '../components/format.js';
 import { EmptyState, ErrorNotice, LoadingPanel, PageIntro, Metric } from '../components/ui.js';
 
@@ -39,6 +39,13 @@ const CLASSIFICATION_LABEL: Record<NonNullable<MessageAnalysis['classification']
   unknown: 'Belum dapat diklasifikasi',
 };
 
+const SCOPE_LABEL: Record<CandidateTask['scopeStatus'], string> = {
+  needs_confirmation: 'Menunggu konfirmasi lingkup',
+  confirmed: 'Lingkup dikonfirmasi',
+  rejected: 'Ditolak',
+  converted: 'Sudah menjadi tiket lokal',
+};
+
 /** Server treats a `running` row older than this as abandoned, so the UI may offer a retry then. */
 const STALE_RUN_MS = 10 * 60_000;
 
@@ -65,10 +72,14 @@ type MessageIntelProps = {
   available: boolean;
   busy: boolean;
   busyVersion: string | null;
+  candidate: CandidateTask | null;
+  creatingCandidate: boolean;
+  createCandidateError: string | null;
   onAnalyze: (sourceVersion: string) => void;
+  onCreateCandidate: (sourceVersion: string) => void;
 };
 
-function MessageIntel({ snapshot, available, busy, busyVersion, onAnalyze }: MessageIntelProps) {
+function MessageIntel({ snapshot, available, busy, busyVersion, candidate, creatingCandidate, createCandidateError, onAnalyze, onCreateCandidate }: MessageIntelProps) {
   const [copyState, setCopyState] = useState<'idle' | 'ok' | 'error'>('idle');
   if (!snapshot) {
     return <div className="message-intel">
@@ -117,6 +128,17 @@ function MessageIntel({ snapshot, available, busy, busyVersion, onAnalyze }: Mes
         <p className="message-intel-note">Pertanyaan yang perlu dijawab:</p>
         <ul className="message-intel-list">{analysis.questions.map((question) => <li key={question}>{question}</li>)}</ul>
       </div>}
+      {candidate
+        ? <p className="message-intel-note"><strong>Calon tugas sudah dibuat:</strong> {candidate.title}. Status: {SCOPE_LABEL[candidate.scopeStatus].toLowerCase()}.</p>
+        : <div>
+          <p className="message-intel-note">Calon tugas merangkum permintaan klien menjadi lingkup yang Anda periksa. Tidak ada tiket yang dibuat atau pekerjaan yang dijalankan sebelum Anda mengonfirmasi lingkupnya.</p>
+          <div className="message-intel-actions">
+            <button type="button" className="button button-secondary" disabled={creatingCandidate} onClick={() => onCreateCandidate(snapshot.sourceVersion)}>
+              {creatingCandidate ? 'Membuat calon tugas...' : 'Jadikan calon tugas'}
+            </button>
+          </div>
+          {createCandidateError && <p className="message-intel-note" role="alert">{createCandidateError}</p>}
+        </div>}
       {analysis.replyDraft && <div>
         <p className="message-intel-note"><strong>Draf balasan — belum dikirim dan belum disetujui.</strong> Periksa isinya sebelum mengirim lewat Freelancer.</p>
         <pre className="message-intel-draft">{analysis.replyDraft}</pre>
@@ -143,6 +165,92 @@ function MessageIntel({ snapshot, available, busy, busyVersion, onAnalyze }: Mes
   </div>;
 }
 
+type CandidateSectionProps = {
+  candidates: CandidateTask[];
+  busy: 'confirm' | 'reject' | 'convert' | null;
+  busyId: string | null;
+  error: string | null;
+  onConfirm: (id: string) => void;
+  onReject: (id: string, reason: string) => void;
+  onConvert: (id: string) => void;
+};
+
+/**
+ * Candidates come from a finished analysis, but nothing is a task until the owner confirms the scope.
+ * Every action here is a local record change: no message is sent and no work is executed.
+ */
+function CandidateSection({ candidates, busy, busyId, error, onConfirm, onReject, onConvert }: CandidateSectionProps) {
+  const [rejectId, setRejectId] = useState<string | null>(null);
+  const [reason, setReason] = useState('');
+  const pending = (id: string, action: 'confirm' | 'reject' | 'convert') => busy === action && busyId === id;
+  const submitReject = (id: string) => {
+    const text = reason.trim();
+    if (text.length < 3) return;
+    onReject(id, text);
+    setRejectId(null);
+    setReason('');
+  };
+  return <section className="activity-preview card-section" aria-labelledby="candidate-title">
+    <div className="section-heading">
+      <div><p className="eyebrow">Dari analisis pesan klien</p><h2 id="candidate-title">Calon tugas ({candidates.length})</h2></div>
+    </div>
+    {error && <ErrorNotice message={error} />}
+    {candidates.length ? <ul className="deadlines-list">{candidates.map((candidate) => {
+      const isPending = busyId === candidate.id;
+      return <li className="deadline-item" key={candidate.id}>
+        <div>
+          <strong>{candidate.title}</strong>
+          <div className="item-sub">{candidate.projectTitle} · dibuat {formatDate(candidate.createdAt)}</div>
+        </div>
+        <div className="item-aside"><span className="state-label">{SCOPE_LABEL[candidate.scopeStatus]}</span></div>
+        <div className="message-intel">
+          <p className="message-intel-note"><strong>{CLASSIFICATION_LABEL[candidate.classification]}</strong>. {candidate.objective}</p>
+          {candidate.acceptanceCriteria.length > 0 && <div>
+            <p className="message-intel-note">Kriteria penerimaan usulan. Menunggu persetujuan Anda dan belum menjadi kontrak.</p>
+            <ul className="message-intel-list">{candidate.acceptanceCriteria.map((criterion) => <li key={criterion.id}>
+              {criterion.text}
+              <q className="message-intel-quote">{criterion.quote}</q>
+            </li>)}</ul>
+          </div>}
+          {candidate.questions.length > 0 && <div>
+            <p className="message-intel-note">Pertanyaan untuk klien:</p>
+            <ul className="message-intel-list">{candidate.questions.map((question) => <li key={question}>{question}</li>)}</ul>
+          </div>}
+          {candidate.dependencies.length > 0 && <p className="message-intel-note">Misi analisis terkait: <span className="local-reference">{candidate.dependencies.join(', ')}</span>. Hanya catatan, tidak mengubah jadwal.</p>}
+          {candidate.scopeStatus === 'rejected' && <p className="message-intel-note"><strong>Alasan ditolak:</strong> {candidate.scopeNote ?? 'Alasan tidak tersimpan.'}</p>}
+          {candidate.scopeStatus === 'converted' && <p className="message-intel-note">
+            <strong>Tiket lokal:</strong> <span className="local-reference">{candidate.convertedMissionId ?? 'ID tidak tersimpan'}</span>. Tiket hanya masuk antrean misi lokal; tidak ada pekerjaan yang dikirim atau dijalankan otomatis. Perbarui <Link to="/overview" className="text-link">Prioritas hari ini</Link> untuk melihatnya.
+          </p>}
+
+          {(candidate.scopeStatus === 'needs_confirmation' || candidate.scopeStatus === 'confirmed') && <div className="message-intel-actions">
+            {candidate.scopeStatus === 'needs_confirmation' && <button type="button" className="button button-secondary" disabled={isPending} onClick={() => onConfirm(candidate.id)}>
+              {pending(candidate.id, 'confirm') ? 'Mengonfirmasi...' : 'Konfirmasi lingkup'}
+            </button>}
+            {candidate.scopeStatus === 'confirmed' && <button type="button" className="button button-primary" disabled={isPending} onClick={() => onConvert(candidate.id)}>
+              {pending(candidate.id, 'convert') ? 'Membuat tiket...' : 'Buat tiket lokal'}
+            </button>}
+            <button type="button" className="button button-secondary" disabled={isPending} onClick={() => { setRejectId(candidate.id); setReason(''); }}>
+              Tolak
+            </button>
+          </div>}
+
+          {rejectId === candidate.id && <div className="message-intel-actions">
+            <label className="form-field" style={{ flex: '1 1 260px' }}>
+              <span>Alasan menolak (wajib, minimal 3 karakter)</span>
+              <input value={reason} maxLength={300} onChange={(event) => setReason(event.target.value)} />
+            </label>
+            <button type="button" className="button button-secondary" disabled={reason.trim().length < 3 || busy === 'reject'} onClick={() => submitReject(candidate.id)}>
+              {pending(candidate.id, 'reject') ? 'Menolak...' : 'Simpan penolakan'}
+            </button>
+            <button type="button" className="button button-secondary" onClick={() => setRejectId(null)}>Batal</button>
+          </div>}
+        </div>
+      </li>;
+    })}</ul>
+      : <EmptyState title="Belum ada calon tugas" description="Calon tugas dibuat dari analisis pesan yang selesai dan sudah tertaut ke satu proyek aktif. Tidak ada yang dibuat otomatis." />}
+  </section>;
+}
+
 export default function InboxPage() {
   const queryClient = useQueryClient();
   const inbox = useQuery({ queryKey: ['inbox'], queryFn: () => api<Inbox>('/inbox'), refetchInterval: 10_000 });
@@ -155,10 +263,36 @@ export default function InboxPage() {
       ]);
     },
   });
+  const refreshCandidateViews = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['inbox'] }),
+      queryClient.invalidateQueries({ queryKey: ['activity'] }),
+      queryClient.invalidateQueries({ queryKey: ['daily-priority'] }),
+    ]);
+  };
+  const createCandidate = useMutation({
+    mutationFn: (sourceVersion: string) => api<{ candidate: CandidateTask; created: boolean }>('/candidates', jsonRequest('POST', { sourceVersion })),
+    onSuccess: refreshCandidateViews,
+  });
+  const confirmCandidate = useMutation({
+    mutationFn: (id: string) => api<{ candidate: CandidateTask }>(`/candidates/${encodeURIComponent(id)}/confirm`, jsonRequest('POST', {})),
+    onSuccess: refreshCandidateViews,
+  });
+  const rejectCandidate = useMutation({
+    mutationFn: (input: { id: string; reason: string }) => api<{ candidate: CandidateTask }>(`/candidates/${encodeURIComponent(input.id)}/reject`, jsonRequest('POST', { reason: input.reason })),
+    onSuccess: refreshCandidateViews,
+  });
+  const convertCandidate = useMutation({
+    mutationFn: (id: string) => api<{ candidate: CandidateTask; created: boolean }>(`/candidates/${encodeURIComponent(id)}/convert`, jsonRequest('POST', { confirm: true })),
+    onSuccess: refreshCandidateViews,
+  });
 
   if (inbox.isPending) return <LoadingPanel label="Memuat kotak masuk..." />;
   if (inbox.isError) return <ErrorNotice message="Kotak masuk belum dapat dimuat." onRetry={() => inbox.refetch()} />;
   const { sync, needsReply, followUps, messageIntel } = inbox.data;
+  const candidates = inbox.data.candidates ?? [];
+  const candidateByVersion = new Map(candidates.map((candidate) => [candidate.sourceVersion, candidate]));
+  const scopePending = candidates.filter((candidate) => candidate.scopeStatus === 'needs_confirmation').length;
   const state = syncState(sync);
   const synced = state === 'synced';
   const syncMessage = syncLine(state, sync);
@@ -166,11 +300,22 @@ export default function InboxPage() {
   const busy = analyze.isPending;
   const busyVersion = busy ? analyze.variables?.sourceVersion ?? null : null;
   const analyzeError = analyze.isError ? (analyze.error instanceof Error ? analyze.error.message : 'Analisis pesan gagal.') : null;
+  const createCandidateError = createCandidate.isError ? (createCandidate.error instanceof Error ? createCandidate.error.message : 'Calon tugas tidak dapat dibuat.') : null;
+  const candidateAction = confirmCandidate.isPending
+    ? { action: 'confirm' as const, id: confirmCandidate.variables ?? null }
+    : rejectCandidate.isPending
+      ? { action: 'reject' as const, id: rejectCandidate.variables?.id ?? null }
+      : convertCandidate.isPending
+        ? { action: 'convert' as const, id: convertCandidate.variables ?? null }
+        : { action: null, id: null };
+  const candidateError = [confirmCandidate.error, rejectCandidate.error, convertCandidate.error]
+    .find((error): error is Error => error instanceof Error)?.message ?? null;
   return <>
     <PageIntro eyebrow="Freelancer" title="Kotak masuk Freelancer" description="Fokus utama: pesan yang perlu dibalas. Server memeriksa pesan setiap menit selama aktif." action={<a className="button button-primary" href="https://www.freelancer.com/messages" target="_blank" rel="noreferrer">Buka pesan Freelancer</a>} />
     <section className="card-summary-grid" aria-label="Ringkasan kotak masuk">
       <Metric label="Menunggu balasan" value={synced ? needsReply.length : 'Tidak diketahui'} note={synced ? 'Pesan terakhir berasal dari akun lain' : 'Bergantung pada sinkronisasi pesan'} tone="primary" />
       <Metric label="Bid perlu ditinjau" value={followUps.length} note="Minimal 3 hari tanpa percakapan" />
+      <Metric label="Calon tugas" value={scopePending} note="Menunggu konfirmasi lingkup Anda" />
     </section>
     <div className="card-toolbar">
       <p className="form-help" role="status" aria-live="polite">Data layar diperbarui {formatDate(new Date(inbox.dataUpdatedAt).toISOString())}{inbox.isFetching ? '. Memperbarui...' : '.'}</p>
@@ -196,13 +341,33 @@ export default function InboxPage() {
       {needsReply.length ? <ul className="deadlines-list">{needsReply.map((thread) => <li className="deadline-item" key={thread.threadId}>
         <div><strong>{thread.projectTitle ?? 'Percakapan tanpa proyek tersinkron'}</strong><div className="item-sub">{thread.preview}</div></div>
         <div className="item-aside"><strong className={thread.waitingHours >= 24 ? 'is-late' : ''}>{waitingLabel(thread.waitingHours)}</strong><div className="item-sub">{formatDate(thread.lastMessageAt)}</div></div>
-        <MessageIntel snapshot={thread.snapshot} available={messageIntel.available} busy={busy} busyVersion={busyVersion} onAnalyze={(sourceVersion) => analyze.mutate({ sourceVersion })} />
+        <MessageIntel
+          snapshot={thread.snapshot}
+          available={messageIntel.available}
+          busy={busy}
+          busyVersion={busyVersion}
+          candidate={thread.snapshot ? candidateByVersion.get(thread.snapshot.sourceVersion) ?? null : null}
+          creatingCandidate={createCandidate.isPending && createCandidate.variables === thread.snapshot?.sourceVersion}
+          createCandidateError={createCandidate.isError && createCandidate.variables === thread.snapshot?.sourceVersion ? createCandidateError : null}
+          onAnalyze={(sourceVersion) => analyze.mutate({ sourceVersion })}
+          onCreateCandidate={(sourceVersion) => createCandidate.mutate(sourceVersion)}
+        />
       </li>)}</ul>
         : <EmptyState title={empty.title} description={empty.description} action={<>
           <a className="button button-secondary" href="https://www.freelancer.com/messages" target="_blank" rel="noreferrer">Buka pesan Freelancer</a>
           {!synced && <><button type="button" className="button button-secondary" onClick={() => void inbox.refetch()}>Muat ulang</button><Link className="button button-secondary" to="/capabilities">Periksa integrasi</Link></>}
         </>} />}
     </section>
+
+    <CandidateSection
+      candidates={candidates}
+      busy={candidateAction.action}
+      busyId={candidateAction.id}
+      error={candidateError}
+      onConfirm={(id) => confirmCandidate.mutate(id)}
+      onReject={(id, reason) => rejectCandidate.mutate({ id, reason })}
+      onConvert={(id) => convertCandidate.mutate(id)}
+    />
 
     <section className="activity-preview card-section" aria-labelledby="follow-up-title">
       <div className="section-heading"><div><p className="eyebrow">Bid tanpa percakapan klien ≥ 3 hari</p><h2 id="follow-up-title">Tinjau tindak lanjut ({followUps.length})</h2></div></div>

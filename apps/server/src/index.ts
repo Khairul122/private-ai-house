@@ -18,6 +18,7 @@ import { createApp } from './app.js';
 import { FreelancerAutopilot } from './services/autopilot.js';
 import { BusinessSync } from './services/business-sync.js';
 import { MessageAnalysisService, captureMessageSnapshots } from './services/message-analysis.js';
+import { CandidateTaskService } from './services/candidate-tasks.js';
 import { OperationsService } from './services/operations.js';
 import { OperationsRepository } from '@fvh/persistence';
 import { DpapiIntegrationVault } from './lib/integration-vault.js';
@@ -130,6 +131,7 @@ const messageAnalysis = new MessageAnalysisService({
   analyze: drafting ?? new UnavailableMessageAnalysisAdapter(),
   available: hermesEnabled,
 });
+const candidateTasks = new CandidateTaskService({ repository });
 const webBuild = resolve(projectRoot, 'apps/web/dist');
 const integrationVault = new DpapiIntegrationVault(dataDirectory,resolve(projectRoot,'apps/server/src/lib/integration-vault.ps1'));
 const whatsapp = new WhatsAppService(integrationVault);
@@ -183,6 +185,7 @@ const app = await createApp({
   autopilot,
   businessSync,
   messageAnalysis,
+  candidateTasks,
   verifyFreelancerSandboxWrite: async (input) => {
     const token = freelancerEnvironment.sandboxToken;
     if (!token) throw new Error('Freelancer sandbox token is not configured.');

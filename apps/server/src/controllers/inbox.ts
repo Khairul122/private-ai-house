@@ -4,6 +4,7 @@ import type { MessageAnalysisService } from '../services/message-analysis.js';
 import { MessageAnalysisError } from '../services/message-analysis.js';
 import { analyzeMessageSchema } from '@fvh/contracts';
 import { parseBody, type AppContext } from './shared.js';
+import { candidateView } from './candidates.js';
 
 const FOLLOW_UP_DAYS = 3;
 
@@ -102,6 +103,7 @@ export function inboxController({ options, repository, now, threadProjectIds }: 
       return {
         sync: sync && { lastRunAt: sync.lastRunAt, ok: sync.ok, error: sync.error },
         needsReply, followUps,
+        candidates: (await repository.listCandidateTasks(50)).map(candidateView),
         messageIntel: {
           available: options.messageAnalysis?.available ?? false,
           reason: options.messageAnalysis?.available ? null : options.draftingReason ?? 'Hermes belum aktif, jadi analisis pesan tidak tersedia.',

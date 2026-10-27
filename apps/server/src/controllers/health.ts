@@ -1,4 +1,5 @@
 import type { AppContext } from './shared.js';
+import { bidAnalytics } from '@fvh/domain';
 
 export function healthController({ options, repository, now, draftingMode, threadProjectIds }: AppContext) {
   return {
@@ -22,6 +23,11 @@ export function healthController({ options, repository, now, draftingMode, threa
         outcomes: { submitted: outcomes.length, won, lost, pending, withConversation: outcomes.filter((row) => conversations.has(row.projectId)).length, winRate: won + lost === 0 ? null : won / (won + lost) },
         recent: await Promise.all(outcomes.slice(0, 10).map(async (outcome) => ({ projectId: outcome.projectId, title: (await repository.getProject(outcome.projectId))?.title ?? null, submittedAt: outcome.submittedAt, outcome: outcome.outcome, awardStatus: outcome.awardStatus, checkedAt: outcome.checkedAt }))),
         skips: { total: reasons.reduce((total, reason) => total + Number(reason.total), 0), recent7d: reasons.reduce((total, reason) => total + Number(reason.recent), 0), reasons },
+        // Only fields stored with each bid feed these groups; missing attributes are reported, never guessed.
+        analytics: bidAnalytics(outcomes.map((row) => ({
+          projectId: row.projectId, amount: row.amount, currency: row.currency,
+          submittedAt: row.submittedAt, outcome: row.outcome, checkedAt: row.checkedAt,
+        }))),
         lastCheck: sync?.lastRunAt ? { at: sync.lastRunAt, ok: sync.ok, error: sync.error } : { at: lastChecked, ok: lastChecked ? true : null, error: null },
       };
     },

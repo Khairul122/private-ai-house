@@ -151,6 +151,7 @@ Koneksi: `DATABASE_URL` (Session pooler Supabase, port 5432) dibaca dari `.env` 
 | `knowledge_sources`, `knowledge_chunks` (kolom `content_tsv` + indeks GIN untuk pencarian) | Knowledge Hub |
 | `bid_results` | Bid terkirim: `bid_id`, jumlah, `award_status` mentah, `outcome` |
 | `client_threads` | Thread pesan Freelancer terbaru |
+| `candidate_tasks` | Calon tugas dari satu analisis pesan (`needs_confirmation → confirmed → converted`, atau `rejected`); satu baris per `source_version`, tanpa eksekusi otomatis |
 | `client_projects`, `payments` | Proyek aktif multi-sumber & pembayaran |
 
 ⚠️ **Tabel lama `bid_outcomes`** (di Postgres diarsipkan sebagai `legacy_bid_outcomes`; 255 baris keputusan skipped/submitted, dari versi kode sebelum git) ada di database nyata, **bukan** bagian skema saat ini. **Jangan dihapus, jangan dipakai ulang namanya.** Tabel baru sengaja bernama `bid_results`.
@@ -173,7 +174,8 @@ Pengecualian pemilik 19 Oktober 2026: proyek `projects_co_id` boleh `submitted` 
 | `GET /api/business-sync` | Status BusinessSync (null jika tidak tersedia) |
 | `GET /api/dashboard` | Hitungan, kebijakan, `bidUsage {today, week}` (zona waktu kebijakan), `externalWrites` |
 | `GET /api/insights/bids` | Hasil bid (`winRate` null bila belum ada keputusan), alasan skip, waktu cek terakhir |
-| `GET /api/inbox` | `needsReply`, `followUps` (bid pending ≥ 3 hari tanpa percakapan) |
+| `GET /api/inbox` | `needsReply`, `followUps` (bid pending ≥ 3 hari tanpa percakapan), `candidates` (calon tugas tersimpan) |
+| `GET /api/candidates` · `POST /api/candidates` · `POST /api/candidates/:id/confirm` · `/reject` · `/convert` | Calon tugas dari analisis pesan yang selesai dan tertaut; `convert` wajib `{ confirm: true }` dan hanya membuat mission lokal |
 | `GET /api/work` · `POST /api/work/projects` · `PUT /api/work/projects/:id` · `POST /api/work/payments` · `POST /api/work/payments/:id/received` | Proyek aktif & pendapatan (per mata uang, tidak dijumlah lintas kurs) |
 | `GET /api/capabilities` | Status integrasi; `hermes.draftsInProgress` = draf manual + autopilot |
 | `POST /api/freelancer/verify` · `/sandbox-write-test` · `/production-write` · `/projects/sync` | Freelancer; production-write butuh `confirmLive: true` |

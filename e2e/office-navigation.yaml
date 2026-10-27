@@ -1,36 +1,38 @@
 url: "http://127.0.0.1:3001"
 name: "Office Workspace Navigation"
 ---
+# Cards opened from the office hide the page-intro title, so every assertion targets a
+# visible section heading or intro description instead of the hidden h1.
 - launchApp
 - assertVisible:
-    css: ".vo3d-root"
+    css: ".vo3d-app"
 - openLink:
     link: "http://127.0.0.1:3001/overview"
 - assertVisible:
-    text: "Hari ini di kantor"
+    css: "#overview-attention-title"
 - takeScreenshot: "01-overview-screen"
 - openLink:
     link: "http://127.0.0.1:3001/opportunities"
 - assertVisible:
-    text: "Peluang proyek"
+    text: "Pemindaian otomatis"
 - takeScreenshot: "02-opportunities-screen"
 - openLink:
     link: "http://127.0.0.1:3001/pipeline"
 - assertVisible:
-    text: "Pipeline penawaran"
+    css: "[aria-label=\"Ringkasan seluruh pipeline\"]"
 - takeScreenshot: "03-pipeline-screen"
 - openLink:
     link: "http://127.0.0.1:3001/policy"
 - assertVisible:
-    text: "Batas automasi Anda"
+    text: "Ubah batas keputusan"
 - takeScreenshot: "04-policy-screen"
 - openLink:
     link: "http://127.0.0.1:3001/work"
 - assertVisible:
-    text: "Proyek & pendapatan"
+    css: "#active-projects-title"
 - takeScreenshot: "05-work-screen"
 - openLink:
     link: "http://127.0.0.1:3001/capabilities"
 - assertVisible:
-    text: "Status integrasi"
+    css: "#health-title"
 - takeScreenshot: "06-capabilities-screen"

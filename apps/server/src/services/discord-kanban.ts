@@ -19,6 +19,16 @@ const API = 'https://discord.com/api/v10';
 const categoryType = 4;
 const textType = 0;
 const footer = (id: string) => `Mission Control · ${id}`;
+const normalIntervalMs = 30_000;
+// Jeda antar siklus setelah gagal berturut-turut: 30 dtk, lalu 2 mnt, lalu 5 mnt.
+const retryDelaysMs = [normalIntervalMs, 120_000, 300_000];
+
+class DiscordApiError extends Error {
+  constructor(readonly status: number) {
+    super(`Discord API ${status}`);
+    this.name = 'DiscordApiError';
+  }
+}
 
 export function discordTaskEmbed(task: HermesKanbanTask) {
   const state = task.status === 'done' ? 'Selesai' : task.status === 'running' ? 'Dikerjakan' : task.status === 'blocked' || task.status === 'triage' ? 'Butuh Anda' : task.status === 'failed' ? 'Gagal' : 'Antre';
@@ -60,27 +70,68 @@ export function discordCalendarEmbed(task: DiscordCalendarTask) {
 }
 
 export class DiscordKanbanMonitor {
-  private timer: ReturnType<typeof setInterval> | undefined;
+  private timer: ReturnType<typeof setTimeout> | undefined;
   private syncing: Promise<void> | null = null;
+  private started = false;
+  private failures = 0;
+  private lastLoggedError: string | null = null;
 
   constructor(private readonly config: DiscordConfig, private readonly kanban: HermesKanban | undefined, private readonly getCalendarTasks: () => Promise<DiscordCalendarTask[]> = async () => [], private readonly fetcher: typeof fetch = fetch) {}
 
   start(): void {
-    if (this.timer) return;
-    void this.sync();
-    this.timer = setInterval(() => { void this.sync(); }, 30_000);
-    this.timer.unref();
+    if (this.started) return;
+    this.started = true;
+    this.failures = 0;
+    this.lastLoggedError = null;
+    this.runCycle();
   }
 
   stop(): void {
-    if (this.timer) clearInterval(this.timer);
+    this.started = false;
+    if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;
+    this.failures = 0;
+    this.lastLoggedError = null;
   }
 
   sync(): Promise<void> {
     if (this.syncing) return this.syncing;
-    this.syncing = this.runSync().catch(error => console.error(`Sinkronisasi Discord gagal: ${error instanceof Error ? error.message : 'tidak diketahui'}`)).finally(() => { this.syncing = null; });
+    this.syncing = this.runSync()
+      .then(() => this.succeeded())
+      .catch((error: unknown) => this.failed(error))
+      .finally(() => { this.syncing = null; });
     return this.syncing;
+  }
+
+  // Satu siklus pada satu waktu: timer dipasang setelah siklus selesai, jadi siklus lambat tidak menumpuk.
+  private runCycle(): void {
+    void this.sync().finally(() => this.arm(this.retryDelayMs()));
+  }
+
+  private arm(delayMs: number): void {
+    if (!this.started) return;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = setTimeout(() => { this.timer = undefined; this.runCycle(); }, delayMs);
+    this.timer.unref();
+  }
+
+  private retryDelayMs(): number {
+    return retryDelaysMs[Math.min(Math.max(this.failures - 1, 0), retryDelaysMs.length - 1)]!;
+  }
+
+  private succeeded(): void {
+    if (this.lastLoggedError !== null) console.log('Sinkronisasi Discord pulih.');
+    this.failures = 0;
+    this.lastLoggedError = null;
+  }
+
+  private failed(error: unknown): void {
+    this.failures += 1;
+    const message = error instanceof Error ? error.message : 'tidak diketahui';
+    // Satu baris per kegagalan yang berbeda; siklus berikutnya dengan galat sama tidak menulis ulang log.
+    if (message === this.lastLoggedError) return;
+    this.lastLoggedError = message;
+    console.error(`Sinkronisasi Discord gagal: ${message} (dicoba lagi tiap ${Math.round(this.retryDelayMs() / 1000)} dtk)`);
   }
 
   private async request<T>(path: string, init?: RequestInit, attempt = 0): Promise<T> {
@@ -93,7 +144,7 @@ export class DiscordKanbanMonitor {
       await new Promise(resolve => setTimeout(resolve, Math.min(Math.max(retryAfter * 1000, 250), 15_000)));
       return this.request<T>(path, init, attempt + 1);
     }
-    if (!response.ok) throw new Error(`Discord API ${response.status}`);
+    if (!response.ok) throw new DiscordApiError(response.status);
     return response.status === 204 ? undefined as T : response.json() as Promise<T>;
   }
 

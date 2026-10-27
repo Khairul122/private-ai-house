@@ -3,6 +3,7 @@ import { FixtureDraftingAdapter } from '@fvh/application';
 import { FreelancerReadError, FreelancerSandboxWriteError } from '@fvh/adapter-freelancer';
 import { WorkspaceRepository } from '@fvh/persistence';
 import { createApp } from './app.js';
+import { MessageAnalysisService, captureMessageSnapshots } from './services/message-analysis.js';
 import { insertTestOpportunity, testOpportunity } from './test-fixtures.js';
 
 const fixedNow = new Date('2026-10-14T04:00:00.000Z');
@@ -115,6 +116,17 @@ describe('local API', () => {
       recent: [],
       skips: { total: 0, recent7d: 0, reasons: [] },
       lastCheck: { at: null, ok: null, error: null },
+      analytics: {
+        period: { firstSubmittedAt: null, lastCheckedAt: null },
+        totals: { submitted: 0, won: 0, lost: 0, pending: 0, decided: 0, winRate: null, missingAmount: 0, missingCurrency: 0 },
+        sample: { decided: 0, minimum: 10, sufficient: false },
+        byPriceBand: [],
+        byMonth: [],
+        limitations: [
+          'Belum ada bid tersimpan; analisis belum dapat disusun.',
+          'Kelompok harga dan bulan hanya memakai atribut tersimpan, bukan taksiran anggaran atau kategori proyek.',
+        ],
+      },
     });
     expect(draft.statusCode).toBe(503);
     expect(draft.json().error).toContain('Hermes belum diaktifkan');
@@ -430,7 +442,7 @@ describe('business operations API', () => {
   it('reports an empty inbox without inventing threads when message sync is unavailable', async () => {
     const inbox = await app.inject({ method: 'GET', url: '/api/inbox' });
     expect(inbox.json()).toEqual({
-      sync: null, needsReply: [], followUps: [],
+      sync: null, needsReply: [], followUps: [], candidates: [],
       messageIntel: {
         available: false,
         reason: expect.any(String),
@@ -445,6 +457,89 @@ describe('business operations API', () => {
     await repository.recordSubmittedBid({ projectId: testOpportunity.id, bidId: '9001', amount: 200, currency: 'USD', submittedAt: '2026-10-10T00:00:00.000Z' });
     const inbox = (await app.inject({ method: 'GET', url: '/api/inbox' })).json();
     expect(inbox.followUps).toEqual([expect.objectContaining({ projectId: testOpportunity.id, daysSinceBid: 4 })]);
+  });
+
+  it('creates a candidate once per message version and converts it only after confirmation', async () => {
+    const project = (await repository.createClientProject({
+      title: 'Situs klien', client: 'Klien A', source: 'freelancer', externalProjectId: 'freelancer:88',
+      status: 'active', deadline: null, value: null, currency: 'USD',
+    }))!;
+    const body = 'Tolong tambahkan ekspor CSV untuk laporan bulanan.';
+    await captureMessageSnapshots(repository, [{
+      threadId: 701, projectId: '88', messageId: 1, senderId: '42', message: body,
+      createdAt: '2026-10-14T01:00:00.000Z', messageLength: body.length,
+    }], '7', '2026-10-14T01:05:00.000Z');
+    const [snapshot] = await repository.listMessageSnapshots();
+    await new MessageAnalysisService({
+      repository, now: () => new Date(fixedNow),
+      analyze: {
+        async analyzeMessage() {
+          return {
+            classification: 'feature', summary: 'Klien meminta ekspor CSV.',
+            requirements: [{ text: 'Ekspor CSV laporan', quote: 'ekspor CSV' }],
+            questions: ['Kolom apa saja?'], replyDraft: 'Baik, saya tambahkan ekspor CSV.',
+          };
+        },
+      },
+    }).analyze(snapshot!.sourceVersion);
+    const headers = { origin: 'http://127.0.0.1:5174' };
+    const payload = { sourceVersion: snapshot!.sourceVersion };
+
+    expect((await app.inject({ method: 'POST', url: '/api/candidates', payload })).statusCode).toBe(403);
+    const created = await app.inject({ method: 'POST', url: '/api/candidates', headers, payload });
+    expect(created.statusCode).toBe(201);
+    const candidate = created.json().candidate;
+    expect(candidate).toMatchObject({ scopeStatus: 'needs_confirmation', clientProjectId: project.id, title: 'Permintaan fitur: Situs klien' });
+
+    const repeated = await app.inject({ method: 'POST', url: '/api/candidates', headers, payload });
+    expect(repeated.statusCode).toBe(200);
+    expect(repeated.json()).toMatchObject({ created: false, candidate: { id: candidate.id } });
+
+    expect((await app.inject({ method: 'POST', url: `/api/candidates/${candidate.id}/convert`, headers, payload: { confirm: true } })).statusCode).toBe(409);
+    expect((await app.inject({ method: 'POST', url: `/api/candidates/${candidate.id}/convert`, headers, payload: {} })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'POST', url: `/api/candidates/${candidate.id}/confirm`, headers, payload: {} })).statusCode).toBe(200);
+
+    const converted = await app.inject({ method: 'POST', url: `/api/candidates/${candidate.id}/convert`, headers, payload: { confirm: true } });
+    expect(converted.statusCode).toBe(201);
+    const mission = converted.json().mission;
+    expect(mission).toMatchObject({ status: 'queued', title: 'Permintaan fitur: Situs klien' });
+
+    const again = await app.inject({ method: 'POST', url: `/api/candidates/${candidate.id}/convert`, headers, payload: { confirm: true } });
+    expect(again.statusCode).toBe(200);
+    expect(again.json()).toMatchObject({ created: false, mission: { id: mission.id } });
+    expect((await repository.listMissions({ source: 'inbox' })).filter((item) => item.kind === 'client.candidate_task')).toHaveLength(1);
+
+    const listed = (await app.inject({ method: 'GET', url: '/api/candidates' })).json();
+    expect(listed.candidates).toMatchObject([{ id: candidate.id, scopeStatus: 'converted', convertedMissionId: mission.id }]);
+    const inbox = (await app.inject({ method: 'GET', url: '/api/inbox' })).json();
+    expect(inbox.candidates).toHaveLength(1);
+  });
+
+  it('refuses a candidate for a message that is not linked to one active project', async () => {
+    const body = 'Ekspor CSV selalu gagal.';
+    await captureMessageSnapshots(repository, [{
+      threadId: 702, projectId: '999', messageId: 2, senderId: '42', message: body,
+      createdAt: '2026-10-14T01:00:00.000Z', messageLength: body.length,
+    }], '7', '2026-10-14T01:05:00.000Z');
+    const [snapshot] = await repository.listMessageSnapshots();
+    await new MessageAnalysisService({
+      repository, now: () => new Date(fixedNow),
+      analyze: {
+        async analyzeMessage() {
+          return {
+            classification: 'bug' as const,
+            summary: 'Ekspor CSV selalu gagal saat dijalankan.',
+            requirements: [], questions: [], replyDraft: 'Baik, saya periksa proses ekspornya hari ini.',
+          };
+        },
+      },
+    }).analyze(snapshot!.sourceVersion);
+
+    const refused = await app.inject({
+      method: 'POST', url: '/api/candidates', headers: { origin: 'http://127.0.0.1:5174' }, payload: { sourceVersion: snapshot!.sourceVersion },
+    });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().error).toMatch(/belum tertaut/);
   });
 
   it('tracks client projects, deadlines, and monthly income per currency', async () => {

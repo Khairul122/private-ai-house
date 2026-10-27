@@ -176,6 +176,27 @@ export type MessageSnapshotView = {
   analysis: MessageAnalysis | null;
 };
 
+export type CandidateTask = {
+  id: string;
+  sourceVersion: string;
+  clientProjectId: string;
+  projectTitle: string;
+  classification: 'feature' | 'bug' | 'question' | 'scope_change' | 'unknown';
+  title: string;
+  objective: string;
+  requirements: Array<{ id: string; text: string; quote: string }>;
+  acceptanceCriteria: Array<{ id: string; text: string; quote: string }>;
+  questions: string[];
+  dependencies: string[];
+  scopeStatus: 'needs_confirmation' | 'confirmed' | 'rejected' | 'converted';
+  scopeNote: string | null;
+  convertedMissionId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  confirmedAt: string | null;
+  convertedAt: string | null;
+};
+
 export type Inbox = {
   sync: SyncRun | null;
   needsReply: Array<{
@@ -183,6 +204,7 @@ export type Inbox = {
     waitingHours: number; snapshot: MessageSnapshotView | null;
   }>;
   followUps: Array<{ projectId: string; title: string; submittedAt: string; daysSinceBid: number }>;
+  candidates: CandidateTask[];
   messageIntel: {
     available: boolean;
     reason: string | null;
@@ -228,6 +250,18 @@ export type Insights = {
   recent: Array<{ projectId: string; title: string | null; submittedAt: string; outcome: string; awardStatus: string | null; checkedAt: string | null }>;
   skips: { total: number; recent7d: number; reasons: Array<{ reason: string; total: number; recent: number }> };
   lastCheck: { at: string | null; ok: boolean | null; error: string | null };
+  analytics: {
+    period: { firstSubmittedAt: string | null; lastCheckedAt: string | null };
+    totals: { submitted: number; won: number; lost: number; pending: number; decided: number; winRate: number | null; missingAmount: number; missingCurrency: number };
+    sample: { decided: number; minimum: number; sufficient: boolean };
+    byPriceBand: BidOutcomeBucket[];
+    byMonth: BidOutcomeBucket[];
+    limitations: string[];
+  };
+};
+
+export type BidOutcomeBucket = {
+  key: string; submitted: number; won: number; lost: number; pending: number; decided: number; winRate: number | null;
 };
 
 export type Autopilot = {

@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { api, type BidDraft, type Opportunity } from '../api/api.js';
+import { api, type BidDraft, type Insights, type Opportunity } from '../api/api.js';
 import { useSourceFilter, SourceSelect, matchesSource, projectLink, opportunitySource } from '../components/source-filter.js';
 import { StateLabel, EmptyState, ErrorNotice, LoadingPanel, PageIntro, Metric } from '../components/ui.js';
-import { formatMoney, PIPELINE_STAGES } from '../components/format.js';
+import { formatDate, formatMoney, PIPELINE_STAGES } from '../components/format.js';
 
 const PAGE_SIZE = 30;
 
@@ -14,6 +14,7 @@ export default function PipelinePage() {
   const [source, setSource] = useSourceFilter();
   const [shown, setShown] = useState(PAGE_SIZE);
   const query = useQuery({ queryKey: ['pipeline'], queryFn: () => api<Array<Opportunity & { latestDraft: BidDraft | null }>>('/pipeline'), refetchInterval: 10_000 });
+  const insights = useQuery({ queryKey: ['insights'], queryFn: () => api<Insights>('/insights/bids'), refetchInterval: 60_000 });
   if (query.isPending) return <LoadingPanel />;
   if (query.isError) return <ErrorNotice message="Pipeline belum dapat dimuat. Data lama tidak ditampilkan." onRetry={() => query.refetch()} />;
   const projects = query.data;
@@ -23,6 +24,8 @@ export default function PipelinePage() {
   const remaining = Math.max(0, visible.length - shown);
   const filtered = filter !== 'all' || source !== 'all' || term.length > 0;
   const resetFilters = () => { setFilter('all'); setSearch(''); setSource('all'); setShown(PAGE_SIZE); };
+  const analytics = insights.isError ? undefined : insights.data?.analytics;
+  const percent = (rate: number | null) => rate === null ? 'Belum tersedia' : `${Math.round(rate * 100)}%`;
 
   return <>
     <PageIntro eyebrow="Pipeline bid" title="Pipeline penawaran" description="Bid Freelancer dikonfirmasi marketplace. Penandaan projects.co.id berasal dari konfirmasi Anda dan belum diverifikasi aplikasi." />
@@ -57,5 +60,55 @@ export default function PipelinePage() {
       </article>
     ))}</div>
     {remaining > 0 && <button className="button button-secondary" type="button" onClick={() => setShown(shown + PAGE_SIZE)}>Tampilkan {Math.min(PAGE_SIZE, remaining)} proyek berikutnya, {remaining} tersisa</button>}
+    <section className="activity-preview card-section" aria-labelledby="bid-results-title">
+      <div className="section-heading">
+        <div><p className="eyebrow">Bid Strategist</p><h2 id="bid-results-title">Hasil bid tersimpan</h2></div>
+      </div>
+      {insights.isPending && <LoadingPanel label="Membaca hasil bid tersimpan..." />}
+      {insights.isError && <ErrorNotice message="Hasil bid tidak tersedia. Data lama tidak ditampilkan." onRetry={() => insights.refetch()} />}
+      {analytics && (analytics.totals.submitted === 0
+        ? <EmptyState title="Belum ada bid tersimpan" description="Ringkasan hasil muncul setelah ada bid tercatat dan hasilnya diperiksa dari marketplace." />
+        : <>
+          <div className="metrics-row">
+            <Metric label="Bid tersimpan" value={analytics.totals.submitted} note={`${analytics.totals.pending} masih pending`} />
+            <Metric label="Diputuskan" value={analytics.totals.decided} note={`${analytics.totals.won} menang, ${analytics.totals.lost} kalah`} />
+            <Metric label="Tingkat kemenangan" value={percent(analytics.totals.winRate)} note={analytics.totals.winRate === null ? 'Belum ada bid diputuskan' : `Dari ${analytics.totals.decided} bid diputuskan`} tone={analytics.totals.winRate === null ? 'plain' : 'primary'} />
+          </div>
+          <p className="form-help">
+            Periode data: {analytics.period.firstSubmittedAt ? `bid pertama ${formatDate(analytics.period.firstSubmittedAt)}` : 'bid pertama belum tercatat'}
+            {analytics.period.lastCheckedAt ? `, pemeriksaan terakhir ${formatDate(analytics.period.lastCheckedAt)}` : ', hasil belum pernah diperiksa'}.
+            {analytics.sample.sufficient ? '' : ` Sampel keputusan ${analytics.sample.decided} dari minimal ${analytics.sample.minimum}; angka ini belum cukup untuk menyimpulkan sebab-akibat.`}
+          </p>
+          {analytics.byPriceBand.length > 0 && <>
+            <h3>Per rentang harga bid</h3>
+            <ul className="deadlines-list">
+              {analytics.byPriceBand.map((group) => <li className="deadline-item" key={`band-${group.key}`}>
+                <div><strong>{group.key}</strong><div className="item-sub">{group.submitted} bid · {group.decided} diputuskan</div></div>
+                <div className="item-aside"><strong>{percent(group.winRate)}</strong><div className="item-sub">{group.won} menang · {group.lost} kalah · {group.pending} pending</div></div>
+              </li>)}
+            </ul>
+          </>}
+          {analytics.byMonth.length > 0 && <>
+            <h3>Per bulan pengiriman</h3>
+            <ul className="deadlines-list">
+              {analytics.byMonth.map((group) => <li className="deadline-item" key={`month-${group.key}`}>
+                <div><strong>{monthLabel(group.key)}</strong><div className="item-sub">{group.submitted} bid · {group.decided} diputuskan</div></div>
+                <div className="item-aside"><strong>{percent(group.winRate)}</strong><div className="item-sub">{group.won} menang · {group.lost} kalah · {group.pending} pending</div></div>
+              </li>)}
+            </ul>
+          </>}
+          <details className="card-disclosure">
+            <summary>Batas data ({analytics.limitations.length})</summary>
+            <ul className="message-intel-list">{analytics.limitations.map((line) => <li key={line}>{line}</li>)}</ul>
+          </details>
+        </>)}
+    </section>
   </>;
+}
+
+/** "2026-10" → "Oktober 2026"; unknown keys are shown as stored rather than guessed. */
+function monthLabel(key: string): string {
+  const parsed = new Date(`${key}-01T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return key;
+  return parsed.toLocaleDateString('id-ID', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 }
