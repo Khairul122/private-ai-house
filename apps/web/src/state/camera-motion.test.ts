@@ -85,10 +85,28 @@ describe('DPR policy (resolveOfficeDpr)', () => {
     expect(resolveOfficeDpr(1920, 1.5)).toBe(1.5);
   });
 
-  it('falls back to 1 for non-positive or invalid DPR values', () => {
+  it('falls back to 1 for non-positive or invalid DPR values including Infinity', () => {
     expect(resolveOfficeDpr(1200, 0)).toBe(1);
     expect(resolveOfficeDpr(760, -2)).toBe(1);
     expect(resolveOfficeDpr(360, Number.NaN)).toBe(1);
+    expect(resolveOfficeDpr(760, Number.POSITIVE_INFINITY)).toBe(1);
+    expect(resolveOfficeDpr(1200, Number.NEGATIVE_INFINITY)).toBe(1);
+  });
+
+  it('accurately tests boundary conditions around 760px vs 761px', () => {
+    // 760px boundary (compact)
+    expect(resolveOfficeDpr(760, 1)).toBe(1);
+    expect(resolveOfficeDpr(760, 1.25)).toBe(1.25);
+    expect(resolveOfficeDpr(760, 1.5)).toBe(1.5);
+    expect(resolveOfficeDpr(760, 2)).toBe(1.5);
+    expect(resolveOfficeDpr(760, 3)).toBe(1.5);
+
+    // 761px boundary (desktop)
+    expect(resolveOfficeDpr(761, 1)).toBe(1);
+    expect(resolveOfficeDpr(761, 1.25)).toBe(1.25);
+    expect(resolveOfficeDpr(761, 1.5)).toBe(1.5);
+    expect(resolveOfficeDpr(761, 2)).toBe(1.5);
+    expect(resolveOfficeDpr(761, 3)).toBe(1.5);
   });
 });
 
