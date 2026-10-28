@@ -68,19 +68,6 @@ function Bookcase({ shadow = true }: { shadow?: boolean }) {
   </group>;
 }
 
-function WindowWall({ minX, maxX, minZ, shadow = true }: { minX: number; maxX: number; minZ: number; shadow?: boolean }) {
-  const windows = [-13, -7, -1, 5, 11];
-  return <group>
-    {windows.filter((x) => x > minX + 2 && x < maxX - 2).map((x) => <group key={x} position={[x, 2.35, minZ + 0.17]}>
-      <Slab p={[0, 0, 0]} s={[4.5, 2.2, 0.035]} color="#a9d0d0" shadow={shadow} />
-      <Slab p={[0, 0, 0]} s={[0.08, 2.05, 0.08]} color="#d9c6a1" shadow={shadow} />
-      <Slab p={[0, 0, 0]} s={[4.35, 0.08, 0.08]} color="#d9c6a1" shadow={shadow} />
-      <Slab p={[0, -1.03, 0]} s={[4.35, 0.08, 0.08]} color="#d9c6a1" shadow={shadow} />
-    </group>)}
-    <Slab p={[(minX + maxX) / 2, 1.18, minZ + 0.24]} s={[maxX - minX - 0.5, 0.08, 0.12]} color="#7a654e" shadow={shadow} />
-  </group>;
-}
-
 function CeilingStructure({ shadow = true }: { shadow?: boolean }) {
   // Keep ceiling fixtures, remove exposed cross-beams that cut through camera view.
   return <group>
@@ -112,7 +99,6 @@ export function OfficeEnvironment({ agents, phase, selectedId, floor, reducedEff
         color={occupied.has(pod.id) ? '#345c43' : '#777d67'} shadow={shadow} />
     </group>)}
     <Bookcase shadow={shadow} />
-    <WindowWall minX={minX} maxX={maxX} minZ={minZ} shadow={shadow} />
     <CeilingStructure shadow={shadow} />
     <Slab p={[centerX, -0.07, maxZ + 1.5]} s={[maxX - minX + 3, 0.05, 3.1]} color={phase.night ? '#665f4e' : '#b5ad96'} shadow={shadow} />
     <Slab p={[maxX + 1.5, -0.07, centerZ]} s={[3.1, 0.05, maxZ - minZ + 3]} color={phase.night ? '#665f4e' : '#b5ad96'} shadow={shadow} />
