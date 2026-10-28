@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, jsonRequest, type ClientProject, type Profile, type Work } from '../api/api.js';
-import { EmptyState, ErrorNotice, LoadingPanel, Metric, PageIntro } from '../components/ui.js';
+import { EmptyState, ErrorNotice, LoadingPanel, Metric, PageIntro, StateLabel } from '../components/ui.js';
 import { formatMoney, deadlineLabel } from '../components/format.js';
 
 const SOURCE_LABELS: Record<ClientProject['source'], string> = { freelancer: 'Freelancer', direct: 'Langsung', linkedin: 'LinkedIn', projects_co_id: 'projects.co.id', other: 'Lainnya' };
@@ -82,9 +82,9 @@ export default function WorkPage() {
     <section className="activity-preview card-section" aria-labelledby="payments-title">
       <div className="section-heading"><div><p className="eyebrow">Belum diterima</p><h2 id="payments-title">Pembayaran tertunda ({pendingPayments.length})</h2></div></div>
       {markReceived.isError && <ErrorNotice message={markReceived.error.message} onRetry={() => { const variables = markReceived.variables; if (variables) markReceived.mutate(variables); }} />}
-      {pendingPayments.length ? <ul className="deadlines-list">{pendingPayments.map((item) => <li className="deadline-item" key={item.id}>
-        <div><strong>{formatMoney(item.amount, item.currency)}</strong><div className="item-sub">{titles.get(item.projectId) ?? 'Proyek tidak ditemukan'}{item.dueDate ? ` · jatuh tempo ${item.dueDate}` : ' · tanpa jatuh tempo'}{item.note ? ` · ${item.note}` : ''}</div></div>
-        <button type="button" className="button button-secondary" disabled={markReceived.isPending} onClick={() => { if (window.confirm(`Tandai pembayaran ${formatMoney(item.amount, item.currency)} sudah diterima?`)) markReceived.mutate(item.id); }}>Tandai diterima</button>
+      {pendingPayments.length ? <ul className="deadlines-list invoice-list">{pendingPayments.map((item) => <li className="deadline-item invoice-card" key={item.id}>
+        <div><div className="invoice-meta"><span className="invoice-id">ID: {item.id}</span><span className="invoice-status"><StateLabel state={item.status === 'expected' ? 'active' : 'won'} /> {item.status === 'expected' ? 'Menunggu' : 'Diterima'}</span></div><strong className="invoice-amount">{formatMoney(item.amount, item.currency)}</strong><div className="item-sub invoice-project">{titles.get(item.projectId) ?? 'Proyek tidak ditemukan'}{item.dueDate ? ` · jatuh tempo ${item.dueDate}` : ' · tanpa jatuh tempo'}{item.note ? ` · ${item.note}` : ''}</div><small className="invoice-due">{item.dueDate ? `Jatuh tempo: ${item.dueDate}` : 'Tanpa jatuh tempo'}</small></div>
+        <button type="button" className="button button-secondary invoice-action" disabled={markReceived.isPending} onClick={() => { if (window.confirm(`Tandai pembayaran ${formatMoney(item.amount, item.currency)} sudah diterima?`)) markReceived.mutate(item.id); }}>Tandai diterima</button>
       </li>)}</ul>
         : <EmptyState title="Belum ada pembayaran tertunda" description={payments.length ? 'Semua pembayaran yang tercatat sudah ditandai diterima.' : 'Pembayaran muncul setelah dicatat di formulir bawah.'} action={<button type="button" className="button button-secondary" onClick={() => setFormsOpen(true)}>Catat pembayaran</button>} />}
     </section>

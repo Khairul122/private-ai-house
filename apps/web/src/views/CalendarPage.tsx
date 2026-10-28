@@ -1,18 +1,18 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { api, type AuditEvent, type Autopilot, type Opportunity, type Policy, type Work } from '../api/api.js';
 import type { OperationsData } from '../api/operations-api.js';
 import { formatMoney, formatDate, deadlineLabel } from '../components/format.js';
 import { ErrorNotice, LoadingPanel, PageIntro, ActivityRows, useClock } from '../components/ui.js';
 
-type CalendarView = 'day' | 'month' | 'year';
+type CalendarView = 'agenda' | 'day' | 'month' | 'year';
 type CalendarEvent = {
   id: string;
   dateKey: string;
   title: string;
   detail: string;
-  kind: 'operation' | 'deadline' | 'payment' | 'policy' | 'activity';
+  kind: 'operation' | 'deadline' | 'payment' | 'policy' | 'activity'; source: string;
   time: string | null;
   href: string | null;
 };
@@ -70,7 +70,7 @@ function moveCalendarDate(value: string, view: CalendarView, amount: number) {
     const date = new Date(Date.UTC(year, month - 1, day + amount));
     return makeDateKey(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
   }
-  if (view === 'month') {
+  if (view === 'month' || view === 'agenda') {
     const date = new Date(Date.UTC(year, month - 1 + amount, 1));
     return makeDateKey(date.getUTCFullYear(), date.getUTCMonth() + 1, 1);
   }
@@ -103,7 +103,13 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
   const ownerAgenda=useQuery({queryKey:['operations'],queryFn:()=>api<OperationsData>('/operations'),refetchInterval:10_000});
   const ownerTasks=ownerAgenda.isError?undefined:ownerAgenda.data?.tasks;
   const autopilotQuery = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 10_000 });
-  const [view, setView] = useState<CalendarView>('month');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const queryView = searchParams.get('view') as CalendarView | null;
+  const [view, setView] = useState<CalendarView>(() => {
+    if (queryView && ['agenda', 'day', 'month', 'year'].includes(queryView)) return queryView;
+    if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(max-width: 760px)').matches) return 'agenda';
+    return 'month';
+  });
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
   const [logLimit, setLogLimit] = useState(30);
   const agendaQuery = useQuery({ queryKey: ['agenda', 'summary'], queryFn: () => api<AgendaSummary>('/agenda/activity?days=180'), refetchInterval: 30_000 });
@@ -115,11 +121,11 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
     const result: CalendarEvent[] = [];
     for(const task of ownerTasks ?? []) {
       const dateKey=dateKeyInTimezone(task.startAt,policy.timezone);
-      if(dateKey) result.push({id:`owner-${task.id}`,dateKey,title:`${task.done?'Selesai':'Tugas pemilik'}: ${task.title}`,detail:task.notes || (task.syncGoogle?'Dipilih untuk Google Calendar':'Jadwal pribadi'),kind:'operation',time:timeInTimezone(task.startAt,policy.timezone),href:'/operations'});
+      if(dateKey) result.push({id:`owner-${task.id}`,dateKey,title:`${task.done?'Selesai':'Tugas pemilik'}: ${task.title}`,detail:task.notes || (task.syncGoogle?'Dipilih untuk Google Calendar':'Jadwal pribadi'),kind:'operation',source:'Operasi pemilik',time:timeInTimezone(task.startAt,policy.timezone),href:'/operations'});
     }
     const expiryKey = dateKeyInTimezone(policy.expiresAt, policy.timezone);
     const expiryTime = timeInTimezone(policy.expiresAt, policy.timezone);
-    if (expiryKey) result.push({ id: 'policy-expiry', dateKey: expiryKey, title: 'Masa berlaku kebijakan berakhir', detail: `Kebijakan versi ${policy.version}`, kind: 'policy', time: expiryTime, href: '/policy' });
+    if (expiryKey) result.push({ id: 'policy-expiry', dateKey: expiryKey, title: 'Masa berlaku kebijakan berakhir', detail: `Kebijakan versi ${policy.version}`, kind: 'policy', source: 'Kebijakan', time: expiryTime, href: '/policy' });
 
     if (autopilot?.state === 'running' && autopilot.nextRunAt) {
       const dateKey = dateKeyInTimezone(autopilot.nextRunAt, policy.timezone);
@@ -129,7 +135,7 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
         dateKey,
         title: 'Siklus autopilot berikutnya',
         detail: autopilot.cycleInProgress ? 'Siklus saat ini sedang berjalan' : 'Jadwal dari status server',
-        kind: 'operation',
+        kind: 'operation', source: 'Freelancer autopilot',
         time: timeInTimezone(autopilot.nextRunAt, policy.timezone),
         href: '/activity',
       });
@@ -138,26 +144,26 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
     for (const item of work?.projects ?? []) {
       if (item.status !== 'active' || !item.deadline) continue;
       const dateKey = dateKeyInTimezone(item.deadline, policy.timezone);
-      if (dateKey) result.push({ id: `project-${item.id}`, dateKey, title: `Tenggat: ${item.title}`, detail: `Klien: ${item.client}`, kind: 'deadline', time: null, href: '/work' });
+      if (dateKey) result.push({ id: `project-${item.id}`, dateKey, title: `Tenggat: ${item.title}`, detail: `Klien: ${item.client}`, kind: 'deadline', source: item.source === 'projects_co_id' ? 'projects.co.id' : item.source === 'freelancer' ? 'Freelancer' : item.source === 'direct' ? 'Klien langsung' : 'Operasi klien', time: null, href: '/work' });
     }
 
     for (const item of listings ?? []) {
       // Only listings still waiting on the owner; closesAt is the source's own close time.
       if (item.source !== 'projects_co_id' || !item.closesAt || item.status !== 'open' || !['new', 'scored', 'draft_ready'].includes(item.pipelineStatus)) continue;
       const dateKey = dateKeyInTimezone(item.closesAt, policy.timezone);
-      if (dateKey) result.push({ id: `listing-${item.id}`, dateKey, title: `Listing ditutup: ${item.title}`, detail: `projects.co.id · ${item.pipelineStatus === 'draft_ready' ? 'draf siap Anda kirim' : 'belum ada draf'}`, kind: 'deadline', time: timeInTimezone(item.closesAt, policy.timezone), href: `/projects-co-id?project=${encodeURIComponent(item.id)}` });
+      if (dateKey) result.push({ id: `listing-${item.id}`, dateKey, title: `Listing ditutup: ${item.title}`, detail: `projects.co.id · ${item.pipelineStatus === 'draft_ready' ? 'draf siap Anda kirim' : 'belum ada draf'}`, kind: 'deadline', source: 'projects.co.id', time: timeInTimezone(item.closesAt, policy.timezone), href: `/projects-co-id?project=${encodeURIComponent(item.id)}` });
     }
 
     for (const payment of work?.payments ?? []) {
       if (payment.status !== 'expected' || !payment.dueDate) continue;
       const dateKey = dateKeyInTimezone(payment.dueDate, policy.timezone);
-      if (dateKey) result.push({ id: `payment-${payment.id}`, dateKey, title: 'Pembayaran diharapkan', detail: formatMoney(payment.amount, payment.currency), kind: 'payment', time: null, href: '/work' });
+      if (dateKey) result.push({ id: `payment-${payment.id}`, dateKey, title: 'Pembayaran diharapkan', detail: formatMoney(payment.amount, payment.currency), kind: 'payment', source: 'Pembayaran klien', time: null, href: '/work' });
     }
 
     for (const [dateKey, counts] of Object.entries(agenda?.days ?? {})) {
       for (const [category, label] of AGENDA_LABELS) {
         const count = counts[category];
-        if (count) result.push({ id: `activity-${dateKey}-${category}`, dateKey, title: label(count), detail: 'Tercatat di log audit', kind: 'activity', time: null, href: '/activity' });
+        if (count) result.push({ id: `activity-${dateKey}-${category}`, dateKey, title: label(count), detail: 'Tercatat di log audit', kind: 'activity', source: 'Log audit', time: null, href: '/activity' });
       }
     }
     return result.sort((left, right) => left.dateKey.localeCompare(right.dateKey) || (left.time ?? '99:99').localeCompare(right.time ?? '99:99'));
@@ -177,7 +183,7 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
   const dayLog = useQuery({ queryKey: ['agenda', 'day', currentDateKey], enabled: view === 'day', queryFn: () => api<{ date: string; events: AuditEvent[] }>('/agenda/activity?date=' + currentDateKey), refetchInterval: 30_000 });
   const heading = view === 'year'
     ? String(year)
-    : view === 'month'
+    : view === 'month' || view === 'agenda'
       ? calendarDateLabel(currentDateKey, { month: 'long', year: 'numeric' })
       : calendarDateLabel(currentDateKey, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   const changePeriod = (amount: number) => setSelectedDateKey(moveCalendarDate(currentDateKey, view, amount));
@@ -186,7 +192,7 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
     <div className="calendar-browser-heading">
       <div><p className="eyebrow">Agenda ruang kerja</p><h2 id="calendar-browser-title">Kalender</h2><p>Zona waktu kebijakan: <strong>{policy.timezone}</strong></p></div>
       <div className="calendar-view-tabs" role="group" aria-label="Tampilan kalender">
-        {(['day', 'month', 'year'] as const).map((item) => <button key={item} className={`calendar-view-button${view === item ? ' active' : ''}`} type="button" aria-pressed={view === item} onClick={() => setView(item)}>{item === 'day' ? 'Hari' : item === 'month' ? 'Bulan' : 'Tahun'}</button>)}
+        {(['agenda', 'day', 'month', 'year'] as const).map((item) => <button key={item} className={`calendar-view-button${view === item ? ' active' : ''}`} type="button" aria-pressed={view === item} onClick={() => { setView(item); setSearchParams((prev) => { const next = new URLSearchParams(prev); next.set('view', item); return next; }, { replace: true }); }}>{item === 'agenda' ? 'Agenda' : item === 'day' ? 'Hari' : item === 'month' ? 'Bulan' : 'Tahun'}</button>)}
       </div>
     </div>
     <div className="calendar-navigation">
@@ -198,6 +204,42 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
       <button className="calendar-today-button" type="button" onClick={() => { setSelectedDateKey(todayKey); setView('day'); }}>Hari ini</button>
     </div>
     <label className="form-field calendar-date-jump"><span>Lompat ke tanggal</span><input type="date" value={currentDateKey} min="1900-01-01" max="9999-12-31" onChange={(event) => { if (event.target.value) { setSelectedDateKey(event.target.value); setView('day'); setLogLimit(30); } }} /></label>
+
+    {view === 'agenda' && (() => {
+      const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
+      const periodEvents = events.filter((e) => e.dateKey.startsWith(monthPrefix));
+      return (
+        <div className="calendar-agenda-view">
+          <div className="calendar-day-summary">
+            <strong>Agenda {heading}</strong>
+            <span>{periodEvents.length} agenda tercatat</span>
+          </div>
+          {periodEvents.length === 0 ? (
+            <div className="calendar-empty" role="status">
+              <strong>Belum ada agenda pada periode {heading}.</strong>
+              <span>Agenda berasal dari status autopilot, tenggat proyek klien, pembayaran tertunda, masa berlaku kebijakan, dan riwayat aktivitas 180 hari terakhir.</span>
+            </div>
+          ) : (
+            <ol className="calendar-event-list calendar-agenda-list">
+              {periodEvents.map((event) => (
+                <li key={event.id} className={`calendar-event calendar-event-${event.kind}`}>
+                  <div className="calendar-event-meta">
+                    <span className="calendar-event-source">{event.source}</span>
+                    <span className="calendar-event-status">{event.kind === 'deadline' ? 'Tenggat' : event.kind === 'payment' ? 'Pembayaran' : event.kind === 'policy' ? 'Kebijakan' : event.kind === 'activity' ? 'Aktivitas' : 'Operasi'}</span>
+                    <span className="calendar-event-date">{event.dateKey}{event.time ? ` · ${event.time}` : ''}</span>
+                  </div>
+                  <div>
+                    <strong>{event.title}</strong>
+                    <span>{event.detail}</span>
+                  </div>
+                  {event.href && <Link to={event.href} className="calendar-event-link">Buka detail</Link>}
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      );
+    })()}
 
     {view === 'month' && <div className="calendar-month-view">
       <div className="calendar-weekdays" aria-hidden="true">{calendarWeekdays.map((weekday) => <span key={weekday}>{weekday}</span>)}</div>
@@ -220,7 +262,7 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
       {currentEvents.length === 0
         ? <div className="calendar-empty"><strong>Belum ada agenda pada tanggal ini.</strong><span>Agenda berasal dari status autopilot, tenggat proyek, pembayaran, masa berlaku kebijakan, dan riwayat aktivitas 180 hari terakhir.</span></div>
         : <ol className="calendar-event-list">{currentEvents.map((event) => <li key={event.id} className={`calendar-event calendar-event-${event.kind}`}>
-          <span className="calendar-event-date">{event.time ?? (event.kind === 'deadline' ? 'Tenggat' : event.kind === 'payment' ? 'Pembayaran' : event.kind === 'policy' ? 'Kebijakan' : event.kind === 'activity' ? 'Aktivitas' : 'Operasi')}</span>
+          <div className="calendar-event-meta"><span className="calendar-event-source">{event.source}</span><span className="calendar-event-status">{event.kind === 'deadline' ? 'Tenggat' : event.kind === 'payment' ? 'Pembayaran' : event.kind === 'policy' ? 'Kebijakan' : event.kind === 'activity' ? 'Aktivitas' : 'Operasi'}</span><span className="calendar-event-date">{event.time ?? (event.kind === 'deadline' ? 'Tenggat' : event.kind === 'payment' ? 'Pembayaran' : event.kind === 'policy' ? 'Kebijakan' : event.kind === 'activity' ? 'Aktivitas' : 'Operasi')}</span></div>
           <div><strong>{event.title}</strong><span>{event.detail}</span></div>{event.href && <Link to={event.href} className="calendar-event-link">Buka detail</Link>}
         </li>)}</ol>}
       <div className="calendar-day-log">
@@ -246,12 +288,12 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
     <div className="calendar-source-state" aria-live="polite">
       <span>Diperbarui {(() => { const latest = Math.max(autopilotQuery.dataUpdatedAt, agendaQuery.dataUpdatedAt, projectsQuery.dataUpdatedAt); return latest > 0 ? new Date(latest).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : 'belum diketahui'; })()}</span>
       {autopilotQuery.isPending && <span role="status">Memuat jadwal siklus server...</span>}
-      {autopilotQuery.isError && <span>Jadwal siklus server tidak tersedia; data lama disembunyikan.</span>}
-      {agendaQuery.isError && <span>Riwayat aktivitas tidak tersedia; data lama disembunyikan.</span>}
-      {ownerAgenda.isError && <span>Agenda pemilik tidak tersedia; kalender belum lengkap.</span>}
-      {projectsQuery.isError && <span>Penutupan listing tidak tersedia; kalender belum lengkap.</span>}
+      {autopilotQuery.isError && <span role="alert" className="is-late">Jadwal siklus server tidak tersedia; data lama disembunyikan.</span>}
+      {agendaQuery.isError && <span role="alert" className="is-late">Riwayat aktivitas tidak tersedia; data lama disembunyikan.</span>}
+      {ownerAgenda.isError && <span role="alert" className="is-late">Agenda pemilik tidak tersedia; kalender belum lengkap.</span>}
+      {projectsQuery.isError && <span role="alert" className="is-late">Penutupan listing tidak tersedia; kalender belum lengkap.</span>}
       {workPending && <span role="status">Memuat tenggat proyek dan pembayaran...</span>}
-      {workError && <span>Tenggat proyek dan pembayaran tidak tersedia; data lama disembunyikan.</span>}
+      {workError && <span role="alert" className="is-late">Tenggat proyek dan pembayaran tidak tersedia; data lama disembunyikan.</span>}
       <span>Penutupan listing Freelancer menggunakan hitungan dari sinkronisasi terakhir, bukan tanggal pasti.</span>
     </div>
   </section>;

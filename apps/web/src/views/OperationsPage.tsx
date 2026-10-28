@@ -1,4 +1,4 @@
-﻿import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { currencyDigits, invoiceBalance, OPERATIONS_ROSTER, toMinor } from '@fvh/domain';
@@ -7,7 +7,7 @@ import type { OperationsData } from '../api/operations-api.js';
 import ClientWhatsAppCard from '../components/ClientWhatsAppCard.js';
 import WhatsAppStatus from '../components/WhatsAppStatus.js';
 import { checkWhatsAppStatus } from '../api/whatsapp-status.js';
-import { Metric, PageIntro } from '../components/ui.js';
+import { Metric, PageIntro, StateLabel } from '../components/ui.js';
 
 const TABS=['Klien & progres','Invoice','Jadwal pemilik','WhatsApp','Google Calendar','Laporan tim'] as const;
 const money=(n:number,c:string)=>new Intl.NumberFormat('id-ID',{style:'currency',currency:c,minimumFractionDigits:0,maximumFractionDigits:currencyDigits(c)}).format(n);
@@ -77,7 +77,7 @@ export default function OperationsPage() {
         <label className="form-field"><span>Total invoice ({projects.find(p=>p.id===projectId)?.currency ?? 'mata uang proyek'})</span><input name="amount" type="number" min="0.01" step="any" required/></label>
         <Field name="clientEmail" label="Email klien" type="email"/><Field name="category" label="Kategori layanan"/><Field name="description" label="Deskripsi pekerjaan" type="textarea"/><button className="button button-primary">Terbitkan invoice</button>
       </fieldset></form>{!data.identity&&<p className="notice">Simpan identitas penerbit terlebih dahulu.</p>}</details></section></div>
-      <section className="form-card card-section"><h2>Invoice tersimpan</h2>{!data.invoices.length?<p>Belum ada invoice. Simpan identitas penerbit, lalu terbitkan invoice dari proyek aktif.</p>:data.invoices.map(inv=>{const balance=invoiceBalance(inv,data.payments.filter(p=>p.projectId===inv.projectId));return <article className="operations-row" key={inv.id}><div><strong>{inv.number}</strong><p>{projects.find(p=>p.id===inv.projectId)?.title ?? 'Proyek tidak tersedia'}</p><p>Total {money(inv.totalMinor/10**currencyDigits(inv.currency),inv.currency)} · Sisa {money(balance.remainingMinor/10**currencyDigits(inv.currency),inv.currency)}</p><small>Jatuh tempo {inv.dueOn}</small></div><a className="button button-secondary" href={`/api/operations/invoices/${encodeURIComponent(inv.id)}/print`} target="_blank" rel="noreferrer">Buka invoice / simpan PDF</a></article>;})}</section>
+      <section className="form-card card-section"><h2>Invoice tersimpan</h2>{!data.invoices.length?<p>Belum ada invoice. Simpan identitas penerbit, lalu terbitkan invoice dari proyek aktif.</p>:data.invoices.map(inv=>{const balance=invoiceBalance(inv,data.payments.filter(p=>p.projectId===inv.projectId));const isPaid=balance.remainingMinor===0;return <article className="operations-row invoice-card" key={inv.id}><div><div className="invoice-meta"><strong className="invoice-id">#{inv.number}</strong><span className="invoice-status"><StateLabel state={isPaid ? 'won' : 'active'} /> {isPaid ? 'Lunas' : 'Menunggu pembayaran'}</span></div><p className="invoice-project">{projects.find(p=>p.id===inv.projectId)?.title ?? 'Proyek tidak tersedia'}</p><p className="invoice-amount">Total {money(inv.totalMinor/10**currencyDigits(inv.currency),inv.currency)} · Sisa {money(balance.remainingMinor/10**currencyDigits(inv.currency),inv.currency)}</p><small className="invoice-due">Jatuh tempo {inv.dueOn}</small></div><a className="button button-secondary invoice-action" href={`/api/operations/invoices/${encodeURIComponent(inv.id)}/print`} target="_blank" rel="noreferrer">Buka invoice / simpan PDF</a></article>;})}</section>
     </>}
     {tab==='Jadwal pemilik'&&<div className="operations-grid"><section className="form-card card-section"><h2>Jadwal pemilik</h2><details className="card-disclosure" open={!!editing}><summary>{editing?'Ubah jadwal terpilih':'Tambah jadwal'}</summary><p>Jam mengikuti zona waktu perangkat Anda. Tugas yang dipilih disinkronkan dengan kalender utama Google. <Link to="/calendar">Lihat kalender hari, bulan, dan tahun.</Link></p><form key={editing?.id ?? 'new-task'} onSubmit={submit(async(f,form)=>{
       if(await run(editing?`/operations/tasks/${editing.id}`:'/operations/tasks',editing?'PUT':'POST',{title:text(f,'title'),projectId:text(f,'projectId')||null,startAt:new Date(text(f,'startAt')).toISOString(),endAt:new Date(text(f,'endAt')).toISOString(),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,notes:text(f,'notes'),done:editing?.done ?? false,syncGoogle:f.has('syncGoogle')})){form.reset();setEditingTask(null);}

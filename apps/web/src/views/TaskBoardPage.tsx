@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { api, type BidDraft, type Opportunity } from '../api/api.js';
+import { api, jsonRequest, type BidDraft, type Opportunity } from '../api/api.js';
 import HermesKanbanCard from '../components/HermesKanbanCard.js';
 import { useSourceFilter, SourceSelect, matchesSource, projectLink, opportunitySource } from '../components/source-filter.js';
 import { StateLabel, ErrorNotice, LoadingPanel, PageIntro } from '../components/ui.js';
@@ -9,10 +9,31 @@ import { formatMoney } from '../components/format.js';
 
 const KANBAN_LIMIT = 12;
 
+export function evaluateTaskBoardMove(
+  p: Opportunity,
+  targetColId: string,
+  targetColTitle: string,
+): { allowed: boolean; reason: string } {
+  if (p.source === 'projects_co_id' && targetColId === 'archived' && p.status === 'open') {
+    return { allowed: true, reason: 'Peluang projects.co.id dapat dilewati oleh pemilik.' };
+  }
+  if (targetColId === 'active') {
+    return {
+      allowed: false,
+      reason: `Perpindahan ke "${targetColTitle}" gagal: konfirmasi marketplace diperlukan sesuai kebijakan.`,
+    };
+  }
+  return {
+    allowed: false,
+    reason: `Perpindahan ke "${targetColTitle}" gagal: status kartu dikelola otomatis oleh kebijakan dan sistem.`,
+  };
+}
+
 export default function TaskBoardPage() {
   const [filter, setFilter] = useState('');
   const [source, setSource] = useSourceFilter();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [moveErrors, setMoveErrors] = useState<Record<string, string>>({});
   const pipeline = useQuery({ queryKey: ['pipeline'], queryFn: () => api<Array<Opportunity & { latestDraft: BidDraft | null }>>('/pipeline'), refetchInterval: 10_000 });
 
   if (pipeline.isPending) return <LoadingPanel label="Memuat papan tugas..." />;
@@ -51,6 +72,24 @@ export default function TaskBoardPage() {
       hint: 'Termasuk error dan hasil tidak pasti yang perlu diperiksa',
     },
   ];
+
+  const handleMove = async (p: Opportunity, targetColId: string) => {
+    const targetCol = columns.find((c) => c.id === targetColId);
+    if (!targetCol) return;
+    const evaluation = evaluateTaskBoardMove(p, targetColId, targetCol.title);
+    if (evaluation.allowed) {
+      try {
+        await api(`/projects-co-id/projects/${encodeURIComponent(p.id)}/skip`, jsonRequest('POST', { confirm: true }));
+        setMoveErrors((prev) => { const next = { ...prev }; delete next[p.id]; return next; });
+        await pipeline.refetch();
+        return;
+      } catch (err) {
+        setMoveErrors((prev) => ({ ...prev, [p.id]: err instanceof Error ? err.message : 'Perpindahan kartu gagal.' }));
+        return;
+      }
+    }
+    setMoveErrors((prev) => ({ ...prev, [p.id]: evaluation.reason }));
+  };
 
   return <>
     <PageIntro
@@ -103,7 +142,17 @@ export default function TaskBoardPage() {
                     <span className="kanban-card-budget">{formatMoney(p.budgetMin, p.currency)} - {formatMoney(p.budgetMax, p.currency)}</span>
                     <span className="kanban-card-score">Skor: {p.score}</span>
                   </div>
+                  {moveErrors[p.id] && <div className="notice notice-error kanban-move-error" role="alert"><span>{moveErrors[p.id]}</span></div>}
                   <div className="kanban-card-action">
+                    <div className="kanban-move-control">
+                      <label className="kanban-move-label">
+                        <span className="sr-only">Pindahkan ke</span>
+                        <select aria-label={`Pindahkan peluang ${p.title} ke tahap lain`} className="kanban-move-select" value="" onChange={(e) => void handleMove(p, e.target.value)}>
+                          <option value="" disabled>Pindahkan ke…</option>
+                          {columns.map((target) => <option key={target.id} value={target.id} disabled={target.id === col.id}>{target.title}</option>)}
+                        </select>
+                      </label>
+                    </div>
                     <Link
                       to={projectLink(p)}
                       className="button button-secondary"
