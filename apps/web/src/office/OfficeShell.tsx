@@ -18,6 +18,8 @@ import { isCardQuery } from '../api/card-data.js';
 import { invitationSpot, type OfficeInvitation, overlayEventIsolation, safeReleasePointerCapture } from '../state/office-interaction.js';
 import HermesKanbanCard from '../components/HermesKanbanCard.js';
 import { isTabletShortcut } from './tablet-shortcut.js';
+import { useVisualViewport, useMediaQuery } from './visual-viewport.js';
+import { useScrollLock } from './scroll-lock.js';
 
 const VisualOffice = lazy(() => import('./VisualOffice.js'));
 
@@ -217,7 +219,11 @@ export default function OfficeShell() {
   const visibleAgents = query ? agents.filter((agent) => `${agent.name} ${agent.role}`.toLocaleLowerCase().includes(query)) : agents;
   const matchingBoards = query ? BOARDS.filter(board => board.label.toLocaleLowerCase().includes(query)) : [];
   const stateKey = agents.map((agent) => agent.state).join();
+  useVisualViewport({ autoScrollOnFocus: true });
+  const isMobile = useMediaQuery('(max-width: 760px)');
   const sheetOpen = location.pathname !== '/';
+  const shouldLockScroll = sheetOpen || (panel !== null && isMobile);
+  useScrollLock(shouldLockScroll, sheetOpen ? 'office-sheet' : 'office-panel');
   const tabletGroup = TABLET_GROUPS.find((group) => group.routes.some((route) => route === location.pathname));
   const dashboardData = fresh(dashboard);
 
@@ -342,7 +348,7 @@ export default function OfficeShell() {
     if (id === 'projects-co-id-scout') {
       const worker = fresh(projectsCoId);
       return [
-        { label: 'Mode worker', value: worker ? ({ off: 'Nonaktif', 'scan-only': 'Pindai saja', drafts: 'Pindai & buat draf' })[worker.mode] : 'Tidak tersedia' },
+        { label: 'Mode worker', value: worker ? ({ off: 'Nonaktif', 'scan-only': 'Pindai saja', drafts: 'Pindai & buat draf' } as Record<string, string>)[worker.mode] : 'Tidak tersedia' },
         { label: 'Draf siap ditinjau', value: worker ? String(worker.readyDrafts) : 'Tidak tersedia' },
         { label: 'Scan terakhir', value: worker ? worker.lastScanAt ? formatDate(worker.lastScanAt) : 'Belum pernah' : 'Tidak tersedia' },
       ];
