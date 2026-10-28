@@ -46,6 +46,10 @@ export type VisualOfficeProps = {
   boards: BoardContent[];
   onOpenBoard: (id: BoardId) => void;
   onOpenCommunity?: (() => void) | undefined;
+  reducedEffects?: boolean | undefined;
+  onFpsSample?: ((fps: number, dtMs: number) => void) | undefined;
+  onCanvasCreated?: ((gl: THREE.WebGLRenderer) => void) | undefined;
+  frameloopActive?: boolean | undefined;
 };
 
 const GLASS = '#dff1f7';
@@ -540,13 +544,23 @@ function OfficeLifeTick({ life, agents, reducedMotion }: { life: OfficeLife; age
   return null;
 }
 
-function Lights({ phase }: { phase: Phase }) {
+function FpsTracker({ onFpsSample }: { onFpsSample?: ((fps: number, dtMs: number) => void) | undefined }) {
+  useFrame((_, dt) => {
+    if (onFpsSample) {
+      const fps = dt > 0 ? Math.min(1 / dt, 120) : 60;
+      onFpsSample(fps, dt * 1000);
+    }
+  });
+  return null;
+}
+
+function Lights({ phase, reducedEffects }: { phase: Phase; reducedEffects?: boolean | undefined }) {
   return <>
     <color attach="background" args={[phase.sky]} />
     <hemisphereLight args={['#f5eddb', '#65715c', phase.ambient * 0.7]} />
     <ambientLight intensity={phase.ambient * 0.22} />
-    <directionalLight position={[-12, 20, 12]} intensity={phase.sun * 1.1} color={phase.sunColor} castShadow
-      shadow-mapSize={[1024, 1024]} shadow-camera-left={-30} shadow-camera-right={30} shadow-camera-top={26} shadow-camera-bottom={-26} shadow-camera-far={80} shadow-bias={-0.0002} shadow-normalBias={0.04} />
+    <directionalLight position={[-12, 20, 12]} intensity={phase.sun * 1.1} color={phase.sunColor} castShadow={!reducedEffects}
+      shadow-mapSize={reducedEffects ? [256, 256] : [1024, 1024]} shadow-camera-left={-30} shadow-camera-right={30} shadow-camera-top={26} shadow-camera-bottom={-26} shadow-camera-far={80} shadow-bias={-0.0002} shadow-normalBias={0.04} />
     <directionalLight position={[16, 9, -5]} intensity={phase.night ? 0.65 : 0.35} color={phase.night ? '#e6cba1' : '#f7edd7'} />
     <pointLight position={[-10, 3.1, 2]} intensity={phase.night ? 1.2 : 0.28} distance={12} color="#ffd79a" />
     <pointLight position={[8, 3.1, -7]} intensity={phase.night ? 1.1 : 0.22} distance={11} color="#c7dcff" />
@@ -554,7 +568,7 @@ function Lights({ phase }: { phase: Phase }) {
   </>;
 }
 
-export default function VisualOffice({ invitation, floor, ownerStart, onLift, agents, learning, ready, selectedId, ownerSelected, ownerInput, ownerTarget, ownerVisitVersion, onOwnerMoving, followId, onSelect, onOwnerSelect, onCameraInteract, command, view, tour, phase, reducedMotion, boards, onOpenBoard, onOpenCommunity }: VisualOfficeProps) {
+export default function VisualOffice({ invitation, floor, ownerStart, onLift, agents, learning, ready, selectedId, ownerSelected, ownerInput, ownerTarget, ownerVisitVersion, onOwnerMoving, followId, onSelect, onOwnerSelect, onCameraInteract, command, view, tour, phase, reducedMotion, boards, onOpenBoard, onOpenCommunity, reducedEffects, onFpsSample, onCanvasCreated, frameloopActive }: VisualOfficeProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [hoveredBoard, setHoveredBoard] = useState<BoardId | null>(null);
   const spots = useMemo(() => spotsFor(agents), [agents]);
@@ -568,11 +582,13 @@ export default function VisualOffice({ invitation, floor, ownerStart, onLift, ag
     return () => document.removeEventListener('visibilitychange', update);
   }, []);
   useEffect(() => { document.body.style.cursor = hoveredId || hoveredBoard ? 'pointer' : ''; return () => { document.body.style.cursor = ''; }; }, [hoveredId, hoveredBoard]);
-  return <Canvas frameloop={visible ? 'always' : 'never'} shadows dpr={1} camera={{ position: [20, 28, 38], fov: 38, near: 0.5, far: 400 }} onPointerMissed={() => onSelect(null)}>
+  const isLoopActive = visible && (frameloopActive ?? true);
+  return <Canvas frameloop={isLoopActive ? 'always' : 'never'} shadows={!reducedEffects} dpr={reducedEffects ? 0.85 : 1} camera={{ position: [20, 28, 38], fov: 38, near: 0.5, far: 400 }} onPointerMissed={() => onSelect(null)} onCreated={(state) => onCanvasCreated?.(state.gl)}>
+    <FpsTracker onFpsSample={onFpsSample} />
     <OfficeLifeTick life={life} agents={agents} reducedMotion={reducedMotion} />
-    <Lights phase={phase} />
+    <Lights phase={phase} reducedEffects={reducedEffects} />
     <Building agents={agents} phase={phase} floor={floor} />
-    <OfficeEnvironment agents={agents} phase={phase} selectedId={selectedId} floor={floor} />
+    <OfficeEnvironment agents={agents} phase={phase} selectedId={selectedId} floor={floor} reducedEffects={reducedEffects} />
     <OfficeObjects floor={floor} onOpenBoard={onOpenBoard} onHover={setHoveredId} onOpenCommunity={onOpenCommunity} />
     <Lift floor={floor} onUse={onLift} />
     {BOARDS.filter(slot=>(slot.floor ?? 1)===floor).map((slot) => { const content = boards.find((board) => board.id === slot.id); return content ? <Board key={slot.id} slot={slot} content={content} hovered={hoveredBoard === slot.id} onHover={setHoveredBoard} onOpen={onOpenBoard} /> : null; })}

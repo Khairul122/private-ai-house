@@ -1,4 +1,5 @@
-﻿import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import type * as THREE from 'three';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router';
 import { api, jsonRequest, type AuditEvent, type Autopilot, type BidDraft, type BusinessSyncStatus, type Capabilities, type Inbox, type Opportunity, type Policy, type Profile, type Work } from '../api/api.js';
@@ -18,6 +19,11 @@ import { isCardQuery } from '../api/card-data.js';
 import { invitationSpot, type OfficeInvitation } from '../state/office-interaction.js';
 import HermesKanbanCard from '../components/HermesKanbanCard.js';
 import { isTabletShortcut } from './tablet-shortcut.js';
+import { PerformanceController, type PerformanceStatus } from '../state/performance-controller.js';
+import { WebglLifecycleController, type FallbackReason, type WebglLifecycleStatus } from './webgl-lifecycle.js';
+import { OfficeErrorBoundary } from './OfficeErrorBoundary.js';
+import { OfficeFallbackView } from './OfficeFallbackView.js';
+import { PerformanceOfferBanner } from './PerformanceOfferBanner.js';
 
 const VisualOffice = lazy(() => import('./VisualOffice.js'));
 
@@ -159,9 +165,82 @@ export default function OfficeShell() {
   const [fullscreen, setFullscreen] = useState(false);
   const [changes, setChanges] = useState<StateChange[]>([]);
   const previous = useRef<Map<string, AgentState> | null>(null);
-  const [webgl] = useState(() => {
-    try { const canvas = document.createElement('canvas'); return Boolean(canvas.getContext('webgl2') || canvas.getContext('webgl')); } catch { return false; }
-  });
+  const supportedWebgl = useMemo(() => {
+    try {
+      const canvas = document.createElement('canvas');
+      return Boolean(canvas.getContext('webgl2') || canvas.getContext('webgl'));
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const [webglStatus, setWebglStatus] = useState<WebglLifecycleStatus>(() => (supportedWebgl ? 'ready' : 'fallback'));
+  const [fallbackReason, setFallbackReason] = useState<FallbackReason | undefined>(() => (supportedWebgl ? undefined : 'unsupported'));
+  const [sceneError, setSceneError] = useState<unknown | undefined>(undefined);
+  const [frameloopActive, setFrameloopActive] = useState(true);
+
+  const [perfStatus, setPerfStatus] = useState<PerformanceStatus>('normal');
+  const [currentFps, setCurrentFps] = useState(60);
+
+  const perfControllerRef = useRef<PerformanceController | null>(null);
+  if (!perfControllerRef.current) {
+    perfControllerRef.current = new PerformanceController();
+  }
+
+  const lifecycleRef = useRef<WebglLifecycleController | null>(null);
+  if (!lifecycleRef.current) {
+    lifecycleRef.current = new WebglLifecycleController({
+      restoreTimeoutMs: 5000,
+      maxRetriesPerLoss: 1,
+      onStatusChange: (status, reason) => {
+        setWebglStatus(status);
+        if (reason) setFallbackReason(reason);
+      },
+      onFallback: (reason, error) => {
+        setWebglStatus('fallback');
+        setFallbackReason(reason);
+        if (error) setSceneError(error);
+      },
+      onLoopControl: (active) => {
+        setFrameloopActive(active);
+      },
+      onRestore: (mode) => {
+        if (mode === 'reduced-effects') {
+          setPerfStatus('reduced-effects');
+        }
+      },
+    });
+  }
+
+  useEffect(() => {
+    return () => {
+      lifecycleRef.current?.destroy();
+    };
+  }, []);
+
+  const handleFpsSample = useCallback((fps: number, dtMs: number) => {
+    setCurrentFps(fps);
+    const newStatus = perfControllerRef.current?.update(fps, dtMs);
+    if (newStatus && newStatus !== perfStatus) {
+      setPerfStatus(newStatus);
+    }
+  }, [perfStatus]);
+
+  const handleCanvasCreated = useCallback((gl: THREE.WebGLRenderer) => {
+    if (lifecycleRef.current) {
+      return lifecycleRef.current.attachToCanvas(gl.domElement);
+    }
+  }, []);
+
+  const retry3D = useCallback(() => {
+    setSceneError(undefined);
+    perfControllerRef.current?.reset();
+    setPerfStatus('normal');
+    lifecycleRef.current?.retry();
+  }, []);
+
+  const isWebglActive = webglStatus === 'ready' || webglStatus === 'restoring';
+  const webgl = isWebglActive;
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const now = useClock(30_000);
   const phase = dayPhase(now.getHours());
@@ -386,9 +465,87 @@ export default function OfficeShell() {
   return <div className="vo3d vo3d-app" ref={stage} style={{ background: phase.sky }}>
     <div className="vo3d-office-layer" inert={sheetOpen}>
     <div ref={officeSurface} className="vo3d-canvas" role="img" tabIndex={0} aria-label={`Kantor 3D Mission Control. ${summary}. Tekan Tab untuk membuka tablet. Gunakan tablet dan daftar agen untuk navigasi dengan keyboard.`}>
-      {webgl ? <Suspense fallback={<div className="vo3d-fallback">Memuat kantor visual...</div>}>
-        <VisualOffice invitation={invitation} key={floor} floor={floor} ownerStart={arrival?.floor===floor?arrival.at:[OWNER_SPOT.x,OWNER_SPOT.z]} onLift={()=>goToFloor(floor===1?2:1,true)} agents={agents} learning={fresh(learning)} ready={!autopilot.isPending} selectedId={selectedId} ownerSelected={panel === 'owner'} ownerInput={ownerInput} ownerTarget={ownerTarget} ownerVisitVersion={ownerVisitVersion} onOwnerMoving={setOwnerMoving} followId={followId} onSelect={selectAgent} onOwnerSelect={openOwner} onCameraInteract={() => { setFollowId(null); setTour(false); }} command={command} view={view} tour={tour} phase={phase} reducedMotion={reducedMotion} boards={boards} onOpenBoard={openBoard} />
-      </Suspense> : <div className="vo3d-fallback">WebGL tidak tersedia di browser ini. Gunakan tablet untuk membuka setiap kartu.</div>}
+      <OfficeErrorBoundary
+        onError={(error) => {
+          lifecycleRef.current?.triggerFallback('scene_error', error);
+        }}
+        fallback={(error, reset) => (
+          <OfficeFallbackView
+            reason="scene_error"
+            error={error}
+            boards={boards}
+            onOpenBoard={openBoard}
+            onRetry={() => {
+              reset();
+              retry3D();
+            }}
+          />
+        )}
+      >
+        {isWebglActive ? (
+          <Suspense fallback={<div className="vo3d-fallback">Memuat kantor visual...</div>}>
+            <VisualOffice
+              invitation={invitation}
+              key={floor}
+              floor={floor}
+              ownerStart={arrival?.floor===floor?arrival.at:[OWNER_SPOT.x,OWNER_SPOT.z]}
+              onLift={()=>goToFloor(floor===1?2:1,true)}
+              agents={agents}
+              learning={fresh(learning)}
+              ready={!autopilot.isPending}
+              selectedId={selectedId}
+              ownerSelected={panel === 'owner'}
+              ownerInput={ownerInput}
+              ownerTarget={ownerTarget}
+              ownerVisitVersion={ownerVisitVersion}
+              onOwnerMoving={setOwnerMoving}
+              followId={followId}
+              onSelect={selectAgent}
+              onOwnerSelect={openOwner}
+              onCameraInteract={() => { setFollowId(null); setTour(false); }}
+              command={command}
+              view={view}
+              tour={tour}
+              phase={phase}
+              reducedMotion={reducedMotion}
+              boards={boards}
+              onOpenBoard={openBoard}
+              reducedEffects={perfStatus === 'reduced-effects' || perfStatus === 'fallback-offer'}
+              frameloopActive={frameloopActive}
+              onFpsSample={handleFpsSample}
+              onCanvasCreated={handleCanvasCreated}
+            />
+          </Suspense>
+        ) : webglStatus === 'context-lost' ? (
+          <div className="vo3d-fallback" role="status">
+            <div>
+              <h3>Koneksi grafis (WebGL) terputus</h3>
+              <p>Mencoba memulihkan koneksi grafis dalam 5 detik...</p>
+            </div>
+          </div>
+        ) : (
+          <OfficeFallbackView
+            reason={fallbackReason}
+            error={sceneError}
+            boards={boards}
+            onOpenBoard={openBoard}
+            onRetry={supportedWebgl ? retry3D : undefined}
+          />
+        )}
+      </OfficeErrorBoundary>
+
+      {perfStatus === 'fallback-offer' && isWebglActive && (
+        <PerformanceOfferBanner
+          fps={currentFps}
+          onAccept={() => {
+            lifecycleRef.current?.triggerFallback('low_fps');
+          }}
+          onDismiss={() => {
+            perfControllerRef.current?.dismissFallbackOffer();
+            setPerfStatus('reduced-effects');
+          }}
+        />
+      )}
     </div>
 
     <div className="vo3d-left-rail">
