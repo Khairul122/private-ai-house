@@ -61,6 +61,42 @@ const BOARD_ACCENTS: Record<BoardId, string> = {
   activity: '#495057', agents: '#d62828', profile: '#f4a261', policy: '#9c6ade', knowledge: '#8ab17d', capabilities: '#277da1',
 };
 
+export function isElementVisible(item: HTMLElement): boolean {
+  if (typeof item.checkVisibility === 'function') {
+    try {
+      return item.checkVisibility();
+    } catch {
+      // Fallback for environments where checkVisibility may fail
+    }
+  }
+  return !item.hasAttribute('hidden') && item.style.display !== 'none' && item.style.visibility !== 'hidden';
+}
+
+export function trapFocus(container: HTMLElement | null, event: KeyboardEvent, fallbackFocusTarget?: HTMLElement | null) {
+  if (event.key !== 'Tab' || !container) return;
+  const items = [...container.querySelectorAll<HTMLElement>(
+    'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]'
+  )].filter(isElementVisible);
+
+  const first = items[0];
+  const last = items.at(-1);
+
+  if (!first || !last) {
+    event.preventDefault();
+    fallbackFocusTarget?.focus();
+    return;
+  }
+
+  const active = document.activeElement;
+  if (event.shiftKey && (active === first || !items.includes(active as HTMLElement))) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (active === last || !items.includes(active as HTMLElement))) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
 type ShellData = {
   projectsCoId?: ProjectsCoIdStatus | null | undefined;
   operations?: OperationsData | undefined;
@@ -148,6 +184,12 @@ export default function OfficeShell() {
   const panelBody = useRef<HTMLDivElement>(null);
   const sheetHeading = useRef<HTMLHeadingElement>(null);
   const sheetElement = useRef<HTMLElement>(null);
+  const drawerTrigger = useRef<HTMLElement | null>(null);
+  const panelElement = useRef<HTMLElement>(null);
+  const panelTrigger = useRef<HTMLElement | null>(null);
+  const killButtonRef = useRef<HTMLButtonElement>(null);
+  const confirmCancelRef = useRef<HTMLButtonElement>(null);
+  const [confirmKill, setConfirmKill] = useState<'pause' | 'resume' | null>(null);
   const [refreshingSheet, setRefreshingSheet] = useState(false);
   const [invitation, setInvitation] = useState<OfficeInvitation>(null);
   const [interaction, setInteraction] = useState<'task' | 'chat' | 'meeting' | null>(null);
@@ -229,18 +271,82 @@ export default function OfficeShell() {
 
   useEffect(() => {
     if (!sheetOpen) return;
-    const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : drawerTrigger.current;
+    const focusTimer = setTimeout(() => {
+      if (sheetHeading.current) {
+        sheetHeading.current.focus();
+      } else {
+        const first = sheetElement.current?.querySelector<HTMLElement>(
+          'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled)'
+        );
+        first?.focus();
+      }
+    }, 0);
+
     const onTab = (event: KeyboardEvent) => {
-      if (event.key !== 'Tab') return;
-      const items = [...(sheetElement.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]') ?? [])].filter((item) => item.checkVisibility());
-      const first = items[0]; const last = items.at(-1);
-      if (!first || !last) { event.preventDefault(); sheetHeading.current?.focus(); return; }
-      if (event.shiftKey && (document.activeElement === first || !items.includes(document.activeElement as HTMLElement))) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && (document.activeElement === last || !items.includes(document.activeElement as HTMLElement))) { event.preventDefault(); first.focus(); }
+      trapFocus(sheetElement.current, event, sheetHeading.current);
     };
+
     document.addEventListener('keydown', onTab);
-    return () => { document.removeEventListener('keydown', onTab); if (returnFocus !== document.body && returnFocus?.isConnected && returnFocus.checkVisibility()) returnFocus.focus(); else tabletButton.current?.focus(); };
+    return () => {
+      clearTimeout(focusTimer);
+      document.removeEventListener('keydown', onTab);
+      if (returnFocus && returnFocus !== document.body && returnFocus.isConnected && isElementVisible(returnFocus)) {
+        returnFocus.focus();
+      } else {
+        tabletButton.current?.focus();
+      }
+      drawerTrigger.current = null;
+    };
   }, [sheetOpen]);
+
+  useEffect(() => {
+    if (!panel) return;
+    const focusTimer = setTimeout(() => {
+      const activeTab = document.getElementById(`office-tab-${panel}`);
+      if (activeTab) {
+        activeTab.focus();
+      } else {
+        panelElement.current?.querySelector<HTMLElement>('button:not(:disabled)')?.focus();
+      }
+    }, 0);
+
+    const onTab = (event: KeyboardEvent) => {
+      trapFocus(panelElement.current, event);
+    };
+
+    document.addEventListener('keydown', onTab);
+    return () => {
+      clearTimeout(focusTimer);
+      document.removeEventListener('keydown', onTab);
+      const target = panelTrigger.current;
+      if (target && target !== document.body && target.isConnected && isElementVisible(target)) {
+        target.focus();
+      } else {
+        ownerButton.current?.focus();
+      }
+      panelTrigger.current = null;
+    };
+  }, [panel]);
+
+  useEffect(() => {
+    if (!confirmKill) return;
+    const focusTimer = setTimeout(() => {
+      confirmCancelRef.current?.focus();
+    }, 0);
+
+    const onTab = (event: KeyboardEvent) => {
+      const dialog = document.querySelector<HTMLElement>('.vo3d-confirm-dialog');
+      trapFocus(dialog, event, confirmCancelRef.current);
+    };
+
+    document.addEventListener('keydown', onTab);
+    return () => {
+      clearTimeout(focusTimer);
+      document.removeEventListener('keydown', onTab);
+      killButtonRef.current?.focus();
+    };
+  }, [confirmKill]);
   useEffect(() => { sheetElement.current?.querySelector('.vo3d-sheet-body')?.scrollTo({ top: 0 }); }, [location.pathname]);
 
   useEffect(() => { panelBody.current?.scrollTo({ top: 0 }); }, [panel, selectedId]);
@@ -276,6 +382,7 @@ export default function OfficeShell() {
       if (location.pathname === '/' && isTabletShortcut(event,
         event.target === document.body || event.target === officeSurface.current || event.target instanceof Element && Boolean(event.target.closest('.vo3d-canvas')))) {
         event.preventDefault();
+        drawerTrigger.current = officeSurface.current;
         officeSurface.current?.focus();
         navigate('/overview');
         return;
@@ -287,15 +394,28 @@ export default function OfficeShell() {
       }
       if (event.key === 'Escape') {
         ownerInput.stop();
-        if (location.pathname !== '/') navigate('/');
-        else { setPanel(null); ownerButton.current?.focus(); }
+        if (confirmKill) {
+          event.preventDefault();
+          setConfirmKill(null);
+          return;
+        }
+        if (location.pathname !== '/') {
+          event.preventDefault();
+          navigate('/');
+          return;
+        }
+        if (panel) {
+          event.preventDefault();
+          setPanel(null);
+          return;
+        }
       }
     };
     const onFullscreen = () => setFullscreen(document.fullscreenElement === stage.current);
     window.addEventListener('keydown', onKey);
     document.addEventListener('fullscreenchange', onFullscreen);
     return () => { window.removeEventListener('keydown', onKey); document.removeEventListener('fullscreenchange', onFullscreen); };
-  }, [location.pathname, navigate, ownerInput]);
+  }, [location.pathname, navigate, ownerInput, confirmKill, panel]);
 
   const fly = (next: Omit<CameraCommand, 'n'>) => {
     setFollowId(null); setTour(false);
@@ -314,6 +434,7 @@ export default function OfficeShell() {
   }, [location.pathname]);
 
   const selectAgent = (id: string | null) => {
+    if (!panel) panelTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setSelectedId(id); setInteraction(null);
     if (!id) return;
     setOwnerVisitVersion((version) => version + 1);
@@ -322,6 +443,7 @@ export default function OfficeShell() {
     if (spots.has(id)) fly({ kind: 'agent', id });
   };
   const openOwner = () => {
+    if (!panel) panelTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : ownerButton.current;
     panelBody.current?.scrollTo({ top: 0 });
     setSelectedId(null);
     setPanel('owner');
@@ -336,7 +458,30 @@ export default function OfficeShell() {
     setFollowId(next);
     setTour(false);
   };
-  const openBoard = (id: BoardId) => navigate(BOARDS.find((slot) => slot.id === id)!.route);
+  const openBoard = (id: BoardId) => {
+    drawerTrigger.current = officeSurface.current;
+    navigate(BOARDS.find((slot) => slot.id === id)!.route);
+  };
+
+  const renderKillSwitch = (extraClass = '') => {
+    if (!dashboardData || dashboardData.policy.state === 'draft') return null;
+    const isPaused = dashboardData.policy.state === 'paused';
+    const label = isPaused ? 'Lanjutkan kebijakan' : 'Jeda automasi';
+    return (
+      <button
+        ref={killButtonRef}
+        type="button"
+        className={`vo3d-kill${!isPaused ? ' is-danger' : ''} ${extraClass}`.trim()}
+        disabled={pause.isPending}
+        aria-label="Jeda automasi"
+        title={label}
+        onClick={() => setConfirmKill(isPaused ? 'resume' : 'pause')}
+      >
+        {label}
+      </button>
+    );
+  };
+  const hasKillSwitch = Boolean(dashboardData && dashboardData.policy.state !== 'draft');
   const summary = autopilot.isPending ? 'Memuat status kru...'
     : [`${counts.working} bekerja`, `${counts.idle} idle`, `${counts.offline} offline`, ...(counts.unknown ? [`${counts.unknown} tidak diketahui`] : [])].join(' · ');
   const time = new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit' }).format(now);
@@ -404,13 +549,13 @@ export default function OfficeShell() {
     <div className="vo3d-left-rail" {...overlayEventIsolation}>
     <section className="vo3d-float vo3d-card" aria-label="Status kantor">
       <div className="vo3d-mission-head"><h1>Mission Control</h1><span className={`vo3d-connection${health.isError ? ' is-unavailable' : ''}`}><span className={`vo3d-live${!fresh(health)?.ok ? ' is-off' : ''}`} aria-hidden="true" />{health.isError ? 'API terputus' : fresh(health)?.ok ? 'API terhubung' : 'Memuat'}</span></div>
-      <div className="vo3d-mission-meta"><span>{phase.label} · {time}</span><Link to="/overview">Ringkasan →</Link></div>
+      <div className="vo3d-mission-meta"><span>{phase.label} · {time}</span><Link to="/overview" onClick={(e) => { drawerTrigger.current = e.currentTarget; }}>Ringkasan →</Link></div>
       <div className="vo3d-floor-picker" role="group" aria-label="Pilih lantai" {...overlayEventIsolation}>{([1,2] as const).map(n=><button type="button" key={n} aria-pressed={floor===n} onClick={()=>goToFloor(n)}>Lantai {n}</button>)}</div>
       <p>{summary}</p>
-      {autopilotData?.marketplaceNotice && <Link className="vo3d-last-warning" to="/capabilities">Percobaan bid terakhir gagal · {timeOf(autopilotData.marketplaceNotice.at)}</Link>}
+      {autopilotData?.marketplaceNotice && <Link className="vo3d-last-warning" to="/capabilities" onClick={(e) => { drawerTrigger.current = e.currentTarget; }}>Percobaan bid terakhir gagal · {timeOf(autopilotData.marketplaceNotice.at)}</Link>}
       <details className="vo3d-mission-details"><summary>{externalLabel}</summary>
         <p>{live === 'live' ? 'Koneksi pembaruan aplikasi terhubung.' : live === 'connecting' ? 'Menghubungkan pembaruan aplikasi…' : 'Realtime terputus; data diperbarui berkala.'}</p>
-        {autopilotData?.marketplaceNotice && <p className="vo3d-warn">Percobaan bid {formatDate(autopilotData.marketplaceNotice.at)}: {autopilotData.marketplaceNotice.quotaExhausted ? 'ditolak karena kuota akun habis.' : 'pengiriman gagal.'} <Link to="/capabilities">Lihat rincian</Link></p>}
+        {autopilotData?.marketplaceNotice && <p className="vo3d-warn">Percobaan bid {formatDate(autopilotData.marketplaceNotice.at)}: {autopilotData.marketplaceNotice.quotaExhausted ? 'ditolak karena kuota akun habis.' : 'pengiriman gagal.'} <Link to="/capabilities" onClick={(e) => { drawerTrigger.current = e.currentTarget; }}>Lihat rincian</Link></p>}
       </details>
     </section>
 
@@ -425,20 +570,19 @@ export default function OfficeShell() {
     </div>
 
     <div className="vo3d-float vo3d-tools" {...overlayEventIsolation}>
-      <button ref={tabletButton} type="button" className="vo3d-icon vo3d-tablet-trigger" aria-label="Buka tablet Mission Control" title="Buka tablet (Tab saat fokus di kantor)" onClick={() => navigate('/overview')}><OfficeIcon name="grid" /><span>Tablet <kbd>Tab</kbd></span></button>
+      <button ref={tabletButton} type="button" className="vo3d-icon vo3d-tablet-trigger" aria-label="Buka tablet Mission Control" title="Buka tablet (Tab saat fokus di kantor)" onClick={(e) => { drawerTrigger.current = e.currentTarget; navigate('/overview'); }}><OfficeIcon name="grid" /><span>Tablet <kbd>Tab</kbd></span></button>
       <button ref={ownerButton} type="button" className="vo3d-owner-action" aria-pressed={panel === 'owner'} onClick={openOwner}><OfficeIcon name="target" />Pemilik</button>
       <div className="vo3d-search-wrap"><label className="vo3d-search"><OfficeIcon name="search" /><span className="sr-only">Cari agen atau papan</span>
         <input ref={searchInput} type="search" placeholder="Cari agen atau papan" value={search} onChange={(event) => setSearch(event.target.value)}
-          onKeyDown={(event) => { if (event.key === 'Enter') { if (matchingBoards[0]) { navigate(matchingBoards[0].route); setSearch(''); } else if (visibleAgents[0]) selectAgent(visibleAgents[0].id); } if (event.key === 'Escape') setSearch(''); }} />
+          onKeyDown={(event) => { if (event.key === 'Enter') { if (matchingBoards[0]) { drawerTrigger.current = searchInput.current; navigate(matchingBoards[0].route); setSearch(''); } else if (visibleAgents[0]) selectAgent(visibleAgents[0].id); } if (event.key === 'Escape') { event.preventDefault(); event.currentTarget.blur(); } }} />
         <kbd>Ctrl K</kbd>
-      </label>{matchingBoards.length > 0 && <nav className="vo3d-search-results" aria-label="Hasil pencarian papan">{matchingBoards.map(board => <Link key={board.id} to={board.route} onClick={() => setSearch('')}>{board.label}</Link>)}</nav>}</div>
-      {dashboardData && dashboardData.policy.state !== 'draft' && <button type="button" className={`vo3d-kill${dashboardData.policy.state === 'active' ? ' is-danger' : ''}`} disabled={pause.isPending}
-        onClick={() => pause.mutate(dashboardData.policy.state === 'active' ? 'pause' : 'resume')}>{dashboardData.policy.state === 'active' ? 'Jeda automasi' : 'Lanjutkan kebijakan'}</button>}
+      </label>{matchingBoards.length > 0 && <nav className="vo3d-search-results" aria-label="Hasil pencarian papan">{matchingBoards.map(board => <Link key={board.id} to={board.route} onClick={(e) => { drawerTrigger.current = e.currentTarget; setSearch(''); }}>{board.label}</Link>)}</nav>}</div>
+      {hasKillSwitch && <div className="vo3d-kill-placeholder" aria-hidden="true" />}
       <button type="button" className="vo3d-icon" aria-pressed={fullscreen} aria-label={fullscreen ? 'Keluar dari layar penuh' : 'Layar penuh'} onClick={() => { if (document.fullscreenElement) void document.exitFullscreen(); else void stage.current?.requestFullscreen?.(); }}><OfficeIcon name="expand" /></button>
     </div>
     {pause.isError && <div className="vo3d-float vo3d-toast" role="alert" {...overlayEventIsolation}>{pause.error.message}</div>}
 
-    {panel && !sheetOpen && <aside className="vo3d-float vo3d-panel" aria-label="Panel detail" {...overlayEventIsolation}>
+    {panel && !sheetOpen && <aside ref={panelElement} className="vo3d-float vo3d-panel" role="dialog" aria-modal="true" aria-label="Panel detail" onClick={(event) => event.stopPropagation()} {...overlayEventIsolation}>
       <div className="vo3d-tabs" role="tablist" aria-label="Rincian kantor">
         {([['owner', 'Pemilik'], ['agent', 'Agen'], ['activity', 'Aktivitas'], ['channels', 'Kanal']] as const).map(([id, label], index, tabs) => <button key={id} id={`office-tab-${id}`} type="button" role="tab" aria-controls="office-detail-panel" tabIndex={panel === id ? 0 : -1} aria-selected={panel === id}
           onClick={() => id === 'owner' ? openOwner() : setPanel(id)}
@@ -450,7 +594,7 @@ export default function OfficeShell() {
             if (tab[0] === 'owner') openOwner(); else setPanel(tab[0]);
             event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
           }}>{label}</button>)}
-        <button type="button" className="vo3d-close" aria-label="Tutup panel" onClick={() => { ownerInput.stop(); setPanel(null); ownerButton.current?.focus(); }}><OfficeIcon name="close" /></button>
+        <button type="button" className="vo3d-close" aria-label="Tutup panel" onClick={() => { ownerInput.stop(); setPanel(null); }}><OfficeIcon name="close" /></button>
       </div>
       <div ref={panelBody} className="vo3d-panel-body" id="office-detail-panel" role="tabpanel" aria-labelledby={`office-tab-${panel}`}>
         {panel === 'owner' && <>
@@ -559,8 +703,8 @@ export default function OfficeShell() {
       {ZONES.map((zone) => { const count = [...spots.values()].filter((spot) => zoneOf(spot) === zone.id).length; return <button key={zone.id} type="button" aria-label={`${zone.label}, ${count} agen`} aria-pressed={command.kind === 'zone' && command.id === zone.id} onClick={() => fly({ kind: 'zone', id: zone.id })}>
         {zone.label}<span className="vo3d-dock-count" aria-hidden="true">{count}</span>
       </button>; })}
-      <button className="vo3d-dock-panel" type="button" aria-pressed={panel === 'activity'} onClick={() => setPanel(panel === 'activity' ? null : 'activity')}>Aktivitas</button>
-      <button className="vo3d-dock-panel" type="button" aria-pressed={panel === 'channels'} onClick={() => setPanel(panel === 'channels' ? null : 'channels')}>Kanal</button>
+      <button className="vo3d-dock-panel" type="button" aria-pressed={panel === 'activity'} onClick={(e) => { if (!panel) panelTrigger.current = e.currentTarget; setPanel(panel === 'activity' ? null : 'activity'); }}>Aktivitas</button>
+      <button className="vo3d-dock-panel" type="button" aria-pressed={panel === 'channels'} onClick={(e) => { if (!panel) panelTrigger.current = e.currentTarget; setPanel(panel === 'channels' ? null : 'channels'); }}>Kanal</button>
     </nav>
 
     <div className="vo3d-float vo3d-seg" role="toolbar" aria-label="Kontrol tampilan" {...overlayEventIsolation}>
@@ -587,6 +731,7 @@ export default function OfficeShell() {
             <div className="sheet-heading vo3d-tablet-heading"><span>{tabletGroup?.label ?? 'Modul'}</span><h2 id="sheet-title" ref={sheetHeading} tabIndex={-1}>{SHEET_TITLES[location.pathname] ?? 'Halaman'}</h2></div>
             <div className="vo3d-tablet-actions">
               <button type="button" className="button button-secondary sheet-refresh" disabled={refreshingSheet} onClick={async () => { setRefreshingSheet(true); try { await queryClient.invalidateQueries({ predicate: query => isCardQuery(query, location.pathname) }); } finally { setRefreshingSheet(false); } }}>{refreshingSheet ? 'Memperbarui…' : 'Perbarui'}</button>
+              {hasKillSwitch && <div className="vo3d-kill-placeholder" aria-hidden="true" />}
               <button type="button" className="vo3d-icon" aria-label="Tutup tablet dan kembali ke kantor" onClick={() => navigate('/')}><OfficeIcon name="close" /></button>
             </div>
           </header>
@@ -594,6 +739,51 @@ export default function OfficeShell() {
           <div className="vo3d-sheet-body vo3d-tablet-body page-content"><Outlet /></div>
         </main>
       </section>
+    </div>}
+    {/* Fixed global kill switch: isolated from drawer and office-layer inert */}
+    <div className="vo3d-kill-fixed-wrap" inert={confirmKill ? true : undefined}>
+      {renderKillSwitch('vo3d-kill-fixed')}
+    </div>
+    {confirmKill && <div className="vo3d-confirm-backdrop" onClick={() => setConfirmKill(null)}>
+      <div
+        className="vo3d-confirm-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="kill-confirm-title"
+        aria-describedby="kill-confirm-desc"
+        onClick={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        <div className="vo3d-confirm-head">
+          <h3 id="kill-confirm-title">{confirmKill === 'pause' ? 'Jeda automasi?' : 'Lanjutkan kebijakan?'}</h3>
+          <p id="kill-confirm-desc">
+            {confirmKill === 'pause'
+              ? 'Tindakan ini akan menghentikan seluruh pemindaian dan pengiriman bid otomatis.'
+              : 'Tindakan ini akan mengaktifkan kembali pemindaian dan penawaran otomatis sesuai kebijakan tersimpan.'}
+          </p>
+        </div>
+        <div className="vo3d-confirm-actions">
+          <button
+            ref={confirmCancelRef}
+            type="button"
+            className="vo3d-confirm-cancel button button-secondary"
+            onClick={() => setConfirmKill(null)}
+          >
+            Batal
+          </button>
+          <button
+            type="button"
+            className={`vo3d-confirm-ok button ${confirmKill === 'pause' ? 'button-danger' : 'button-primary'}`}
+            disabled={pause.isPending}
+            onClick={() => {
+              pause.mutate(confirmKill);
+              setConfirmKill(null);
+            }}
+          >
+            {confirmKill === 'pause' ? 'Ya, jeda automasi' : 'Ya, lanjutkan kebijakan'}
+          </button>
+        </div>
+      </div>
     </div>}
   </div>;
 }
