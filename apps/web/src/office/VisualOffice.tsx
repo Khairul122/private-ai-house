@@ -166,7 +166,7 @@ function Lift({ floor, onUse }: { floor: 1 | 2; onUse: () => void }) {
 
 function Pod({ x, z, color, state }: { x: number; z: number; color: string; state: OfficeAgent['state'] | undefined }) {
   const h = POD_SIZE / 2;
-  const { width, depth, height, dividerHeight, chairRadius, monitorWidth, monitorTop } = TECH_CAMPUS_THEME.workstation;
+  const { width, depth, height, dividerHeight, monitorWidth, monitorTop } = TECH_CAMPUS_THEME.workstation;
   const screen = monitorEmissive(state);
   return <group position={[x, 0, z]}>
     <B p={[0, height, 0]} s={[width, 0.1, depth]} c={TECH_CAMPUS_THEME.slate} roughness={0.78} />
