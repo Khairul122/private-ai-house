@@ -834,7 +834,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
   .vo3d-dock button { min-height: 44px; padding: 0 8px; font-size: 12px; gap: 4px; }
   .vo3d-dock-count { min-width: 20px; height: 20px; font-size: 11px; }
   .vo3d-seg { bottom: 10px; left: 10px; gap: 3px; padding: 3px; }
-  .vo3d-seg button { min-height: 44px; min-width: 40px; padding: 0 6px; font-size: 12px; }
+  .vo3d-seg button { min-height: 44px; min-width: 44px; padding: 0 6px; font-size: 12px; }
   .vo3d-target-menu { max-height: 70%; }
 }
 @media (max-width: 360px) {
@@ -844,7 +844,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
   .vo3d-dock { bottom: 62px; left: 6px; right: 6px; max-width: calc(100% - 12px); padding: 2px 4px; }
   .vo3d-dock button { min-height: 44px; padding: 0 6px; font-size: 11px; }
   .vo3d-seg { bottom: 8px; left: 6px; gap: 2px; padding: 2px; }
-  .vo3d-seg button { min-height: 44px; min-width: 38px; padding: 0 4px; font-size: 11px; }
+  .vo3d-seg button { min-height: 44px; min-width: 44px; padding: 0 4px; font-size: 11px; }
   .vo3d-tools { top: 8px; left: 8px; right: 8px; gap: 4px; }
   .vo3d-tools .vo3d-icon, .vo3d-tools .vo3d-owner-action, .vo3d-tools .vo3d-kill { min-height: 44px; }
 }

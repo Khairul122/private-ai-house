@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { trapFocus } from '../office/OfficeShell.js';
 import {
   getAlternativeAgents,
   getAlternativeBoards,
@@ -233,6 +234,58 @@ describe('compact controls & alternative navigation', () => {
         reducedMotion: false,
       });
       expect(floor2.find((c) => c.id === 'toggle-floor')?.label).toBe('Ke Lantai 1');
+    });
+  });
+
+  describe('target menu focus trap & accessibility', () => {
+    it('traps focus forward from last item to first item', () => {
+      let focused = 'none';
+      const btnFirst = { id: 'tab-boards', checkVisibility: () => true, focus: () => { focused = 'tab-boards'; } };
+      const btnClose = { id: 'btn-close', checkVisibility: () => true, focus: () => { focused = 'btn-close'; } };
+      const container = {
+        querySelectorAll: () => [btnFirst, btnClose],
+      };
+
+      Object.defineProperty(globalThis, 'document', {
+        value: { activeElement: btnClose },
+        configurable: true,
+      });
+
+      let prevented = false;
+      const event = {
+        key: 'Tab',
+        shiftKey: false,
+        preventDefault: () => { prevented = true; },
+      } as unknown as KeyboardEvent;
+
+      trapFocus(container as unknown as HTMLElement, event);
+      expect(prevented).toBe(true);
+      expect(focused).toBe('tab-boards');
+    });
+
+    it('traps focus backward from first item to last item on Shift+Tab', () => {
+      let focused = 'none';
+      const btnFirst = { id: 'tab-boards', checkVisibility: () => true, focus: () => { focused = 'tab-boards'; } };
+      const btnClose = { id: 'btn-close', checkVisibility: () => true, focus: () => { focused = 'btn-close'; } };
+      const container = {
+        querySelectorAll: () => [btnFirst, btnClose],
+      };
+
+      Object.defineProperty(globalThis, 'document', {
+        value: { activeElement: btnFirst },
+        configurable: true,
+      });
+
+      let prevented = false;
+      const event = {
+        key: 'Tab',
+        shiftKey: true,
+        preventDefault: () => { prevented = true; },
+      } as unknown as KeyboardEvent;
+
+      trapFocus(container as unknown as HTMLElement, event);
+      expect(prevented).toBe(true);
+      expect(focused).toBe('btn-close');
     });
   });
 });

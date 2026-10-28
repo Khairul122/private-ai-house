@@ -196,6 +196,8 @@ export default function OfficeShell() {
   const drawerTrigger = useRef<HTMLElement | null>(null);
   const panelElement = useRef<HTMLElement>(null);
   const panelTrigger = useRef<HTMLElement | null>(null);
+  const targetMenuElement = useRef<HTMLElement>(null);
+  const targetMenuTrigger = useRef<HTMLElement | null>(null);
   const killButtonRef = useRef<HTMLButtonElement>(null);
   const confirmCancelRef = useRef<HTMLButtonElement>(null);
   const [confirmKill, setConfirmKill] = useState<'pause' | 'resume' | null>(null);
@@ -497,6 +499,33 @@ export default function OfficeShell() {
       killButtonRef.current?.focus();
     };
   }, [confirmKill]);
+
+  useEffect(() => {
+    if (!targetMenuOpen) return;
+    const focusTimer = setTimeout(() => {
+      const activeTab = targetMenuElement.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+      if (activeTab) {
+        activeTab.focus();
+      } else {
+        targetMenuElement.current?.querySelector<HTMLElement>('button:not(:disabled)')?.focus();
+      }
+    }, 0);
+
+    const onTab = (event: KeyboardEvent) => {
+      trapFocus(targetMenuElement.current, event);
+    };
+
+    document.addEventListener('keydown', onTab);
+    return () => {
+      clearTimeout(focusTimer);
+      document.removeEventListener('keydown', onTab);
+      const target = targetMenuTrigger.current;
+      if (target && target !== document.body && target.isConnected && isElementVisible(target)) {
+        target.focus();
+      }
+      targetMenuTrigger.current = null;
+    };
+  }, [targetMenuOpen]);
   useEffect(() => { sheetElement.current?.querySelector('.vo3d-sheet-body')?.scrollTo({ top: 0 }); }, [location.pathname]);
 
   useEffect(() => { panelBody.current?.scrollTo({ top: 0 }); }, [panel, selectedId]);
@@ -937,7 +966,7 @@ export default function OfficeShell() {
       <p>Klik zona atau agen untuk terbang ke target.</p>
     </figure>}
 
-    {targetMenuOpen && !sheetOpen && <aside className="vo3d-float vo3d-panel vo3d-target-menu" role="dialog" aria-modal="true" aria-label="Menu navigasi & kontrol alternatif" onClick={(e) => e.stopPropagation()} {...overlayEventIsolation}>
+    {targetMenuOpen && !sheetOpen && <aside ref={targetMenuElement} className="vo3d-float vo3d-panel vo3d-target-menu" role="dialog" aria-modal="true" aria-label="Menu navigasi & kontrol alternatif" onClick={(e) => e.stopPropagation()} {...overlayEventIsolation}>
       <div className="vo3d-tabs" role="tablist" aria-label="Kategori navigasi alternatif">
         {([['boards', 'Papan'], ['zones', 'Zona'], ['agents', 'Agen'], ['controls', 'Kontrol']] as const).map(([id, label]) => (
           <button key={id} type="button" role="tab" aria-selected={targetTab === id} onClick={() => setTargetTab(id)}>{label}</button>
@@ -993,7 +1022,7 @@ export default function OfficeShell() {
     </aside>}
 
     <nav className="vo3d-float vo3d-dock" aria-label="Navigasi ruangan" {...overlayEventIsolation}>
-      <button className="vo3d-dock-panel vo3d-dock-target-btn" type="button" aria-pressed={targetMenuOpen} aria-label="Pilih papan, zona, atau kontrol alternatif" onClick={() => { setTargetMenuOpen((o) => !o); setTargetTab('boards'); }}>
+      <button className="vo3d-dock-panel vo3d-dock-target-btn" type="button" aria-pressed={targetMenuOpen} aria-label="Pilih papan, zona, atau kontrol alternatif" onClick={(e) => { targetMenuTrigger.current = e.currentTarget; setTargetMenuOpen((o) => !o); setTargetTab('boards'); }}>
         Papan
       </button>
       {ZONES.map((zone) => { const count = [...spots.values()].filter((spot) => zoneOf(spot) === zone.id).length; return <button key={zone.id} type="button" aria-label={`${zone.label}, ${count} agen`} aria-pressed={command.kind === 'zone' && command.id === zone.id} onClick={() => fly({ kind: 'zone', id: zone.id })}>
@@ -1009,7 +1038,7 @@ export default function OfficeShell() {
       <button type="button" aria-pressed={view === 'top'} aria-label="Tampilan denah atas" title="Denah atas" onClick={() => { setView('top'); setTour(false); fly({ kind: 'overview' }); }}><OfficeIcon name="top" /></button>
       <button type="button" aria-pressed={tour} disabled={reducedMotion} aria-label={reducedMotion ? 'Tur kamera dinonaktifkan karena preferensi kurangi gerakan' : 'Tur kamera otomatis'} title={reducedMotion ? 'Dinonaktifkan karena preferensi kurangi gerakan' : 'Putar kamera otomatis'} onClick={() => { setFollowId(null); setView('3d'); setTour((on) => !on); }}><OfficeIcon name="play" />Tur</button>
       <button type="button" aria-label="Pusatkan kamera" title="Pusatkan" onClick={() => fly({ kind: 'overview' })}><OfficeIcon name="target" /></button>
-      <button type="button" className="vo3d-seg-menu-btn" aria-pressed={targetMenuOpen} aria-label="Menu navigasi & kontrol alternatif" title="Menu alternatif" onClick={() => setTargetMenuOpen((o) => !o)}><OfficeIcon name="menu" /></button>
+      <button type="button" className="vo3d-seg-menu-btn" aria-pressed={targetMenuOpen} aria-label="Menu navigasi & kontrol alternatif" title="Menu alternatif" onClick={(e) => { targetMenuTrigger.current = e.currentTarget; setTargetMenuOpen((o) => !o); }}><OfficeIcon name="menu" /></button>
     </div>
     </div>
 
