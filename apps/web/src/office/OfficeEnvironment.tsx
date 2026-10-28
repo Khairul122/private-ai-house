@@ -27,14 +27,14 @@ function OakFloor({ shadow = true }: { shadow?: boolean }) {
     canvas.width = canvas.height = 512;
     const ctx = canvas.getContext('2d');
     if (ctx) {
-      ctx.fillStyle = '#c7ab82';
+      ctx.fillStyle = '#334155';
       ctx.fillRect(0, 0, 512, 512);
       for (let row = 0; row < 8; row += 1) {
-        ctx.fillStyle = ['#c8ad85', '#c0a37b', '#ceb38c', '#c4a67d'][row % 4]!;
+        ctx.fillStyle = ['#334155', '#3b4759', '#2f3b4d', '#364357'][row % 4]!;
         ctx.fillRect(0, row * 64, 512, 63);
-        ctx.fillStyle = '#ad916d';
+        ctx.fillStyle = '#1e293b';
         ctx.fillRect((row % 3) * 170, row * 64, 1, 64);
-        ctx.strokeStyle = 'rgba(101, 74, 44, 0.07)';
+        ctx.strokeStyle = 'rgba(248, 250, 252, 0.08)';
         for (let grain = 0; grain < 4; grain += 1) {
           ctx.beginPath();
           ctx.moveTo(0, row * 64 + 12 + grain * 12);
@@ -45,6 +45,7 @@ function OakFloor({ shadow = true }: { shadow?: boolean }) {
     }
     const map = new THREE.CanvasTexture(canvas);
     map.colorSpace = THREE.SRGBColorSpace;
+    map.generateMipmaps = false;
     map.wrapS = map.wrapT = THREE.RepeatWrapping;
     map.repeat.set(4, 5);
     map.anisotropy = 4;
