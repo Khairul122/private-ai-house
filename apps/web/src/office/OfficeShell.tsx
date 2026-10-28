@@ -1,4 +1,4 @@
-﻿import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router';
 import { api, jsonRequest, type AuditEvent, type Autopilot, type BidDraft, type BusinessSyncStatus, type Capabilities, type Inbox, type Opportunity, type Policy, type Profile, type Work } from '../api/api.js';
@@ -15,7 +15,7 @@ import { useLiveUpdates } from '../api/live.js';
 import { StateLabel, useClock } from '../components/ui.js';
 import { CardDataStatus } from '../components/CardDataStatus.js';
 import { isCardQuery } from '../api/card-data.js';
-import { invitationSpot, type OfficeInvitation } from '../state/office-interaction.js';
+import { invitationSpot, type OfficeInvitation, overlayEventIsolation, safeReleasePointerCapture } from '../state/office-interaction.js';
 import HermesKanbanCard from '../components/HermesKanbanCard.js';
 import { isTabletShortcut } from './tablet-shortcut.js';
 
@@ -97,6 +97,10 @@ function buildBoards(data: ShellData): BoardContent[] {
 
 function OwnerControls({ input, moving }: { input: OwnerInput; moving: boolean }) {
   useEffect(() => () => input.clear(), [input]);
+  const releaseCapture = (event: React.PointerEvent<HTMLButtonElement>) => {
+    safeReleasePointerCapture(event.currentTarget, event.pointerId);
+    input.release(`pointer:${event.pointerId}`);
+  };
   const button = (direction: OwnerDirection, label: string, key: string) => <button type="button" aria-label={label}
     onPointerDown={(event) => {
       if (event.button !== 0) return;
@@ -104,12 +108,12 @@ function OwnerControls({ input, moving }: { input: OwnerInput; moving: boolean }
       event.currentTarget.setPointerCapture(event.pointerId);
       input.press(`pointer:${event.pointerId}`, direction);
     }}
-    onPointerUp={(event) => input.release(`pointer:${event.pointerId}`)} onPointerCancel={(event) => input.release(`pointer:${event.pointerId}`)}
-    onLostPointerCapture={(event) => input.release(`pointer:${event.pointerId}`)}
+    onPointerUp={releaseCapture} onPointerCancel={releaseCapture}
+    onPointerLeave={releaseCapture} onLostPointerCapture={releaseCapture}
     onKeyDown={(event) => { if (event.key === ' ' || event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); if (!event.repeat) input.press(`button:${direction}`, direction); } }}
     onKeyUp={(event) => { if (event.key === ' ' || event.key === 'Enter') input.release(`button:${direction}`); }}
     onBlur={() => input.release(`button:${direction}`)}>{key}</button>;
-  return <div className="vo3d-owner-controls" aria-label="Kontrol gerak Owner">
+  return <div className="vo3d-owner-controls" aria-label="Kontrol gerak Owner" {...overlayEventIsolation}>
     <p className="vo3d-owner-motion" role="status">{moving ? 'Owner sedang berjalan' : 'Owner diam'}</p>
     <p className="vo3d-owner-hint">Tahan WASD, tombol panah, atau tombol di bawah untuk berjalan sesuai arah kamera. Lepaskan untuk berhenti. Esc menghentikan perjalanan.</p>
     <div className="vo3d-owner-dpad">
@@ -391,11 +395,11 @@ export default function OfficeShell() {
       </Suspense> : <div className="vo3d-fallback">WebGL tidak tersedia di browser ini. Gunakan tablet untuk membuka setiap kartu.</div>}
     </div>
 
-    <div className="vo3d-left-rail">
+    <div className="vo3d-left-rail" {...overlayEventIsolation}>
     <section className="vo3d-float vo3d-card" aria-label="Status kantor">
       <div className="vo3d-mission-head"><h1>Mission Control</h1><span className={`vo3d-connection${health.isError ? ' is-unavailable' : ''}`}><span className={`vo3d-live${!fresh(health)?.ok ? ' is-off' : ''}`} aria-hidden="true" />{health.isError ? 'API terputus' : fresh(health)?.ok ? 'API terhubung' : 'Memuat'}</span></div>
       <div className="vo3d-mission-meta"><span>{phase.label} · {time}</span><Link to="/overview">Ringkasan →</Link></div>
-      <div className="vo3d-floor-picker" role="group" aria-label="Pilih lantai">{([1,2] as const).map(n=><button type="button" key={n} aria-pressed={floor===n} onClick={()=>goToFloor(n)}>Lantai {n}</button>)}</div>
+      <div className="vo3d-floor-picker" role="group" aria-label="Pilih lantai" {...overlayEventIsolation}>{([1,2] as const).map(n=><button type="button" key={n} aria-pressed={floor===n} onClick={()=>goToFloor(n)}>Lantai {n}</button>)}</div>
       <p>{summary}</p>
       {autopilotData?.marketplaceNotice && <Link className="vo3d-last-warning" to="/capabilities">Percobaan bid terakhir gagal · {timeOf(autopilotData.marketplaceNotice.at)}</Link>}
       <details className="vo3d-mission-details"><summary>{externalLabel}</summary>
@@ -414,7 +418,7 @@ export default function OfficeShell() {
     </nav>
     </div>
 
-    <div className="vo3d-float vo3d-tools">
+    <div className="vo3d-float vo3d-tools" {...overlayEventIsolation}>
       <button ref={tabletButton} type="button" className="vo3d-icon vo3d-tablet-trigger" aria-label="Buka tablet Mission Control" title="Buka tablet (Tab saat fokus di kantor)" onClick={() => navigate('/overview')}><OfficeIcon name="grid" /><span>Tablet <kbd>Tab</kbd></span></button>
       <button ref={ownerButton} type="button" className="vo3d-owner-action" aria-pressed={panel === 'owner'} onClick={openOwner}><OfficeIcon name="target" />Pemilik</button>
       <div className="vo3d-search-wrap"><label className="vo3d-search"><OfficeIcon name="search" /><span className="sr-only">Cari agen atau papan</span>
@@ -426,9 +430,9 @@ export default function OfficeShell() {
         onClick={() => pause.mutate(dashboardData.policy.state === 'active' ? 'pause' : 'resume')}>{dashboardData.policy.state === 'active' ? 'Jeda automasi' : 'Lanjutkan kebijakan'}</button>}
       <button type="button" className="vo3d-icon" aria-pressed={fullscreen} aria-label={fullscreen ? 'Keluar dari layar penuh' : 'Layar penuh'} onClick={() => { if (document.fullscreenElement) void document.exitFullscreen(); else void stage.current?.requestFullscreen?.(); }}><OfficeIcon name="expand" /></button>
     </div>
-    {pause.isError && <div className="vo3d-float vo3d-toast" role="alert">{pause.error.message}</div>}
+    {pause.isError && <div className="vo3d-float vo3d-toast" role="alert" {...overlayEventIsolation}>{pause.error.message}</div>}
 
-    {panel && !sheetOpen && <aside className="vo3d-float vo3d-panel" aria-label="Panel detail">
+    {panel && !sheetOpen && <aside className="vo3d-float vo3d-panel" aria-label="Panel detail" {...overlayEventIsolation}>
       <div className="vo3d-tabs" role="tablist" aria-label="Rincian kantor">
         {([['owner', 'Pemilik'], ['agent', 'Agen'], ['activity', 'Aktivitas'], ['channels', 'Kanal']] as const).map(([id, label], index, tabs) => <button key={id} id={`office-tab-${id}`} type="button" role="tab" aria-controls="office-detail-panel" tabIndex={panel === id ? 0 : -1} aria-selected={panel === id}
           onClick={() => id === 'owner' ? openOwner() : setPanel(id)}
@@ -532,7 +536,7 @@ export default function OfficeShell() {
       </div>
     </aside>}
 
-    {!panel && !sheetOpen && <figure className="vo3d-float vo3d-map" aria-hidden="true">
+    {!panel && !sheetOpen && <figure className="vo3d-float vo3d-map" aria-hidden="true" {...overlayEventIsolation}>
       <svg viewBox={`${FLOOR.minX} ${FLOOR.minZ} ${width} ${depth}`}>
         <rect x={FLOOR.minX} y={FLOOR.minZ} width={width} height={depth} rx="1" fill="#f3efe6" />
         {ZONES.map((zone) => <g key={zone.id} onClick={() => fly({ kind: 'zone', id: zone.id })}>
@@ -545,7 +549,7 @@ export default function OfficeShell() {
       <p>Lt {floor} · titik = posisi tujuan tiap agen</p>
     </figure>}
 
-    <nav className="vo3d-float vo3d-dock" aria-label="Navigasi ruangan">
+    <nav className="vo3d-float vo3d-dock" aria-label="Navigasi ruangan" {...overlayEventIsolation}>
       {ZONES.map((zone) => { const count = [...spots.values()].filter((spot) => zoneOf(spot) === zone.id).length; return <button key={zone.id} type="button" aria-label={`${zone.label}, ${count} agen`} aria-pressed={command.kind === 'zone' && command.id === zone.id} onClick={() => fly({ kind: 'zone', id: zone.id })}>
         {zone.label}<span className="vo3d-dock-count" aria-hidden="true">{count}</span>
       </button>; })}
@@ -553,7 +557,7 @@ export default function OfficeShell() {
       <button className="vo3d-dock-panel" type="button" aria-pressed={panel === 'channels'} onClick={() => setPanel(panel === 'channels' ? null : 'channels')}>Kanal</button>
     </nav>
 
-    <div className="vo3d-float vo3d-seg" role="toolbar" aria-label="Kontrol tampilan">
+    <div className="vo3d-float vo3d-seg" role="toolbar" aria-label="Kontrol tampilan" {...overlayEventIsolation}>
       <button type="button" aria-pressed={view === '3d'} aria-label="Tampilan 3D" title="Tampilan 3D" onClick={() => { setView('3d'); fly({ kind: 'overview' }); }}><OfficeIcon name="cube" /></button>
       <button type="button" aria-pressed={view === 'top'} aria-label="Tampilan denah atas" title="Denah atas" onClick={() => { setView('top'); setTour(false); fly({ kind: 'overview' }); }}><OfficeIcon name="top" /></button>
       <button type="button" aria-pressed={tour} disabled={reducedMotion} title={reducedMotion ? 'Dinonaktifkan karena preferensi kurangi gerakan' : 'Putar kamera otomatis'} onClick={() => { setFollowId(null); setView('3d'); setTour((on) => !on); }}><OfficeIcon name="play" />Tur</button>
@@ -562,7 +566,7 @@ export default function OfficeShell() {
     </div>
 
     {sheetOpen && <div className="vo3d-sheet-backdrop vo3d-tablet-backdrop" onClick={() => navigate('/')}>
-      <section ref={sheetElement} className="vo3d-sheet vo3d-tablet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" onClick={(event) => event.stopPropagation()}>
+      <section ref={sheetElement} className="vo3d-sheet vo3d-tablet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" onClick={(event) => event.stopPropagation()} {...overlayEventIsolation}>
         <aside className="vo3d-tablet-sidebar" aria-label="Modul tablet">
           <div className="vo3d-tablet-brand"><OfficeIcon name="grid" /><span>MISSION CONTROL<small>Tablet kerja</small></span></div>
           <nav className="vo3d-tablet-nav" aria-label="Semua modul">

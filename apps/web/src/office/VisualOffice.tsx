@@ -10,7 +10,7 @@ import { createOwnerMotion, setOwnerDestination, stepOwnerMotion, stopOwnerMotio
 import { OfficeAgent as OfficeAgentCharacter, spokenOfficeTurn } from './OfficeAgent.js';
 import { OfficeEnvironment } from './OfficeEnvironment.js';
 import OfficeObjects from './OfficeObjects.js';
-import { invitationSpot, type OfficeInvitation } from '../state/office-interaction.js';
+import { bindCanvasGestureIsolation, createGestureTracker, invitationSpot, type GestureTracker, type OfficeInvitation } from '../state/office-interaction.js';
 import { createOfficeLife, updateOfficeLife, type OfficeLife } from '../state/office-life.js';
 import { clampCameraPan, followCamera } from '../state/camera-motion.js';
 
@@ -554,6 +554,14 @@ function Lights({ phase }: { phase: Phase }) {
   </>;
 }
 
+function CanvasGestureBridge({ tracker }: { tracker: GestureTracker }) {
+  const { gl } = useThree();
+  useEffect(() => {
+    return bindCanvasGestureIsolation(gl.domElement, tracker);
+  }, [gl, tracker]);
+  return null;
+}
+
 export default function VisualOffice({ invitation, floor, ownerStart, onLift, agents, learning, ready, selectedId, ownerSelected, ownerInput, ownerTarget, ownerVisitVersion, onOwnerMoving, followId, onSelect, onOwnerSelect, onCameraInteract, command, view, tour, phase, reducedMotion, boards, onOpenBoard, onOpenCommunity }: VisualOfficeProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [hoveredBoard, setHoveredBoard] = useState<BoardId | null>(null);
@@ -561,6 +569,22 @@ export default function VisualOffice({ invitation, floor, ownerStart, onLift, ag
   const positions = useMemo(() => new Map<string, THREE.Vector3>(), []);
   const life = useMemo(() => createOfficeLife(), []);
   const invitedSpot = useMemo(() => invitationSpot(agents, invitation), [agents, invitation]);
+  const tracker = useMemo(() => createGestureTracker(), []);
+  const handleSelect = (id: string | null) => {
+    if (tracker.canSelectMesh()) onSelect(id);
+  };
+  const handleOwnerSelect = () => {
+    if (tracker.canSelectMesh()) onOwnerSelect();
+  };
+  const handleOpenBoard = (id: BoardId) => {
+    if (tracker.canSelectMesh()) onOpenBoard(id);
+  };
+  const handleLift = () => {
+    if (tracker.canSelectMesh()) onLift();
+  };
+  const handleOpenCommunity = onOpenCommunity ? () => {
+    if (tracker.canSelectMesh()) onOpenCommunity();
+  } : undefined;
   const [visible, setVisible] = useState(() => !document.hidden);
   useEffect(() => {
     const update = () => setVisible(!document.hidden);
@@ -568,20 +592,21 @@ export default function VisualOffice({ invitation, floor, ownerStart, onLift, ag
     return () => document.removeEventListener('visibilitychange', update);
   }, []);
   useEffect(() => { document.body.style.cursor = hoveredId || hoveredBoard ? 'pointer' : ''; return () => { document.body.style.cursor = ''; }; }, [hoveredId, hoveredBoard]);
-  return <Canvas frameloop={visible ? 'always' : 'never'} shadows dpr={1} camera={{ position: [20, 28, 38], fov: 38, near: 0.5, far: 400 }} onPointerMissed={() => onSelect(null)}>
+  return <Canvas style={{ touchAction: 'none' }} frameloop={visible ? 'always' : 'never'} shadows dpr={1} camera={{ position: [20, 28, 38], fov: 38, near: 0.5, far: 400 }} onPointerMissed={() => handleSelect(null)}>
+    <CanvasGestureBridge tracker={tracker} />
     <OfficeLifeTick life={life} agents={agents} reducedMotion={reducedMotion} />
     <Lights phase={phase} />
     <Building agents={agents} phase={phase} floor={floor} />
     <OfficeEnvironment agents={agents} phase={phase} selectedId={selectedId} floor={floor} />
-    <OfficeObjects floor={floor} onOpenBoard={onOpenBoard} onHover={setHoveredId} onOpenCommunity={onOpenCommunity} />
-    <Lift floor={floor} onUse={onLift} />
-    {BOARDS.filter(slot=>(slot.floor ?? 1)===floor).map((slot) => { const content = boards.find((board) => board.id === slot.id); return content ? <Board key={slot.id} slot={slot} content={content} hovered={hoveredBoard === slot.id} onHover={setHoveredBoard} onOpen={onOpenBoard} /> : null; })}
+    <OfficeObjects floor={floor} onOpenBoard={handleOpenBoard} onHover={setHoveredId} onOpenCommunity={handleOpenCommunity} />
+    <Lift floor={floor} onUse={handleLift} />
+    {BOARDS.filter(slot=>(slot.floor ?? 1)===floor).map((slot) => { const content = boards.find((board) => board.id === slot.id); return content ? <Board key={slot.id} slot={slot} content={content} hovered={hoveredBoard === slot.id} onHover={setHoveredBoard} onOpen={handleOpenBoard} /> : null; })}
     {ready && agents.map((agent, index) => {
       const spot = spots.get(agent.id);
       return spot ? <OfficeAgentCharacter key={agent.id} agent={agent} agents={agents} index={index} spot={spot} selected={agent.id === selectedId} hovered={agent.id === hoveredId}
-        onSelect={onSelect} onHover={setHoveredId} reducedMotion={reducedMotion} positions={positions} life={life} invitation={agent.id === invitation?.id ? invitedSpot : undefined} spokenMessage={spokenOfficeTurn(learning, agent.id)} /> : null;
+        onSelect={handleSelect} onHover={setHoveredId} reducedMotion={reducedMotion} positions={positions} life={life} invitation={agent.id === invitation?.id ? invitedSpot : undefined} spokenMessage={spokenOfficeTurn(learning, agent.id)} /> : null;
     })}
-    <OwnerCharacter start={ownerStart} onLift={onLift} destination={ownerTarget} request={ownerVisitVersion} selected={ownerSelected} hovered={hoveredId === 'owner'} input={ownerInput} onMoving={onOwnerMoving} onSelect={onOwnerSelect} onHover={setHoveredId} reducedMotion={reducedMotion} positions={positions} />
+    <OwnerCharacter start={ownerStart} onLift={handleLift} destination={ownerTarget} request={ownerVisitVersion} selected={ownerSelected} hovered={hoveredId === 'owner'} input={ownerInput} onMoving={onOwnerMoving} onSelect={handleOwnerSelect} onHover={setHoveredId} reducedMotion={reducedMotion} positions={positions} />
     <CameraRig command={command} view={view} tour={tour} spots={spots} reducedMotion={reducedMotion} followId={followId} positions={positions} onInteract={onCameraInteract} />
   </Canvas>;
 }
