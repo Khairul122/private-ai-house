@@ -273,6 +273,7 @@ export default function OfficeShell() {
   useEffect(() => {
     return () => {
       lifecycleRef.current?.destroy();
+      perfControllerRef.current?.dispose();
     };
   }, []);
 

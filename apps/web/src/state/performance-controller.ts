@@ -1,5 +1,30 @@
 export type PerformanceStatus = 'normal' | 'reduced-effects' | 'fallback-offer';
 
+/** Fixed-size rolling window for stable FPS decisions without unbounded memory. */
+export class RollingFpsWindow {
+  private readonly samples: number[] = [];
+
+  constructor(private readonly size = 60) {}
+
+  add(fps: number): number {
+    this.samples.push(fps);
+    if (this.samples.length > this.size) this.samples.shift();
+    return this.average;
+  }
+
+  get average(): number {
+    return this.samples.length === 0 ? 60 : this.samples.reduce((sum, sample) => sum + sample, 0) / this.samples.length;
+  }
+
+  get isFull(): boolean {
+    return this.samples.length >= this.size;
+  }
+
+  clear(): void {
+    this.samples.length = 0;
+  }
+}
+
 export type PerformanceControllerOptions = {
   /** FPS threshold below which duration begins accumulating for reduced effects. Default: 30 */
   reducedFpsThreshold?: number;
@@ -27,6 +52,8 @@ export type PerformanceMetrics = {
 export class PerformanceController {
   private status: PerformanceStatus = 'normal';
   private lastFps = 60;
+  private readonly fpsWindow: RollingFpsWindow;
+  private hidden = false;
   private belowReducedMs = 0;
   private belowFallbackMs = 0;
   private recoveryMs = 0;
@@ -46,15 +73,37 @@ export class PerformanceController {
     this.fallbackDurationMs = options.fallbackDurationMs ?? 5000;
     this.recoveryFpsThreshold = options.recoveryFpsThreshold ?? 35;
     this.recoveryDurationMs = options.recoveryDurationMs ?? 3000;
+    this.fpsWindow = new RollingFpsWindow(60);
+    if (typeof document !== 'undefined') {
+      this.hidden = document.hidden;
+      document.addEventListener('visibilitychange', this.handleVisibility);
+    }
+  }
+
+  private readonly handleVisibility = () => {
+    this.hidden = document.hidden;
+    if (this.hidden) {
+      this.fpsWindow.clear();
+      this.belowReducedMs = 0;
+      this.belowFallbackMs = 0;
+      this.recoveryMs = 0;
+    }
+  };
+
+  /**
+   * Updates controller with one frame sample. Long gaps and hidden tabs do not count.
+   */
+  update(fps: number, deltaMs: number): PerformanceStatus {
+    if (deltaMs > 250 || this.hidden) return this.status;
+    this.fpsWindow.add(fps);
+    const averageFps = this.fpsWindow.isFull ? this.fpsWindow.average : fps;
+    return this.updateAverage(averageFps, deltaMs);
   }
 
   /**
-   * Updates the performance controller with the latest FPS sample and frame delta time.
-   * @param fps Current instantaneous or sampled frames per second
-   * @param deltaMs Elapsed time in milliseconds since the previous sample
-   * @returns Current performance status
+   * Applies state transitions to rolling-average FPS.
    */
-  update(fps: number, deltaMs: number): PerformanceStatus {
+  private updateAverage(fps: number, deltaMs: number): PerformanceStatus {
     this.lastFps = fps;
 
     if (this.status === 'normal') {
@@ -143,6 +192,11 @@ export class PerformanceController {
     this.belowFallbackMs = 0;
     this.recoveryMs = 0;
     this.fallbackDismissed = false;
+    this.fpsWindow.clear();
+  }
+
+  dispose(): void {
+    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', this.handleVisibility);
   }
 
   getStatus(): PerformanceStatus {
