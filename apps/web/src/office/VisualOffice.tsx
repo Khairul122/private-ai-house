@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { BOARD_SIZE, BOARDS, FLOOR, FLOOR_TWO_PODS, PROJECTS_CO_ID_DESK, LEAD_DESK, LIFT, liftDoorReached, LEAD_ID, MANAGER_DESK, OWNER_SPOT, PODS, POD_SIZE, spotsFor, ZONES, type BoardId, type BoardSlot, type dayPhase, type P2, type Spot } from '../state/office-layout.js';
 import type { OfficeAgent } from '../state/office-state.js';
+import { TECH_CAMPUS_THEME, monitorEmissive } from '../state/office-theme.js';
 import type { OfficeLearningStatus } from '../../../server/src/models/office-learning-types.js';
 import type { OwnerInput } from '../state/owner-input.js';
 import { createOwnerMotion, setOwnerDestination, stepOwnerMotion, stopOwnerMotion } from '../state/owner-motion.js';
@@ -63,10 +64,10 @@ export type VisualOfficeProps = {
 const GLASS = '#dff1f7';
 const FRAME = '#f4f5f2';
 
-function B({ p, s, c, e, o, shadow = true, roughness = 0.72, metalness = 0 }: { p: V3; s: V3; c: string; e?: string | undefined; o?: number; shadow?: boolean; roughness?: number; metalness?: number }) {
+function B({ p, s, c, e, ei = 0.65, o, shadow = true, roughness = 0.72, metalness = 0 }: { p: V3; s: V3; c: string; e?: string | undefined; ei?: number; o?: number; shadow?: boolean; roughness?: number; metalness?: number }) {
   return <mesh position={p} castShadow={shadow && o === undefined} receiveShadow>
     <boxGeometry args={s} />
-    <meshStandardMaterial color={c} {...(o !== undefined ? { transparent: true, opacity: o, depthWrite: false, roughness: 0.18, metalness: 0.08 } : { roughness, metalness })} {...(e ? { emissive: e, emissiveIntensity: 0.65 } : {})} />
+    <meshStandardMaterial color={c} {...(o !== undefined ? { transparent: true, opacity: o, depthWrite: false, roughness: 0.18, metalness: 0.08 } : { roughness, metalness })} {...(e ? { emissive: e, emissiveIntensity: ei } : {})} />
   </mesh>;
 }
 
@@ -158,27 +159,21 @@ function Lift({ floor, onUse }: { floor: 1 | 2; onUse: () => void }) {
   </group>;
 }
 
-function Pod({ x, z, color, screenOn, night }: { x: number; z: number; color: string; screenOn: boolean; night: boolean }) {
+function Pod({ x, z, color, state }: { x: number; z: number; color: string; state: OfficeAgent['state'] | undefined }) {
   const h = POD_SIZE / 2;
+  const { width, depth, height, dividerHeight, chairRadius, monitorWidth, monitorTop } = TECH_CAMPUS_THEME.workstation;
+  const screen = monitorEmissive(state);
   return <group position={[x, 0, z]}>
-    <B p={[0.5, 0.66, -h + 0.16]} s={[2.95, 1.32, 0.12]} c="#687568" roughness={0.98} />
-    <B p={[0.5, 1.34, -h + 0.16]} s={[3.05, 0.06, 0.18]} c="#bd976d" />
-    <B p={[-0.83, 0.9, -h + 0.24]} s={[0.13, 0.35, 0.025]} c={color} shadow={false} />
-    <B p={[0, 0.75, 0.1]} s={[2.45, 0.11, 1.05]} c="#bd976d" roughness={0.65} />
-    {[-1, 1].map((sx) => <group key={sx}>
-      <B p={[sx * 1.03, 0.37, 0.1]} s={[0.12, 0.74, 0.72]} c="#38483e" />
-      <B p={[sx * 1.03, 0.06, 0.1]} s={[0.32, 0.1, 0.95]} c="#38483e" />
+    <B p={[0, height, 0]} s={[width, 0.1, depth]} c={TECH_CAMPUS_THEME.slate} roughness={0.78} />
+    {[-1, 1].map((side) => <B key={side} p={[side * (width / 2 - 0.08), height / 2, 0]} s={[0.1, height, depth - 0.08]} c={TECH_CAMPUS_THEME.charcoal} metalness={0.2} />)}
+    <B p={[0, height + dividerHeight / 2, 0]} s={[0.04, dividerHeight, depth - 0.1]} c={TECH_CAMPUS_THEME.white} o={0.35} shadow={false} />
+    {[-1, 1].map((side) => <group key={side} position={[side * 0.43, 0, 0.17]} rotation={[0, side * Math.PI / 12, 0]}>
+      <B p={[0, monitorTop - 0.3, 0]} s={[monitorWidth, 0.6, 0.035]} c={TECH_CAMPUS_THEME.charcoal} metalness={0.25} />
+      <B p={[0, monitorTop - 0.3, 0.022]} s={[monitorWidth - 0.06, 0.53, 0.012]} c={screen.color} e={screen.color} ei={screen.intensity} shadow={false} />
+      <B p={[0, height + 0.12, 0]} s={[0.06, monitorTop - height - 0.15, 0.06]} c={TECH_CAMPUS_THEME.charcoal} metalness={0.3} />
     </group>)}
-    <B p={[0, 0.816, 0.09]} s={[1.32, 0.014, 0.73]} c="#596558" roughness={0.98} shadow={false} />
-    <B p={[0, 1.22, 0.42]} s={[0.95, 0.6, 0.06]} c="#1d2228" />
-    <B p={[0, 1.22, 0.385]} s={[0.85, 0.5, 0.01]} c={screenOn ? '#b6d5bf' : '#36423d'} e={screenOn ? '#547e65' : undefined} />
-    <B p={[0, 0.88, 0.42]} s={[0.12, 0.2, 0.08]} c="#1d2228" />
-    <B p={[0, 0.8, -0.05]} s={[0.6, 0.03, 0.22]} c="#d7d3c8" />
-    <Chair p={[0, 0, -0.95]} c="#4c5c51" />
-    <B p={[0.91, 0.84, -0.05]} s={[0.37, 0.06, 0.42]} c="#b8734f" roughness={0.85} />
-    <mesh position={[-0.91, 0.92, 0.18]}><cylinderGeometry args={[0.1, 0.09, 0.23, 12]} /><meshStandardMaterial color={night ? '#e0cc9d' : '#e7dfcd'} /></mesh>
-    <B p={[-1.85, 0.38, 0.3]} s={[0.66, 0.76, 0.8]} c="#ded8c9" />
-    <B p={[-1.85, 0.57, 0.712]} s={[0.44, 0.04, 0.035]} c="#7a745f" />
+    <Chair p={[0, 0, -0.95]} c="#475569" />
+    <B p={[h - 0.4, 0.38, 0]} s={[0.5, 0.76, 0.5]} c={color} />
     <Plant p={[-h + 0.55, 0, -h + 0.55]} scale={0.65} />
   </group>;
 }
@@ -302,7 +297,7 @@ function Building({ agents, phase, floor }: { agents: OfficeAgent[]; phase: Phas
   const d = maxZ - minZ;
   const cx = (minX + maxX) / 2;
   const cz = (minZ + maxZ) / 2;
-  const working = new Set(agents.filter((agent) => agent.room === 'workspace').map((agent) => agent.id));
+  const podStates = new Map(agents.filter((agent) => agent.room === 'workspace' && (agent.floor ?? 1) === floor).map((agent) => [agent.id, agent.state]));
   return <group>
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, -0.05, cz]} receiveShadow><planeGeometry args={[140, 140]} /><meshStandardMaterial roughness={0.94} color={phase.grass} /></mesh>
     <mesh position={[cx, -0.02, cz]} receiveShadow><boxGeometry args={[w, 0.06, d]} /><meshStandardMaterial roughness={0.9} color={phase.night ? '#aaa393' : '#d8d0bf'} /></mesh>
@@ -316,7 +311,7 @@ function Building({ agents, phase, floor }: { agents: OfficeAgent[]; phase: Phas
     <B p={[minX + 0.16, 4.16, cz]} s={[0.12, 0.12, d - 0.2]} c="#b8734f" metalness={0.2} />
     <B p={[cx, 0.2, maxZ]} s={[w, 0.4, 0.2]} c="#f4f2ec" />
     <B p={[maxX, 0.2, cz]} s={[0.2, 0.4, d]} c="#f4f2ec" />
-    {(floor===1?PODS:FLOOR_TWO_PODS).map((pod) => <Pod key={pod.id} x={pod.x} z={pod.z} color={pod.color} screenOn={working.has(pod.id)} night={phase.night} />)}
+    {(floor===1?PODS:FLOOR_TWO_PODS).map((pod) => <Pod key={pod.id} x={pod.x} z={pod.z} color={pod.color} state={podStates.get(pod.id)} />)}
     <MeetingRoom active={agents.some((agent) => agent.room === 'meeting')} />
     <WallPanel p={[3.8, 2.05, minZ + 0.35]} color="#496354" />
     <WallPanel p={[maxX - 0.35, 2.05, -5.2]} rotY={Math.PI / 2} color="#6c806f" />
