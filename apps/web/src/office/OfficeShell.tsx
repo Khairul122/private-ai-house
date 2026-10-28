@@ -1,11 +1,10 @@
 import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type * as THREE from 'three';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router';
 import { api, jsonRequest, type AuditEvent, type Autopilot, type BidDraft, type BusinessSyncStatus, type Capabilities, type Inbox, type Opportunity, type Policy, type Profile, type Work } from '../api/api.js';
 import { deriveOfficeAgents, ROOM_LABELS, STATE_COLORS, STATE_LABELS, summarize, type AgentState } from '../state/office-state.js';
 import { BOARDS, dayPhase, FLOOR, LIFT, OWNER_SPOT, PODS, spotsFor, ZONES, type BoardId, type P2, type Spot, FLOOR_TWO_PODS } from '../state/office-layout.js';
-import type { BoardContent, CameraCommand } from './VisualOffice.js';
+import type { BoardContent, CameraCommand, SavedCameraState } from './VisualOffice.js';
 import { bindOwnerKeyboard, createOwnerInput, type OwnerDirection, type OwnerInput } from '../state/owner-input.js';
 import type { ProjectsCoIdStatus } from '../api/projects-co-id-api.js';
 import type { OperationsData } from '../api/operations-api.js';
@@ -234,6 +233,8 @@ export default function OfficeShell() {
   const [fallbackReason, setFallbackReason] = useState<FallbackReason | undefined>(() => (supportedWebgl ? undefined : 'unsupported'));
   const [sceneError, setSceneError] = useState<unknown | undefined>(undefined);
   const [frameloopActive, setFrameloopActive] = useState(true);
+  const [canvasKey, setCanvasKey] = useState(0);
+  const savedCameraState = useRef<SavedCameraState | null>(null);
 
   const [perfStatus, setPerfStatus] = useState<PerformanceStatus>('normal');
   const [currentFps, setCurrentFps] = useState(60);
@@ -250,7 +251,7 @@ export default function OfficeShell() {
       maxRetriesPerLoss: 1,
       onStatusChange: (status, reason) => {
         setWebglStatus(status);
-        if (reason) setFallbackReason(reason);
+        setFallbackReason(reason);
       },
       onFallback: (reason, error) => {
         setWebglStatus('fallback');
@@ -268,60 +269,29 @@ export default function OfficeShell() {
     });
   }
 
-  const unbindCanvasRef = useRef<(() => void) | null>(null);
-
   const isWebglActive = webglStatus === 'ready' || webglStatus === 'restoring';
   const webgl = isWebglActive;
 
   useEffect(() => {
     return () => {
-      if (unbindCanvasRef.current) {
-        unbindCanvasRef.current();
-        unbindCanvasRef.current = null;
-      }
       lifecycleRef.current?.destroy();
     };
   }, []);
 
-  useEffect(() => {
-    if (!isWebglActive && unbindCanvasRef.current) {
-      unbindCanvasRef.current();
-      unbindCanvasRef.current = null;
-    }
-  }, [isWebglActive]);
-
   const handleFpsSample = useCallback((fps: number, dtMs: number) => {
     setCurrentFps(fps);
-    if (lifecycleRef.current?.getStatus() === 'ready') {
-      lifecycleRef.current.markStable();
-    }
     const newStatus = perfControllerRef.current?.update(fps, dtMs);
     if (newStatus && newStatus !== perfStatus) {
       setPerfStatus(newStatus);
     }
   }, [perfStatus]);
 
-  const handleCanvasCreated = useCallback((gl: THREE.WebGLRenderer) => {
-    if (unbindCanvasRef.current) {
-      unbindCanvasRef.current();
-      unbindCanvasRef.current = null;
-    }
-    if (lifecycleRef.current) {
-      const unbind = lifecycleRef.current.attachToCanvas(gl.domElement);
-      unbindCanvasRef.current = unbind;
-      return () => {
-        unbind();
-        if (unbindCanvasRef.current === unbind) {
-          unbindCanvasRef.current = null;
-        }
-      };
-    }
-  }, []);
-
   const retry3D = useCallback(() => {
+    if (lifecycleRef.current?.getStatus() !== 'fallback') return;
     setSceneError(undefined);
     perfControllerRef.current?.reset();
     setPerfStatus('normal');
+    setCanvasKey((key) => key + 1);
     lifecycleRef.current?.retry();
   }, []);
 
@@ -743,11 +713,13 @@ export default function OfficeShell() {
           />
         )}
       >
-        {isWebglActive ? (
+        {webglStatus !== 'fallback' ? (
           <Suspense fallback={<div className="vo3d-fallback">Memuat kantor visual...</div>}>
             <VisualOffice
+              lifecycle={lifecycleRef.current}
+              savedCameraState={savedCameraState}
               invitation={invitation}
-              key={floor}
+              key={`${floor}:${canvasKey}`}
               floor={floor}
               ownerStart={arrival?.floor===floor?arrival.at:[OWNER_SPOT.x,OWNER_SPOT.z]}
               onLift={()=>goToFloor(floor===1?2:1,true)}
@@ -774,16 +746,16 @@ export default function OfficeShell() {
               reducedEffects={perfStatus === 'reduced-effects' || perfStatus === 'fallback-offer'}
               frameloopActive={frameloopActive}
               onFpsSample={handleFpsSample}
-              onCanvasCreated={handleCanvasCreated}
             />
+            {webglStatus === 'context-lost' && (
+              <div className="vo3d-fallback" role="status">
+                <div>
+                  <h3>Koneksi grafis (WebGL) terputus</h3>
+                  <p>Mencoba memulihkan koneksi grafis dalam 5 detik...</p>
+                </div>
+              </div>
+            )}
           </Suspense>
-        ) : webglStatus === 'context-lost' ? (
-          <div className="vo3d-fallback" role="status">
-            <div>
-              <h3>Koneksi grafis (WebGL) terputus</h3>
-              <p>Mencoba memulihkan koneksi grafis dalam 5 detik...</p>
-            </div>
-          </div>
         ) : (
           <OfficeFallbackView
             reason={fallbackReason}

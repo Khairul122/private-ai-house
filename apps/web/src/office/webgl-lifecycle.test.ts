@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { WebglLifecycleController } from './webgl-lifecycle.js';
+import { WebglLifecycleController, type FallbackReason } from './webgl-lifecycle.js';
 
 describe('WebglLifecycleController', () => {
   beforeEach(() => {
@@ -15,6 +15,40 @@ describe('WebglLifecycleController', () => {
     expect(controller.getStatus()).toBe('ready');
     expect(controller.getCurrentMode()).toBe('normal');
     expect(controller.getRetryCount()).toBe(0);
+  });
+
+  it('keeps recovery pending until a stable render is verified', () => {
+    const controller = new WebglLifecycleController();
+    controller.handleContextLost({ preventDefault: () => {} });
+    controller.handleContextRestored();
+    expect(controller.getStatus()).toBe('restoring');
+    expect(controller.getRetryCount()).toBe(1);
+    vi.advanceTimersByTime(5000);
+    expect(controller.getFallbackReason()).toBe('context_lost_timeout');
+    controller.markStable();
+    expect(controller.getStatus()).toBe('fallback');
+    expect(controller.getRetryCount()).toBe(1);
+  });
+
+  it('does not postpone recovery timeout for duplicate context loss events', () => {
+    const controller = new WebglLifecycleController();
+    controller.handleContextLost();
+    vi.advanceTimersByTime(4999);
+    controller.handleContextLost();
+    vi.advanceTimersByTime(1);
+    expect(controller.getFallbackReason()).toBe('context_lost_timeout');
+  });
+
+  it('rejects events from a foreign canvas without preventing their default', () => {
+    const controller = new WebglLifecycleController();
+    const canvas = new EventTarget() as HTMLCanvasElement;
+    const otherCanvas = new EventTarget() as HTMLCanvasElement;
+    controller.attachToCanvas(canvas);
+    const preventDefault = vi.fn();
+    controller.handleContextLost({ target: otherCanvas, preventDefault });
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(controller.getStatus()).toBe('ready');
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('handles webglcontextlost event: calls preventDefault, stops loop, enters context-lost', () => {
@@ -70,12 +104,13 @@ describe('WebglLifecycleController', () => {
 
     controller.handleContextRestored('reduced-effects');
 
-    expect(controller.getStatus()).toBe('ready');
+    expect(controller.getStatus()).toBe('restoring');
     expect(controller.getCurrentMode()).toBe('reduced-effects');
     expect(controller.getRetryCount()).toBe(1);
     expect(loopControl).toHaveBeenCalledWith(true);
     expect(restoreFn).toHaveBeenCalledWith('reduced-effects');
 
+    controller.markStable();
     // Further advancing the timer should NOT trigger timeout
     vi.advanceTimersByTime(5000);
     expect(controller.getStatus()).toBe('ready');
@@ -92,15 +127,16 @@ describe('WebglLifecycleController', () => {
     controller.handleContextLost({ preventDefault: () => {} });
     expect(controller.getStatus()).toBe('context-lost');
     controller.handleContextRestored('normal');
-    expect(controller.getStatus()).toBe('ready');
+    expect(controller.getStatus()).toBe('restoring');
     expect(controller.getRetryCount()).toBe(1);
     expect(restoreFn).toHaveBeenCalledTimes(1);
 
+    controller.markStable();
     // 2nd separate context loss and restore (both allowed without fallback)
     controller.handleContextLost({ preventDefault: () => {} });
     expect(controller.getStatus()).toBe('context-lost');
     controller.handleContextRestored('reduced-effects');
-    expect(controller.getStatus()).toBe('ready');
+    expect(controller.getStatus()).toBe('restoring');
     expect(controller.getRetryCount()).toBe(1);
     expect(restoreFn).toHaveBeenCalledTimes(2);
     expect(controller.getCurrentMode()).toBe('reduced-effects');
@@ -114,6 +150,7 @@ describe('WebglLifecycleController', () => {
 
     controller.handleContextLost({ preventDefault: () => {} });
     controller.handleContextRestored('normal');
+    controller.markStable();
     expect(controller.getStatus()).toBe('ready');
     expect(restoreFn).toHaveBeenCalledTimes(1);
 
@@ -201,7 +238,7 @@ describe('WebglLifecycleController', () => {
     // 2nd loss & restore now succeeds
     controller.handleContextLost({ preventDefault: () => {} });
     controller.handleContextRestored('normal');
-    expect(controller.getStatus()).toBe('ready');
+    expect(controller.getStatus()).toBe('restoring');
   });
 
   it('attaches and detaches canvas event listeners cleanly', () => {
@@ -222,7 +259,7 @@ describe('WebglLifecycleController', () => {
 
     // Simulate event on canvas
     const preventDefault = vi.fn();
-    listeners['webglcontextlost']?.({ preventDefault } as unknown as Event);
+    listeners['webglcontextlost']?.({ target: mockCanvas, preventDefault } as unknown as Event);
     expect(preventDefault).toHaveBeenCalled();
     expect(controller.getStatus()).toBe('context-lost');
 
@@ -243,8 +280,162 @@ describe('WebglLifecycleController', () => {
     expect(controller.getFallbackReason()).toBe('scene_error');
 
     controller.retry();
-    expect(controller.getStatus()).toBe('ready');
+    expect(controller.getStatus()).toBe('restoring');
     expect(controller.getFallbackReason()).toBeUndefined();
+    expect(controller.getRetryCount()).toBe(1);
+  });
+
+  it('keeps retry budget spent until two stable frames even after an explicit retry', () => {
+    const controller = new WebglLifecycleController();
+    controller.handleContextLost();
+    controller.handleContextRestored();
+    controller.triggerFallback('scene_error');
+    controller.retry();
+    expect(controller.getStatus()).toBe('restoring');
+    expect(controller.getRetryCount()).toBe(1);
+    controller.markStable();
+    expect(controller.getStatus()).toBe('ready');
     expect(controller.getRetryCount()).toBe(0);
+  });
+
+  it('retains the most severe fallback reason regardless of callback order', () => {
+    const reasons: FallbackReason[] = ['user_choice', 'low_fps', 'context_lost_timeout', 'retry_limit_exceeded', 'scene_error', 'unsupported'];
+    const forward = new WebglLifecycleController();
+    for (const reason of reasons) {
+      forward.triggerFallback(reason);
+      expect(forward.getFallbackReason()).toBe(reason);
+    }
+    const onFallback = vi.fn();
+    const reverse = new WebglLifecycleController({ onFallback });
+    for (const reason of reasons.slice().reverse()) reverse.triggerFallback(reason);
+    expect(reverse.getFallbackReason()).toBe('unsupported');
+    expect(onFallback).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the retry timeout when R3F attaches the replacement before old cleanup', () => {
+    const controller = new WebglLifecycleController();
+    const oldCanvas = new EventTarget() as HTMLCanvasElement;
+    const detachOld = controller.attachToCanvas(oldCanvas);
+    controller.triggerFallback('scene_error');
+    controller.retry();
+    const newCanvas = new EventTarget() as HTMLCanvasElement;
+    controller.attachToCanvas(newCanvas);
+    detachOld();
+    expect(controller.isCurrentCanvas(newCanvas)).toBe(true);
+    vi.advanceTimersByTime(5000);
+    expect(controller.getFallbackReason()).toBe('context_lost_timeout');
+  });
+
+  it('removes listeners and timers on destroy and ignores subsequent callbacks', () => {
+    const onStatusChange = vi.fn();
+    const controller = new WebglLifecycleController({ onStatusChange });
+    const canvas = new EventTarget() as HTMLCanvasElement;
+    const remove = vi.spyOn(canvas, 'removeEventListener');
+    controller.attachToCanvas(canvas);
+    canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    controller.destroy();
+    controller.destroy();
+    expect(remove).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+    onStatusChange.mockClear();
+    canvas.dispatchEvent(new Event('webglcontextrestored'));
+    controller.handleContextLost();
+    controller.handleContextRestored();
+    controller.retry();
+    controller.markStable();
+    controller.triggerFallback('scene_error');
+    vi.advanceTimersByTime(10000);
+    expect(onStatusChange).not.toHaveBeenCalled();
+  });
+
+  it('ignores restore in initial ready and duplicate restore while still restoring', () => {
+    const onRestore = vi.fn();
+    const controller = new WebglLifecycleController({ onRestore });
+    controller.handleContextRestored();
+    expect(onRestore).not.toHaveBeenCalled();
+    controller.handleContextLost();
+    controller.handleContextRestored('normal');
+    controller.handleContextRestored('reduced-effects');
+    expect(controller.getStatus()).toBe('restoring');
+    expect(controller.getRetryCount()).toBe(1);
+    expect(controller.getCurrentMode()).toBe('normal');
+    expect(onRestore).toHaveBeenCalledOnce();
+  });
+
+  it('cannot reset the retry budget while context is lost', () => {
+    const controller = new WebglLifecycleController();
+    controller.handleContextLost();
+    controller.handleContextRestored();
+    controller.handleContextLost();
+    controller.markStable();
+    expect(controller.getRetryCount()).toBe(1);
+    controller.handleContextRestored();
+    expect(controller.getFallbackReason()).toBe('retry_limit_exceeded');
+  });
+
+  it('caps automatic recovery at one attempt even if configured higher', () => {
+    const controller = new WebglLifecycleController({ maxRetriesPerLoss: 10 });
+    controller.handleContextLost();
+    controller.handleContextRestored();
+    controller.handleContextLost();
+    controller.handleContextRestored();
+    expect(controller.getFallbackReason()).toBe('retry_limit_exceeded');
+    expect(controller.getRetryCount()).toBe(1);
+  });
+
+  it('does not extend the original loss deadline when restoration begins', () => {
+    const controller = new WebglLifecycleController();
+    controller.handleContextLost();
+    vi.advanceTimersByTime(4999);
+    controller.handleContextRestored();
+    vi.advanceTimersByTime(1);
+    expect(controller.getFallbackReason()).toBe('context_lost_timeout');
+  });
+
+  it('falls back if resource restoration throws', () => {
+    const error = new Error('restore failed');
+    const onFallback = vi.fn();
+    const controller = new WebglLifecycleController({ onRestore: () => { throw error; }, onFallback });
+    controller.handleContextLost();
+    controller.handleContextRestored();
+    expect(controller.getFallbackReason()).toBe('scene_error');
+    expect(onFallback).toHaveBeenCalledWith('scene_error', error);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('ignores repeated retry calls and remains bounded by the first retry deadline', () => {
+    const onRestore = vi.fn();
+    const controller = new WebglLifecycleController({ onRestore });
+    controller.retry();
+    expect(onRestore).not.toHaveBeenCalled();
+    controller.triggerFallback('low_fps');
+    controller.retry();
+    vi.advanceTimersByTime(4999);
+    controller.retry();
+    vi.advanceTimersByTime(1);
+    expect(onRestore).toHaveBeenCalledOnce();
+    expect(controller.getFallbackReason()).toBe('context_lost_timeout');
+  });
+
+  it('rejects stale loss and restore callbacks after switching canvas', () => {
+    const controller = new WebglLifecycleController();
+    const oldCanvas = new EventTarget() as HTMLCanvasElement;
+    const add = vi.spyOn(oldCanvas, 'addEventListener');
+    const detachOld = controller.attachToCanvas(oldCanvas);
+    const newCanvas = new EventTarget() as HTMLCanvasElement;
+    controller.attachToCanvas(newCanvas);
+    newCanvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    for (const [name, listener] of add.mock.calls) {
+      const event = new Event(name, { cancelable: true });
+      Object.defineProperty(event, 'target', { value: oldCanvas });
+      if (typeof listener === 'function') listener(event);
+      expect(event.defaultPrevented).toBe(false);
+    }
+    detachOld();
+    expect(controller.getStatus()).toBe('context-lost');
+    expect(controller.getRetryCount()).toBe(0);
+    expect(controller.isCurrentCanvas(newCanvas)).toBe(true);
+    vi.advanceTimersByTime(5000);
+    expect(controller.getFallbackReason()).toBe('context_lost_timeout');
   });
 });
