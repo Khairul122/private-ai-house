@@ -1,5 +1,30 @@
 export type PerformanceStatus = 'normal' | 'reduced-effects' | 'fallback-offer';
 
+/** Fixed-size rolling window for stable FPS decisions without unbounded memory. */
+export class RollingFpsWindow {
+  private readonly samples: number[] = [];
+
+  constructor(private readonly size = 60) {}
+
+  add(fps: number): number {
+    this.samples.push(fps);
+    if (this.samples.length > this.size) this.samples.shift();
+    return this.average;
+  }
+
+  get average(): number {
+    return this.samples.length === 0 ? 60 : this.samples.reduce((sum, sample) => sum + sample, 0) / this.samples.length;
+  }
+
+  get isFull(): boolean {
+    return this.samples.length >= this.size;
+  }
+
+  clear(): void {
+    this.samples.length = 0;
+  }
+}
+
 export type PerformanceControllerOptions = {
   /** FPS threshold below which duration begins accumulating for reduced effects. Default: 30 */
   reducedFpsThreshold?: number;
@@ -13,6 +38,10 @@ export type PerformanceControllerOptions = {
   recoveryFpsThreshold?: number;
   /** Sustained duration in ms above recovery threshold required to recover. Default: 3000 ms */
   recoveryDurationMs?: number;
+  /** Maximum delta time in ms before a sample is ignored (e.g. 250ms for heavy GC / background tab). */
+  maxDeltaMs?: number;
+  /** Size of rolling FPS window for moving average smoothing. Default: 60. */
+  windowSize?: number;
 };
 
 export type PerformanceMetrics = {
@@ -27,6 +56,8 @@ export type PerformanceMetrics = {
 export class PerformanceController {
   private status: PerformanceStatus = 'normal';
   private lastFps = 60;
+  private readonly fpsWindow: RollingFpsWindow;
+  private hidden = false;
   private belowReducedMs = 0;
   private belowFallbackMs = 0;
   private recoveryMs = 0;
@@ -38,6 +69,8 @@ export class PerformanceController {
   private readonly fallbackDurationMs: number;
   private readonly recoveryFpsThreshold: number;
   private readonly recoveryDurationMs: number;
+  private readonly maxDeltaMs: number;
+  private subscribed = false;
 
   constructor(options: PerformanceControllerOptions = {}) {
     this.reducedFpsThreshold = options.reducedFpsThreshold ?? 30;
@@ -46,15 +79,41 @@ export class PerformanceController {
     this.fallbackDurationMs = options.fallbackDurationMs ?? 5000;
     this.recoveryFpsThreshold = options.recoveryFpsThreshold ?? 35;
     this.recoveryDurationMs = options.recoveryDurationMs ?? 3000;
+    this.maxDeltaMs = options.maxDeltaMs ?? 250;
+    this.fpsWindow = new RollingFpsWindow(options.windowSize ?? 60);
+  }
+
+  private readonly handleVisibility = () => {
+    this.hidden = document.hidden;
+    if (this.hidden) {
+      this.fpsWindow?.clear();
+      this.belowReducedMs = 0;
+      this.belowFallbackMs = 0;
+      this.recoveryMs = 0;
+    }
+  };
+
+  /**
+   * Updates controller with one frame sample. Long gaps and hidden tabs do not count.
+   */
+  update(fps: number, deltaMs: number): PerformanceStatus {
+    if (deltaMs > this.maxDeltaMs || this.hidden) return this.status;
+    const effectiveFps = this.fpsWindow.add(fps);
+    return this.updateAverage(effectiveFps, deltaMs);
+  }
+
+  subscribe(): () => void {
+    if (typeof document === 'undefined' || this.subscribed) return () => {};
+    this.hidden = document.hidden;
+    document.addEventListener('visibilitychange', this.handleVisibility);
+    this.subscribed = true;
+    return () => this.dispose();
   }
 
   /**
-   * Updates the performance controller with the latest FPS sample and frame delta time.
-   * @param fps Current instantaneous or sampled frames per second
-   * @param deltaMs Elapsed time in milliseconds since the previous sample
-   * @returns Current performance status
+   * Applies state transitions to rolling-average FPS.
    */
-  update(fps: number, deltaMs: number): PerformanceStatus {
+  private updateAverage(fps: number, deltaMs: number): PerformanceStatus {
     this.lastFps = fps;
 
     if (this.status === 'normal') {
@@ -64,6 +123,7 @@ export class PerformanceController {
         if (this.belowReducedMs >= this.reducedDurationMs) {
           this.status = 'reduced-effects';
           this.recoveryMs = 0;
+          this.fpsWindow.clear();
         }
       } else {
         this.belowReducedMs = 0;
@@ -74,6 +134,7 @@ export class PerformanceController {
         this.belowFallbackMs += deltaMs;
         if (this.belowFallbackMs >= this.fallbackDurationMs && !this.fallbackDismissed) {
           this.status = 'fallback-offer';
+          this.fpsWindow.clear();
         }
       } else {
         this.belowFallbackMs = 0;
@@ -86,6 +147,7 @@ export class PerformanceController {
         if (this.belowFallbackMs >= this.fallbackDurationMs && !this.fallbackDismissed) {
           this.status = 'fallback-offer';
           this.recoveryMs = 0;
+          this.fpsWindow.clear();
         }
       } else {
         this.belowFallbackMs = 0;
@@ -143,6 +205,14 @@ export class PerformanceController {
     this.belowFallbackMs = 0;
     this.recoveryMs = 0;
     this.fallbackDismissed = false;
+    this.fpsWindow?.clear();
+  }
+
+  dispose(): void {
+    if (typeof document !== 'undefined' && this.subscribed) {
+      document.removeEventListener('visibilitychange', this.handleVisibility);
+      this.subscribed = false;
+    }
   }
 
   getStatus(): PerformanceStatus {

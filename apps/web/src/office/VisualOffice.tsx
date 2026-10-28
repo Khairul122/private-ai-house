@@ -287,6 +287,13 @@ function LampPost({ p, night }: { p: V3; night: boolean }) {
   </group>;
 }
 
+function NeonStrip({ p, s, intensity }: { p: V3; s: V3; intensity: number }) {
+  return <mesh position={p} castShadow={false}>
+    <boxGeometry args={s} />
+    <meshStandardMaterial color="#38bdf8" emissive="#38bdf8" emissiveIntensity={intensity} toneMapped={false} />
+  </mesh>;
+}
+
 function WallPanel({ p, rotY = 0, color = '#52695c' }: { p: V3; rotY?: number; color?: string }) {
   return <group position={p} rotation={[0, rotY, 0]}>
     <B p={[0, 0, 0]} s={[2.2, 1.6, 0.08]} c="#b5845d" />
@@ -296,13 +303,14 @@ function WallPanel({ p, rotY = 0, color = '#52695c' }: { p: V3; rotY?: number; c
   </group>;
 }
 
-function Building({ agents, phase, floor }: { agents: OfficeAgent[]; phase: Phase; floor:1|2 }) {
+function Building({ agents, phase, floor, reducedEffects }: { agents: OfficeAgent[]; phase: Phase; floor:1|2; reducedEffects?: boolean | undefined }) {
   const { minX, maxX, minZ, maxZ } = FLOOR;
   const w = maxX - minX;
   const d = maxZ - minZ;
   const cx = (minX + maxX) / 2;
   const cz = (minZ + maxZ) / 2;
   const podStates = new Map(agents.filter((agent) => agent.room === 'workspace' && (agent.floor ?? 1) === floor).map((agent) => [agent.id, agent.state]));
+  const neonIntensity = reducedEffects ? 0.18 : phase.night ? 1.1 : 0.4;
   return <group>
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, -0.05, cz]} receiveShadow><planeGeometry args={[140, 140]} /><meshStandardMaterial roughness={0.94} color={phase.grass} /></mesh>
     <mesh position={[cx, -0.02, cz]} receiveShadow><boxGeometry args={[w, 0.06, d]} /><meshStandardMaterial roughness={0.9} color={phase.night ? '#aaa393' : '#d8d0bf'} /></mesh>
@@ -318,6 +326,9 @@ function Building({ agents, phase, floor }: { agents: OfficeAgent[]; phase: Phas
     <B p={[maxX, 0.2, cz]} s={[0.2, 0.4, d]} c="#f4f2ec" />
     {(floor===1?PODS:FLOOR_TWO_PODS).map((pod) => <Pod key={pod.id} x={pod.x} z={pod.z} color={pod.color} state={podStates.get(pod.id)} />)}
     <MeetingRoom active={agents.some((agent) => agent.room === 'meeting')} />
+    <NeonStrip p={[cx, 4.08, minZ + 0.3]} s={[w - 1, 0.035, 0.06]} intensity={neonIntensity} />
+    <NeonStrip p={[minX + 0.3, 2.1, cz]} s={[0.06, 3.4, 0.035]} intensity={neonIntensity} />
+    <NeonStrip p={[1.5, 0.06, cz]} s={[0.035, 0.035, d - 1]} intensity={neonIntensity} />
     <WallPanel p={[3.8, 2.05, minZ + 0.35]} color="#496354" />
     <WallPanel p={[maxX - 0.35, 2.05, -5.2]} rotY={Math.PI / 2} color="#6c806f" />
     <Lounge /><Pantry /><Lobby />
@@ -399,47 +410,57 @@ function OwnerCharacter({ start, onLift, destination, request, selected, hovered
   </group>;
 }
 
+/** Canvas dimensions stay explicit: reduced mode uses 512x256 for predictable GPU cost. */
+export function boardTextureSize(reducedEffects = false): { width: number; height: number } {
+  return reducedEffects ? { width: 512, height: 256 } : { width: 1024, height: Math.round(1024 * BOARD_SIZE.h / BOARD_SIZE.w) };
+}
+
 /** Title band, one large headline value, and one short detail line; sized to stay legible from the overview camera. */
-function boardTexture(content: BoardContent) {
+function boardTexture(content: BoardContent, reducedEffects = false) {
   const canvas = document.createElement('canvas');
-  canvas.width = 1024;
-  canvas.height = Math.round(1024 * BOARD_SIZE.h / BOARD_SIZE.w);
+  const { width, height } = boardTextureSize(reducedEffects);
+  canvas.width = width;
+  canvas.height = height;
   const ctx = canvas.getContext('2d')!;
+  const scale = width / 1024;
+  const yScale = height / 366;
+  const x = (value: number) => value * scale;
+  const y = (value: number) => value * yScale;
   const fit = (text: string, max: number) => {
     let value = text;
     while (ctx.measureText(value).width > max && value.length > 4) value = `${value.slice(0, -2)}…`;
     return value;
   };
   ctx.fillStyle = '#f3efe5';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, width, height);
   ctx.fillStyle = '#233c31';
-  ctx.fillRect(0, 0, canvas.width, 88);
+  ctx.fillRect(0, 0, width, y(88));
   ctx.fillStyle = '#ba7650';
-  ctx.fillRect(0, 88, canvas.width, 8);
+  ctx.fillRect(0, y(88), width, y(8));
   ctx.fillStyle = content.accent;
-  ctx.fillRect(0, 96, 14, canvas.height - 96);
+  ctx.fillRect(0, y(96), x(14), height - y(96));
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#f3efe5';
-  ctx.font = '600 54px "Segoe UI", Arial, sans-serif';
-  ctx.fillText(fit(content.title, canvas.width - 128), 38, 44);
-  if (content.alert) { ctx.beginPath(); ctx.arc(canvas.width - 52, 44, 15, 0, Math.PI * 2); ctx.fillStyle = '#e4b76c'; ctx.fill(); }
+  ctx.font = `600 ${x(54)}px "Segoe UI", Arial, sans-serif`;
+  ctx.fillText(fit(content.title, width - x(128)), x(38), y(44));
+  if (content.alert) { ctx.beginPath(); ctx.arc(width - x(52), y(44), x(15), 0, Math.PI * 2); ctx.fillStyle = '#e4b76c'; ctx.fill(); }
   const [headline = '', ...details] = content.lines;
   ctx.fillStyle = '#233c31';
-  ctx.font = '700 78px "Segoe UI", Arial, sans-serif';
-  ctx.fillText(fit(headline, canvas.width - 100), 40, 190);
+  ctx.font = `700 ${x(78)}px "Segoe UI", Arial, sans-serif`;
+  ctx.fillText(fit(headline, width - x(100)), x(40), y(190));
   ctx.fillStyle = '#475b50';
-  ctx.font = '500 42px "Segoe UI", Arial, sans-serif';
-  ctx.fillText(fit(details.join(' · '), canvas.width - 100), 40, 290);
+  ctx.font = `500 ${x(42)}px "Segoe UI", Arial, sans-serif`;
+  ctx.fillText(fit(details.join(' · '), width - x(100)), x(40), y(290));
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 8;
   return texture;
 }
 
-function Board({ slot, content, hovered, onHover, onOpen }: { slot: BoardSlot; content: BoardContent; hovered: boolean; onHover: (id: BoardId | null) => void; onOpen: (id: BoardId) => void }) {
+function Board({ slot, content, hovered, onHover, onOpen, reducedEffects }: { slot: BoardSlot; content: BoardContent; hovered: boolean; onHover: (id: BoardId | null) => void; onOpen: (id: BoardId) => void; reducedEffects?: boolean | undefined }) {
   const key = `${content.title}|${content.accent}|${content.alert ? 1 : 0}|${content.lines.join('|')}`;
   // key covers every field the texture draws, so content objects can be rebuilt each render.
-  const texture = useMemo(() => boardTexture(content), [key]);
+  const texture = useMemo(() => boardTexture(content, reducedEffects), [key, reducedEffects]);
   useEffect(() => () => texture.dispose(), [texture]);
   const { w, h } = BOARD_SIZE;
   return <group position={[slot.x, slot.y, slot.z]} rotation={[0, slot.rotY, 0]} scale={hovered ? 1.04 : 1}
@@ -650,11 +671,11 @@ export default function VisualOffice({ lifecycle, savedCameraState, invitation, 
     <FpsTracker onFpsSample={onFpsSample} />
     <OfficeLifeTick life={life} agents={agents} reducedMotion={reducedMotion} />
     <Lights phase={phase} reducedEffects={reducedEffects} />
-    <Building agents={agents} phase={phase} floor={floor} />
+    <Building agents={agents} phase={phase} floor={floor} reducedEffects={reducedEffects} />
     <OfficeEnvironment agents={agents} phase={phase} selectedId={selectedId} floor={floor} reducedEffects={reducedEffects} />
     <OfficeObjects floor={floor} onOpenBoard={handleOpenBoard} onHover={setHoveredId} onOpenCommunity={handleOpenCommunity} />
     <Lift floor={floor} onUse={handleLift} />
-    {BOARDS.filter(slot=>(slot.floor ?? 1)===floor).map((slot) => { const content = boards.find((board) => board.id === slot.id); return content ? <Board key={slot.id} slot={slot} content={content} hovered={hoveredBoard === slot.id} onHover={setHoveredBoard} onOpen={handleOpenBoard} /> : null; })}
+    {BOARDS.filter(slot=>(slot.floor ?? 1)===floor).map((slot) => { const content = boards.find((board) => board.id === slot.id); return content ? <Board key={slot.id} slot={slot} content={content} hovered={hoveredBoard === slot.id} onHover={setHoveredBoard} onOpen={handleOpenBoard} reducedEffects={reducedEffects} /> : null; })}
     {ready && agents.map((agent, index) => {
       const spot = spots.get(agent.id);
       return spot ? <OfficeAgentCharacter key={agent.id} agent={agent} agents={agents} index={index} spot={spot} selected={agent.id === selectedId} hovered={agent.id === hoveredId}
