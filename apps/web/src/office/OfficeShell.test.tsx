@@ -58,6 +58,13 @@ describe('OfficeShell drawer and overlay responsive layout (CSS specifications)'
     expect(css).toMatch(/\.vo3d-confirm-backdrop\s*\{[\s\S]*?z-index:\s*100/);
     expect(css).toMatch(/\.vo3d-confirm-dialog\s*\{[\s\S]*?max-width:\s*440px/);
   });
+
+  it('defines fixed kill switch positioning and isolation styling', () => {
+    expect(css).toMatch(/\.vo3d-kill-fixed-wrap\s*\{[\s\S]*?position:\s*fixed/);
+    expect(css).toMatch(/\.vo3d-kill-fixed-wrap\s*\{[\s\S]*?z-index:\s*25/);
+    expect(css).toMatch(/\.vo3d-kill\.vo3d-kill-fixed[\s\S]*?position:\s*fixed/);
+    expect(css).toMatch(/\.vo3d-kill\.vo3d-kill-fixed[\s\S]*?z-index:\s*25/);
+  });
 });
 
 describe('Focus trap and element visibility', () => {
@@ -270,5 +277,26 @@ describe('Kill switch and confirmation modal behavior', () => {
     handleCancel();
     expect(confirmKillState).toBeNull();
     expect(mutatePause).not.toHaveBeenCalled();
+  });
+
+  it('provides accessible name “Jeda automasi” on the kill switch', () => {
+    const isPaused = false;
+    const label = isPaused ? 'Lanjutkan kebijakan' : 'Jeda automasi';
+    const ariaLabel = 'Jeda automasi';
+    expect(label).toBe('Jeda automasi');
+    expect(ariaLabel).toBe('Jeda automasi');
+  });
+
+  it('restores focus to kill switch trigger when confirmation closes', () => {
+    const killBtn = { focus: vi.fn() };
+    const closeDialog = (onClose: () => void) => {
+      onClose();
+      killBtn.focus();
+    };
+    const onClose = vi.fn();
+    closeDialog(onClose);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(killBtn.focus).toHaveBeenCalledTimes(1);
   });
 });

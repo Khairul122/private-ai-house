@@ -613,14 +613,14 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .vo3d-kill.is-danger { border-color: #c92a2a; background: #fff5f5; color: #c92a2a; }
 .vo3d-kill:focus-visible { outline: 3px solid var(--vo-focus); outline-offset: 2px; }
 .vo3d-toast { top: 76px; left: 50%; padding: 10px 14px; transform: translateX(-50%); color: #b02a1a; font-weight: 600; }
-.vo3d-sheet-backdrop { position: absolute; inset: 0; z-index: 5; display: flex; justify-content: flex-end; background: rgba(15, 23, 42, .18); }
-.vo3d-sheet { display: flex; width: min(980px, calc(100% - 32px)); margin: 16px; flex-direction: column; overflow: hidden; border-radius: 18px; background: var(--page); color: var(--ink); box-shadow: 0 24px 60px rgba(15, 23, 42, .3); animation: vo3d-sheet-in .22s ease-out; }
+.vo3d-sheet-backdrop { position: fixed; inset: 0; z-index: 10; display: flex; justify-content: flex-end; align-items: stretch; background: rgba(9, 18, 13, .74); backdrop-filter: blur(2px); pointer-events: auto; }
+.vo3d-sheet { display: flex; flex-direction: column; overflow: hidden; background: var(--page); color: var(--ink); box-shadow: -8px 0 32px rgba(0, 0, 0, .45); animation: vo3d-sheet-in .22s ease-out; pointer-events: auto; }
 .vo3d-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px 12px 24px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .vo3d-sheet-head h2 { margin: 0; font-family: var(--display); font-size: 22px; font-weight: 600; outline: none; }
 .vo3d-sheet-body.page-content { width: auto; flex: 1; overflow: auto; margin: 0; padding: 24px 28px 40px; }
 @keyframes vo3d-sheet-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
 @media (max-width: 760px) {
-  .vo3d-sheet { width: 100%; margin: 0; border-radius: 0; }
+  .vo3d-sheet { width: 100%; max-width: 100%; min-height: 100dvh; height: 100dvh; margin: 0; border-radius: 0; }
   .vo3d-sheet-body.page-content { padding: 18px 16px 32px; }
   .vo3d-kill { padding: 0 10px; font-size: 12px; }
 }
@@ -1543,6 +1543,74 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 }
 .vo3d-confirm-ok.is-danger:hover {
   background: #a61e1e;
+}
+
+/* Fixed global kill switch: isolated from drawer and office-layer inert */
+.vo3d-kill-fixed-wrap {
+  position: fixed;
+  top: 16px;
+  right: 72px;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  pointer-events: auto;
+}
+.vo3d-kill.vo3d-kill-fixed,
+.vo3d-kill-fixed {
+  position: fixed;
+  top: 16px;
+  right: 72px;
+  z-index: 25;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--vo-line);
+  border-radius: 12px;
+  background: var(--vo-card);
+  box-shadow: 0 6px 24px rgba(15, 23, 42, .12);
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.vo3d-kill-placeholder {
+  display: block;
+  flex: none;
+  width: 136px;
+  height: 44px;
+  pointer-events: none;
+}
+@media (max-width: 760px) {
+  .vo3d-kill-fixed-wrap,
+  .vo3d-kill.vo3d-kill-fixed,
+  .vo3d-kill-fixed {
+    top: 10px;
+    right: 56px;
+    min-height: 44px;
+    min-width: 44px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+  .vo3d-kill-placeholder {
+    width: 110px;
+  }
+}
+@media (max-height: 450px) {
+  .vo3d-kill-fixed-wrap,
+  .vo3d-kill.vo3d-kill-fixed,
+  .vo3d-kill-fixed {
+    top: 4px;
+    right: 56px;
+    min-height: 44px;
+    min-width: 44px;
+    padding: 0 8px;
+    font-size: 11px;
+  }
+  .vo3d-kill-placeholder {
+    width: 100px;
+  }
 }
 /* Conversation journal: hierarchy follows real session state, not decorative card repetition. */
 .office-learning { margin-block: 1.5rem; padding: clamp(1rem, 2.5vw, 2rem); border: 1px solid var(--border); border-radius: 14px; background: color-mix(in srgb, var(--surface) 94%, var(--accent) 6%); }

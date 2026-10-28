@@ -471,6 +471,7 @@ export default function OfficeShell() {
       </button>
     );
   };
+  const hasKillSwitch = Boolean(dashboardData && dashboardData.policy.state !== 'draft');
   const summary = autopilot.isPending ? 'Memuat status kru...'
     : [`${counts.working} bekerja`, `${counts.idle} idle`, `${counts.offline} offline`, ...(counts.unknown ? [`${counts.unknown} tidak diketahui`] : [])].join(' · ');
   const time = new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit' }).format(now);
@@ -566,7 +567,7 @@ export default function OfficeShell() {
           onKeyDown={(event) => { if (event.key === 'Enter') { if (matchingBoards[0]) { drawerTrigger.current = searchInput.current; navigate(matchingBoards[0].route); setSearch(''); } else if (visibleAgents[0]) selectAgent(visibleAgents[0].id); } if (event.key === 'Escape') { event.preventDefault(); event.currentTarget.blur(); } }} />
         <kbd>Ctrl K</kbd>
       </label>{matchingBoards.length > 0 && <nav className="vo3d-search-results" aria-label="Hasil pencarian papan">{matchingBoards.map(board => <Link key={board.id} to={board.route} onClick={(e) => { drawerTrigger.current = e.currentTarget; setSearch(''); }}>{board.label}</Link>)}</nav>}</div>
-      {!sheetOpen && renderKillSwitch()}
+      {hasKillSwitch && <div className="vo3d-kill-placeholder" aria-hidden="true" />}
       <button type="button" className="vo3d-icon" aria-pressed={fullscreen} aria-label={fullscreen ? 'Keluar dari layar penuh' : 'Layar penuh'} onClick={() => { if (document.fullscreenElement) void document.exitFullscreen(); else void stage.current?.requestFullscreen?.(); }}><OfficeIcon name="expand" /></button>
     </div>
     {pause.isError && <div className="vo3d-float vo3d-toast" role="alert">{pause.error.message}</div>}
@@ -720,7 +721,7 @@ export default function OfficeShell() {
             <div className="sheet-heading vo3d-tablet-heading"><span>{tabletGroup?.label ?? 'Modul'}</span><h2 id="sheet-title" ref={sheetHeading} tabIndex={-1}>{SHEET_TITLES[location.pathname] ?? 'Halaman'}</h2></div>
             <div className="vo3d-tablet-actions">
               <button type="button" className="button button-secondary sheet-refresh" disabled={refreshingSheet} onClick={async () => { setRefreshingSheet(true); try { await queryClient.invalidateQueries({ predicate: query => isCardQuery(query, location.pathname) }); } finally { setRefreshingSheet(false); } }}>{refreshingSheet ? 'Memperbarui…' : 'Perbarui'}</button>
-              {renderKillSwitch()}
+              {hasKillSwitch && <div className="vo3d-kill-placeholder" aria-hidden="true" />}
               <button type="button" className="vo3d-icon" aria-label="Tutup tablet dan kembali ke kantor" onClick={() => navigate('/')}><OfficeIcon name="close" /></button>
             </div>
           </header>
@@ -729,6 +730,10 @@ export default function OfficeShell() {
         </main>
       </section>
     </div>}
+    {/* Fixed global kill switch: isolated from drawer and office-layer inert */}
+    <div className="vo3d-kill-fixed-wrap" inert={confirmKill ? true : undefined}>
+      {renderKillSwitch('vo3d-kill-fixed')}
+    </div>
     {confirmKill && <div className="vo3d-confirm-backdrop" onClick={() => setConfirmKill(null)}>
       <div
         className="vo3d-confirm-dialog"
@@ -748,12 +753,17 @@ export default function OfficeShell() {
           </p>
         </div>
         <div className="vo3d-confirm-actions">
-          <button ref={confirmCancelRef} type="button" className="button button-secondary" onClick={() => setConfirmKill(null)}>
+          <button
+            ref={confirmCancelRef}
+            type="button"
+            className="vo3d-confirm-cancel button button-secondary"
+            onClick={() => setConfirmKill(null)}
+          >
             Batal
           </button>
           <button
             type="button"
-            className={`button ${confirmKill === 'pause' ? 'button-danger' : 'button-primary'}`}
+            className={`vo3d-confirm-ok button ${confirmKill === 'pause' ? 'button-danger' : 'button-primary'}`}
             disabled={pause.isPending}
             onClick={() => {
               pause.mutate(confirmKill);
