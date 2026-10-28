@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { EmptyState, ErrorNotice, LoadingPanel, OperationStatus } from './ui.js';
+import { EmptyState, ErrorNotice, LoadingPanel, OperationStatus, SkipLink, LiveAnnouncer, VisuallyHidden } from './ui.js';
 import type { Autopilot } from '../api/api.js';
 
 describe('operation status evidence', () => {
@@ -46,5 +46,31 @@ describe('data state primitives', () => {
     expect(html).toContain('empty-state-action');
     expect(html).toContain('Belum ada peluang tersimpan');
     expect(html).toContain('Buka kebijakan');
+  });
+});
+describe('accessibility primitives', () => {
+  it('renders a skip link pointing to a target with accessible label', () => {
+    const html = renderToStaticMarkup(<SkipLink targetId="vo3d-controls" label="Lewati ke kontrol kantor" />);
+    expect(html).toContain('class="vo3d-skip-link"');
+    expect(html).toContain('href="#vo3d-controls"');
+    expect(html).toContain('Lewati ke kontrol kantor');
+  });
+
+  it('renders live announcer for screen reader announcements', () => {
+    const polite = renderToStaticMarkup(<LiveAnnouncer message="Lantai 2 aktif" politeness="polite" />);
+    expect(polite).toContain('role="status"');
+    expect(polite).toContain('aria-live="polite"');
+    expect(polite).toContain('Lantai 2 aktif');
+
+    const assertive = renderToStaticMarkup(<LiveAnnouncer message="Jeda darurat" politeness="assertive" />);
+    expect(assertive).toContain('role="alert"');
+    expect(assertive).toContain('aria-live="assertive"');
+    expect(assertive).toContain('Jeda darurat');
+  });
+
+  it('renders visually hidden content for assistive technology', () => {
+    const html = renderToStaticMarkup(<VisuallyHidden>Teks pembaca layar</VisuallyHidden>);
+    expect(html).toContain('class="sr-only"');
+    expect(html).toContain('Teks pembaca layar');
   });
 });

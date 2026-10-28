@@ -1,4 +1,4 @@
-import { cloneElement, Fragment, isValidElement, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { cloneElement, Fragment, isValidElement, useEffect, useId, useRef, useState, type ReactNode, type ElementType } from 'react';
 import { Link } from 'react-router';
 import type { AuditEvent, Autopilot, Opportunity } from '../api/api.js';
 import { formatDate, formatMoney, activityTitle } from './format.js';
@@ -198,6 +198,47 @@ export function FormActionBar({
     >
       <div className="form-action-buttons">{children}</div>
       {note && <span className="form-action-note">{note}</span>}
+    </div>
+  );
+}
+
+export interface SkipLinkProps {
+  targetId: string;
+  label: string;
+  onClick?: () => void;
+}
+
+export function SkipLink({ targetId, label, onClick }: SkipLinkProps) {
+  return (
+    <a
+      href={`#${targetId}`}
+      className="vo3d-skip-link"
+      onClick={(e) => {
+        if (onClick) {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+    >
+      {label}
+    </a>
+  );
+}
+
+export interface LiveAnnouncerProps {
+  message: string;
+  politeness?: 'polite' | 'assertive';
+}
+
+export function LiveAnnouncer({ message, politeness = 'polite' }: LiveAnnouncerProps) {
+  return (
+    <div
+      role={politeness === 'assertive' ? 'alert' : 'status'}
+      aria-live={politeness}
+      aria-atomic="true"
+      className="sr-only"
+    >
+      {message}
     </div>
   );
 }
@@ -425,4 +466,20 @@ export function extractFieldErrors(errorMessage?: string | null): Record<string,
   }
 
   return errors;
+}
+
+export function useAnnouncer() {
+  const [announcement, setAnnouncement] = useState('');
+  const [politeness, setPoliteness] = useState<'polite' | 'assertive'>('polite');
+
+  const announce = (message: string, mode: 'polite' | 'assertive' = 'polite') => {
+    setPoliteness(mode);
+    setAnnouncement(message);
+  };
+
+  return { announcement, politeness, announce };
+}
+
+export function VisuallyHidden({ children, as: Tag = 'span' }: { children: ReactNode; as?: ElementType }) {
+  return <Tag className="sr-only">{children}</Tag>;
 }
