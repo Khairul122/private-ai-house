@@ -22,8 +22,26 @@
   --focus: #9a472d;
   --display: Georgia, 'Times New Roman', serif;
   --body: 'Segoe UI', 'Aptos', Arial, sans-serif;
+  --visual-viewport-height: 100dvh;
+  --visual-viewport-width: 100vw;
+  --visual-viewport-offset-top: 0px;
+  --visual-viewport-offset-left: 0px;
+  --visual-viewport-scale: 1;
+  --keyboard-height: 0px;
+  --is-keyboard-open: 0;
+  --is-compact-landscape: 0;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
 }
 
+
+html[data-scroll-locked='true'],
+body[data-scroll-locked='true'] {
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+}
 :root[data-theme='dark'] {
   color-scheme: dark;
   --page: #151c18;
@@ -594,7 +612,23 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
   .vo3d-roster.is-collapsed { display: none; }
   .vo3d-dock { bottom: 70px; left: 12px; max-width: calc(100% - 24px); transform: none; }
   .vo3d-seg { right: auto; bottom: 12px; left: 12px; }
-  .vo3d-panel { top: auto; right: 0; bottom: 0; left: 0; width: auto; max-height: 55%; border-radius: 16px 16px 0 0; z-index: 3; }
+  .vo3d-panel {
+    top: auto;
+    right: 0;
+    bottom: env(safe-area-inset-bottom, 0px);
+    left: 0;
+    width: auto;
+    max-height: min(55%, calc(var(--visual-viewport-height, 100dvh) - 80px));
+    border-radius: 16px 16px 0 0;
+    z-index: 3;
+    overscroll-behavior: contain;
+  }
+  .vo3d-panel-body {
+    overflow: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  }
 }
 @media (max-width: 360px) {
   html, body { min-width: 0; }
@@ -605,14 +639,48 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* Mission Control as a full-screen office: pages open as cards over the 3D floor. */
-.vo3d-app { position: fixed; inset: 0; z-index: 1; height: auto; min-height: 0; border-radius: 0; }
+.vo3d-app {
+  position: fixed;
+  inset: 0;
+  top: var(--visual-viewport-offset-top, 0px);
+  left: var(--visual-viewport-offset-left, 0px);
+  width: 100%;
+  width: var(--visual-viewport-width, 100vw);
+  height: 100vh;
+  height: 100dvh;
+  height: var(--visual-viewport-height, 100dvh);
+  min-height: 0;
+  z-index: 1;
+  border-radius: 0;
+  padding-top: var(--safe-top);
+  padding-right: var(--safe-right);
+  padding-bottom: var(--safe-bottom);
+  padding-left: var(--safe-left);
+  box-sizing: border-box;
+  overscroll-behavior: none;
+}
 .vo3d-card .vo3d-warn { color: #b02a1a; font-weight: 600; }
 .vo3d-cta { display: inline-flex; margin-top: 8px; padding: 6px 12px; border-radius: 999px; background: var(--vo-accent); color: #fff; font-size: 12px; font-weight: 700; text-decoration: none; }
 .vo3d-cta:hover { opacity: .9; }
 .vo3d-kill { min-height: 44px; padding: 0 14px; border: 1px solid var(--vo-line); border-radius: 12px; background: var(--vo-card); box-shadow: 0 6px 24px rgba(15, 23, 42, .12); font-weight: 700; white-space: nowrap; }
 .vo3d-kill.is-danger { border-color: #c92a2a; background: #fff5f5; color: #c92a2a; }
 .vo3d-toast { top: 76px; left: 50%; padding: 10px 14px; transform: translateX(-50%); color: #b02a1a; font-weight: 600; }
-.vo3d-sheet-backdrop { position: absolute; inset: 0; z-index: 5; display: flex; justify-content: flex-end; background: rgba(15, 23, 42, .18); }
+.vo3d-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  top: var(--visual-viewport-offset-top, 0px);
+  left: var(--visual-viewport-offset-left, 0px);
+  width: 100%;
+  width: var(--visual-viewport-width, 100vw);
+  height: 100vh;
+  height: 100dvh;
+  height: var(--visual-viewport-height, 100dvh);
+  z-index: 5;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(15, 23, 42, .18);
+  overscroll-behavior: contain;
+}
 .vo3d-sheet { display: flex; width: min(980px, calc(100% - 32px)); margin: 16px; flex-direction: column; overflow: hidden; border-radius: 18px; background: var(--page); color: var(--ink); box-shadow: 0 24px 60px rgba(15, 23, 42, .3); animation: vo3d-sheet-in .22s ease-out; }
 .vo3d-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px 12px 24px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .vo3d-sheet-head h2 { margin: 0; font-family: var(--display); font-size: 22px; font-weight: 600; outline: none; }
@@ -1247,9 +1315,37 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 @keyframes vo3d-tablet-in { from { opacity: 0; transform: translateY(12px) scale(.985); } to { opacity: 1; transform: none; } }
 @media (max-width: 760px) {
   .vo3d-tablet-trigger kbd { display: none; }
-  .vo3d-tablet-backdrop { position: fixed; inset: 0; padding: 0; }
-  .vo3d-tablet.vo3d-sheet { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); width: 100%; height: 100dvh; border: 0; border-radius: 0; box-shadow: none; }
-  .vo3d-tablet-sidebar { overflow-x: auto; overflow-y: hidden; padding: max(8px, env(safe-area-inset-top)) 8px 8px; border-right: 0; border-bottom: 1px solid #475e4f; }
+  .vo3d-tablet-backdrop {
+    position: fixed;
+    inset: 0;
+    top: var(--visual-viewport-offset-top, 0px);
+    height: 100vh;
+    height: 100dvh;
+    height: var(--visual-viewport-height, 100dvh);
+    padding: 0;
+    overscroll-behavior: contain;
+  }
+  .vo3d-tablet.vo3d-sheet {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    height: var(--visual-viewport-height, 100dvh);
+    max-height: var(--visual-viewport-height, 100dvh);
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    overscroll-behavior: contain;
+  }
+  .vo3d-tablet-sidebar {
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior: contain;
+    padding: max(8px, env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px)) 8px max(8px, env(safe-area-inset-left, 0px));
+    border-right: 0;
+    border-bottom: 1px solid #475e4f;
+  }
   .vo3d-tablet-brand { width: fit-content; margin: 0 0 7px; padding: 0 8px; border: 0; font-size: 12px; }
   .vo3d-tablet-brand small { display: none; }
   .vo3d-tablet-nav { display: flex; width: max-content; gap: 10px; }
@@ -1262,7 +1358,17 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
   .vo3d-tablet-heading h2 { font-size: 18px; }
   .vo3d-tablet-actions { gap: 4px; }
   .vo3d-tablet-actions .sheet-refresh { padding-inline: 8px; }
-  .vo3d-tablet-body.vo3d-sheet-body.page-content { padding-bottom: max(32px, env(safe-area-inset-bottom)); }
+  .vo3d-tablet-body.vo3d-sheet-body.page-content {
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: max(32px, env(safe-area-inset-bottom, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+  }
 }
 @media (max-width: 420px) {
   .vo3d-tablet-head.vo3d-sheet-head { flex-wrap: wrap; }
@@ -1335,3 +1441,60 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .inbox-analysis > * + * { margin-top: 0.5rem; }
 .inbox-analysis ul { margin: 0.35rem 0 0; padding-left: 1.25rem; }
 .inbox-analysis-quote { margin: 0.4rem 0; padding: 0.45rem 0.8rem; border-left: 2px solid currentColor; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+@media (max-height: 450px) and (orientation: landscape), (max-height: 450px) {
+  .vo3d-left-rail {
+    bottom: 56px;
+    gap: 4px;
+    width: 240px;
+    padding-left: env(safe-area-inset-left, 0px);
+  }
+  .vo3d-card {
+    padding: 8px 10px;
+  }
+  .vo3d-card h1 {
+    font-size: 15px;
+  }
+  .vo3d-dock {
+    bottom: max(6px, env(safe-area-inset-bottom, 0px));
+    padding: 3px;
+  }
+  .vo3d-dock button {
+    min-height: 36px;
+    padding: 0 8px;
+    font-size: 12px;
+  }
+  .vo3d-seg {
+    bottom: max(6px, env(safe-area-inset-bottom, 0px));
+    right: max(8px, env(safe-area-inset-right, 0px));
+    padding: 3px;
+  }
+  .vo3d-seg button {
+    min-height: 36px;
+    min-width: 36px;
+    padding: 0 6px;
+  }
+  .vo3d-tools {
+    top: max(8px, env(safe-area-inset-top, 0px));
+    right: max(8px, env(safe-area-inset-right, 0px));
+  }
+  .vo3d-tablet.vo3d-sheet {
+    height: 100vh;
+    height: 100dvh;
+    height: var(--visual-viewport-height, 100dvh);
+  }
+  .vo3d-tablet-head.vo3d-sheet-head {
+    min-height: 42px;
+    padding: 4px 12px;
+  }
+  .vo3d-tablet-head h2 {
+    font-size: 16px;
+  }
+  .vo3d-tablet-sidebar {
+    padding: 8px;
+  }
+  .vo3d-panel {
+    max-height: calc(var(--visual-viewport-height, 100dvh) - 20px);
+    bottom: max(6px, env(safe-area-inset-bottom, 0px));
+  }
+}
