@@ -239,7 +239,7 @@ export default function OfficeShell() {
 
   const perfControllerRef = useRef<PerformanceController | null>(null);
   if (!perfControllerRef.current) {
-    perfControllerRef.current = new PerformanceController();
+    perfControllerRef.current = new PerformanceController({ maxDeltaMs: 250, windowSize: 60 });
   }
 
   const lifecycleRef = useRef<WebglLifecycleController | null>(null);
@@ -269,6 +269,11 @@ export default function OfficeShell() {
 
   const isWebglActive = webglStatus === 'ready' || webglStatus === 'restoring';
   const webgl = isWebglActive;
+
+  useEffect(() => {
+    const controller = perfControllerRef.current;
+    return controller?.subscribe();
+  }, []);
 
   useEffect(() => {
     return () => {

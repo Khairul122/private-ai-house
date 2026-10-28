@@ -415,37 +415,47 @@ function OwnerCharacter({ start, onLift, destination, request, selected, hovered
   </group>;
 }
 
+/** Canvas dimensions stay explicit: reduced mode uses 512x256 for predictable GPU cost. */
+export function boardTextureSize(reducedEffects = false): { width: number; height: number } {
+  return reducedEffects ? { width: 512, height: 256 } : { width: 1024, height: Math.round(1024 * BOARD_SIZE.h / BOARD_SIZE.w) };
+}
+
 /** Title band, one large headline value, and one short detail line; sized to stay legible from the overview camera. */
 function boardTexture(content: BoardContent, reducedEffects = false) {
   const canvas = document.createElement('canvas');
-  canvas.width = reducedEffects ? 512 : 1024;
-  canvas.height = reducedEffects ? Math.round(512 * BOARD_SIZE.h / BOARD_SIZE.w) : Math.round(1024 * BOARD_SIZE.h / BOARD_SIZE.w);
+  const { width, height } = boardTextureSize(reducedEffects);
+  canvas.width = width;
+  canvas.height = height;
   const ctx = canvas.getContext('2d')!;
+  const scale = width / 1024;
+  const yScale = height / 366;
+  const x = (value: number) => value * scale;
+  const y = (value: number) => value * yScale;
   const fit = (text: string, max: number) => {
     let value = text;
     while (ctx.measureText(value).width > max && value.length > 4) value = `${value.slice(0, -2)}…`;
     return value;
   };
   ctx.fillStyle = '#f3efe5';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, width, height);
   ctx.fillStyle = '#233c31';
-  ctx.fillRect(0, 0, canvas.width, 88);
+  ctx.fillRect(0, 0, width, y(88));
   ctx.fillStyle = '#ba7650';
-  ctx.fillRect(0, 88, canvas.width, 8);
+  ctx.fillRect(0, y(88), width, y(8));
   ctx.fillStyle = content.accent;
-  ctx.fillRect(0, 96, 14, canvas.height - 96);
+  ctx.fillRect(0, y(96), x(14), height - y(96));
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#f3efe5';
-  ctx.font = '600 54px "Segoe UI", Arial, sans-serif';
-  ctx.fillText(fit(content.title, canvas.width - 128), 38, 44);
-  if (content.alert) { ctx.beginPath(); ctx.arc(canvas.width - 52, 44, 15, 0, Math.PI * 2); ctx.fillStyle = '#e4b76c'; ctx.fill(); }
+  ctx.font = `600 ${x(54)}px "Segoe UI", Arial, sans-serif`;
+  ctx.fillText(fit(content.title, width - x(128)), x(38), y(44));
+  if (content.alert) { ctx.beginPath(); ctx.arc(width - x(52), y(44), x(15), 0, Math.PI * 2); ctx.fillStyle = '#e4b76c'; ctx.fill(); }
   const [headline = '', ...details] = content.lines;
   ctx.fillStyle = '#233c31';
-  ctx.font = '700 78px "Segoe UI", Arial, sans-serif';
-  ctx.fillText(fit(headline, canvas.width - 100), 40, 190);
+  ctx.font = `700 ${x(78)}px "Segoe UI", Arial, sans-serif`;
+  ctx.fillText(fit(headline, width - x(100)), x(40), y(190));
   ctx.fillStyle = '#475b50';
-  ctx.font = '500 42px "Segoe UI", Arial, sans-serif';
-  ctx.fillText(fit(details.join(' · '), canvas.width - 100), 40, 290);
+  ctx.font = `500 ${x(42)}px "Segoe UI", Arial, sans-serif`;
+  ctx.fillText(fit(details.join(' · '), width - x(100)), x(40), y(290));
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 8;

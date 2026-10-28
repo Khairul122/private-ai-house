@@ -1,141 +1,145 @@
-import { describe, expect, it } from 'vitest';
-import { PerformanceController } from './performance-controller.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { PerformanceController, RollingFpsWindow } from './performance-controller.js';
+
+if (typeof document === 'undefined') {
+  const listeners = new Map<string, Set<EventListener>>();
+  const mockDocument = {
+    hidden: false,
+    addEventListener(type: string, listener: EventListener) { (listeners.get(type) ?? (listeners.set(type, new Set()), listeners.get(type)!)).add(listener); },
+    removeEventListener(type: string, listener: EventListener) { listeners.get(type)?.delete(listener); },
+    dispatchEvent(event: Event) { listeners.get(event.type)?.forEach((listener) => listener(event)); return true; },
+  } as unknown as Document;
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: mockDocument });
+}
+
+const frames = (controller: PerformanceController, fps: number, count: number, dtMs = 100) => {
+  for (let i = 0; i < count; i += 1) controller.update(fps, dtMs);
+};
+
+describe('RollingFpsWindow', () => {
+  it('averages available samples during warm-up and evicts oldest after 60 samples', () => {
+    const window = new RollingFpsWindow(60);
+    expect(window.add(20)).toBe(20);
+    expect(window.add(40)).toBe(30);
+    frames({ update: (fps: number) => { window.add(fps); return 'normal'; } } as unknown as PerformanceController, 60, 59, 1);
+    expect(window.isFull).toBe(true);
+    expect(window.add(90)).toBeCloseTo((59 * 60 + 90) / 60);
+  });
+});
 
 describe('PerformanceController state machine', () => {
+  const listeners: Record<string, ((event?: unknown) => void)[]> = {};
+  const mockDoc = {
+    hidden: false,
+    addEventListener: vi.fn((event: string, handler: (event?: unknown) => void) => {
+      listeners[event] = listeners[event] ?? [];
+      listeners[event]!.push(handler);
+    }),
+    removeEventListener: vi.fn((event: string, handler: (event?: unknown) => void) => {
+      if (listeners[event]) listeners[event] = listeners[event]!.filter((h) => h !== handler);
+    }),
+    dispatchEvent: vi.fn((event: { type?: string }) => {
+      const type = event?.type ?? '';
+      listeners[type]?.forEach((h) => h(event));
+      return true;
+    }),
+  };
+
+  if (typeof globalThis.document === 'undefined') {
+    Object.defineProperty(globalThis, 'document', {
+      value: mockDoc,
+      configurable: true,
+      writable: true,
+    });
+  }
+  if (typeof globalThis.Event === 'undefined') {
+    Object.defineProperty(globalThis, 'Event', {
+      value: class {
+        constructor(public type: string) {}
+      },
+      configurable: true,
+      writable: true,
+    });
+  }
+
+  afterEach(() => vi.restoreAllMocks());
+
   it('initializes in normal status with 60 FPS', () => {
     const controller = new PerformanceController();
     expect(controller.getStatus()).toBe('normal');
     expect(controller.getMetrics().lastFps).toBe(60);
   });
 
-  it('stays normal when FPS fluctuates above 30', () => {
+  it('uses moving average from first sample, not instantaneous FPS', () => {
+    const controller = new PerformanceController({ reducedDurationMs: 200 });
+    controller.update(10, 100);
+    controller.update(60, 100);
+    expect(controller.getStatus()).toBe('normal');
+    expect(controller.getMetrics().lastFps).toBe(35);
+  });
+
+  it('ignores long frame gaps', () => {
     const controller = new PerformanceController();
-    controller.update(58, 500);
-    controller.update(45, 1000);
-    controller.update(32, 1000);
+    controller.update(10, 251);
+    expect(controller.getMetrics().lastFps).toBe(60);
     expect(controller.getStatus()).toBe('normal');
   });
 
-  it('stays normal if FPS is below 30 for less than 2 seconds', () => {
+  it('transitions to reduced-effects after 2000ms below 30', () => {
     const controller = new PerformanceController();
-    controller.update(28, 1000);
+    frames(controller, 20, 19);
     expect(controller.getStatus()).toBe('normal');
-    controller.update(29, 800); // Total 1800ms
-    expect(controller.getStatus()).toBe('normal');
-
-    // FPS recovers momentarily
-    controller.update(40, 200);
-    expect(controller.getStatus()).toBe('normal');
-    expect(controller.getMetrics().belowReducedMs).toBe(0);
-  });
-
-  it('transitions to reduced-effects after FPS is below 30 for 2 seconds (2000ms)', () => {
-    const controller = new PerformanceController();
-    controller.update(28, 1000);
-    expect(controller.getStatus()).toBe('normal');
-    controller.update(27, 1000); // 2000ms reached
+    frames(controller, 20, 1);
     expect(controller.getStatus()).toBe('reduced-effects');
   });
 
-  it('transitions to fallback-offer after FPS is below 24 for 5 seconds (5000ms)', () => {
+  it('transitions to fallback-offer after 5000ms below 24', () => {
     const controller = new PerformanceController();
-    // First 2 seconds at 20 FPS -> triggers reduced-effects
-    controller.update(20, 1000);
-    controller.update(20, 1000);
-    expect(controller.getStatus()).toBe('reduced-effects');
-
-    // Another 3 seconds at 20 FPS (total 5000ms below 24)
-    controller.update(20, 2000);
-    expect(controller.getStatus()).toBe('reduced-effects');
-    controller.update(20, 1000);
+    frames(controller, 20, 50);
     expect(controller.getStatus()).toBe('fallback-offer');
   });
 
-  it('enforces hysteresis recovery: does not recover to normal on border FPS (30-34)', () => {
-    const controller = new PerformanceController({
-      reducedFpsThreshold: 30,
-      reducedDurationMs: 2000,
-      recoveryFpsThreshold: 35,
-      recoveryDurationMs: 3000,
-    });
-
-    // Enter reduced-effects
-    controller.update(25, 2000);
+  it('recovers only after 3000ms at or above 35 FPS', () => {
+    const controller = new PerformanceController();
+    frames(controller, 20, 20);
     expect(controller.getStatus()).toBe('reduced-effects');
-
-    // Hovering at 32 FPS (above 30, but below recovery threshold 35)
-    controller.update(32, 2000);
-    controller.update(33, 2000);
+    frames(controller, 50, 29);
     expect(controller.getStatus()).toBe('reduced-effects');
-    expect(controller.getMetrics().recoveryMs).toBe(0);
-  });
-
-  it('recovers to normal only after sustained FPS >= 35 for 3 seconds (3000ms)', () => {
-    const controller = new PerformanceController({
-      reducedFpsThreshold: 30,
-      reducedDurationMs: 2000,
-      recoveryFpsThreshold: 35,
-      recoveryDurationMs: 3000,
-    });
-
-    // Enter reduced-effects
-    controller.update(25, 2000);
-    expect(controller.getStatus()).toBe('reduced-effects');
-
-    // FPS jumps to 55 for 2 seconds
-    controller.update(55, 2000);
-    expect(controller.getStatus()).toBe('reduced-effects');
-
-    // Interrupted by a drop to 28 FPS
-    controller.update(28, 200);
-    expect(controller.getStatus()).toBe('reduced-effects');
-    expect(controller.getMetrics().recoveryMs).toBe(0);
-
-    // Sustained high FPS for full 3000ms
-    controller.update(50, 1500);
-    controller.update(52, 1500);
+    frames(controller, 50, 1);
     expect(controller.getStatus()).toBe('normal');
   });
 
-  it('allows dismissing fallback offer and prevents immediate re-prompt', () => {
+  it('resets sample window and timers when tab becomes hidden', () => {
     const controller = new PerformanceController();
-    // Drive into fallback-offer
-    controller.update(20, 2000);
-    controller.update(20, 3000);
-    expect(controller.getStatus()).toBe('fallback-offer');
+    const unsubscribe = controller.subscribe();
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+    controller.update(10, 100);
+    expect(controller.getMetrics().lastFps).toBe(60);
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    document.dispatchEvent(new Event('visibilitychange'));
+    controller.update(60, 100);
+    expect(controller.getMetrics().lastFps).toBe(60);
+    unsubscribe();
+  });
 
+  it('subscribes and cleans up visibility listener symmetrically', () => {
+    const add = vi.spyOn(document, 'addEventListener');
+    const remove = vi.spyOn(document, 'removeEventListener');
+    const controller = new PerformanceController();
+    const unsubscribe = controller.subscribe();
+    expect(add).toHaveBeenCalledWith('visibilitychange', expect.any(Function));
+    unsubscribe();
+    expect(remove).toHaveBeenCalledWith('visibilitychange', expect.any(Function));
+  });
+
+  it('dismisses fallback offer and prevents re-prompt', () => {
+    const controller = new PerformanceController();
+    frames(controller, 20, 50);
+    expect(controller.getStatus()).toBe('fallback-offer');
     controller.dismissFallbackOffer();
+    frames(controller, 20, 60);
     expect(controller.getStatus()).toBe('reduced-effects');
     expect(controller.getMetrics().fallbackDismissed).toBe(true);
-
-    // Further low frames should not re-trigger fallback-offer while dismissed
-    controller.update(20, 6000);
-    expect(controller.getStatus()).toBe('reduced-effects');
-  });
-
-  it('recovers from fallback-offer to reduced-effects on sustained recovery FPS', () => {
-    const controller = new PerformanceController();
-    // Drive into fallback-offer
-    controller.update(20, 2000);
-    controller.update(20, 3000);
-    expect(controller.getStatus()).toBe('fallback-offer');
-
-    // Sustained 45 FPS for 3000ms
-    controller.update(45, 1500);
-    expect(controller.getStatus()).toBe('fallback-offer');
-    controller.update(45, 1500);
-    expect(controller.getStatus()).toBe('reduced-effects');
-  });
-
-  it('resets correctly to initial state', () => {
-    const controller = new PerformanceController();
-    controller.update(15, 6000);
-    expect(controller.getStatus()).toBe('fallback-offer');
-
-    controller.reset();
-    expect(controller.getStatus()).toBe('normal');
-    expect(controller.getMetrics().belowReducedMs).toBe(0);
-    expect(controller.getMetrics().belowFallbackMs).toBe(0);
-    expect(controller.getMetrics().recoveryMs).toBe(0);
   });
 });

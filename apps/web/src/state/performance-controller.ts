@@ -38,6 +38,10 @@ export type PerformanceControllerOptions = {
   recoveryFpsThreshold?: number;
   /** Sustained duration in ms above recovery threshold required to recover. Default: 3000 ms */
   recoveryDurationMs?: number;
+  /** Maximum delta time in ms before a sample is ignored (e.g. 250ms for heavy GC / background tab). */
+  maxDeltaMs?: number;
+  /** Size of rolling FPS window for moving average smoothing. Default: 60. */
+  windowSize?: number;
 };
 
 export type PerformanceMetrics = {
@@ -65,6 +69,8 @@ export class PerformanceController {
   private readonly fallbackDurationMs: number;
   private readonly recoveryFpsThreshold: number;
   private readonly recoveryDurationMs: number;
+  private readonly maxDeltaMs: number;
+  private subscribed = false;
 
   constructor(options: PerformanceControllerOptions = {}) {
     this.reducedFpsThreshold = options.reducedFpsThreshold ?? 30;
@@ -73,17 +79,14 @@ export class PerformanceController {
     this.fallbackDurationMs = options.fallbackDurationMs ?? 5000;
     this.recoveryFpsThreshold = options.recoveryFpsThreshold ?? 35;
     this.recoveryDurationMs = options.recoveryDurationMs ?? 3000;
-    this.fpsWindow = new RollingFpsWindow(60);
-    if (typeof document !== 'undefined') {
-      this.hidden = document.hidden;
-      document.addEventListener('visibilitychange', this.handleVisibility);
-    }
+    this.maxDeltaMs = options.maxDeltaMs ?? 250;
+    this.fpsWindow = new RollingFpsWindow(options.windowSize ?? 60);
   }
 
   private readonly handleVisibility = () => {
     this.hidden = document.hidden;
     if (this.hidden) {
-      this.fpsWindow.clear();
+      this.fpsWindow?.clear();
       this.belowReducedMs = 0;
       this.belowFallbackMs = 0;
       this.recoveryMs = 0;
@@ -94,10 +97,17 @@ export class PerformanceController {
    * Updates controller with one frame sample. Long gaps and hidden tabs do not count.
    */
   update(fps: number, deltaMs: number): PerformanceStatus {
-    if (deltaMs > 250 || this.hidden) return this.status;
-    this.fpsWindow.add(fps);
-    const averageFps = this.fpsWindow.isFull ? this.fpsWindow.average : fps;
-    return this.updateAverage(averageFps, deltaMs);
+    if (deltaMs > this.maxDeltaMs || this.hidden) return this.status;
+    const effectiveFps = this.fpsWindow.add(fps);
+    return this.updateAverage(effectiveFps, deltaMs);
+  }
+
+  subscribe(): () => void {
+    if (typeof document === 'undefined' || this.subscribed) return () => {};
+    this.hidden = document.hidden;
+    document.addEventListener('visibilitychange', this.handleVisibility);
+    this.subscribed = true;
+    return () => this.dispose();
   }
 
   /**
@@ -113,6 +123,7 @@ export class PerformanceController {
         if (this.belowReducedMs >= this.reducedDurationMs) {
           this.status = 'reduced-effects';
           this.recoveryMs = 0;
+          this.fpsWindow.clear();
         }
       } else {
         this.belowReducedMs = 0;
@@ -123,6 +134,7 @@ export class PerformanceController {
         this.belowFallbackMs += deltaMs;
         if (this.belowFallbackMs >= this.fallbackDurationMs && !this.fallbackDismissed) {
           this.status = 'fallback-offer';
+          this.fpsWindow.clear();
         }
       } else {
         this.belowFallbackMs = 0;
@@ -135,6 +147,7 @@ export class PerformanceController {
         if (this.belowFallbackMs >= this.fallbackDurationMs && !this.fallbackDismissed) {
           this.status = 'fallback-offer';
           this.recoveryMs = 0;
+          this.fpsWindow.clear();
         }
       } else {
         this.belowFallbackMs = 0;
@@ -192,11 +205,14 @@ export class PerformanceController {
     this.belowFallbackMs = 0;
     this.recoveryMs = 0;
     this.fallbackDismissed = false;
-    this.fpsWindow.clear();
+    this.fpsWindow?.clear();
   }
 
   dispose(): void {
-    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', this.handleVisibility);
+    if (typeof document !== 'undefined' && this.subscribed) {
+      document.removeEventListener('visibilitychange', this.handleVisibility);
+      this.subscribed = false;
+    }
   }
 
   getStatus(): PerformanceStatus {
