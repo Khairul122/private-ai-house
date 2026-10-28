@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import type { AuditEvent, Autopilot, Opportunity } from '../api/api.js';
-import { formatDate, activityTitle } from './format.js';
+import { formatDate, formatMoney, activityTitle } from './format.js';
 
 export function StateLabel({ state, source }: { state: string; source?: Opportunity['source'] }) {
   const labels: Record<string, string> = {
@@ -35,8 +35,12 @@ export function PageIntro({ eyebrow, title, description, action }: { eyebrow: st
 }
 
 export function Metric({ label, value, note, tone = 'plain', to }: { label: string; value: string | number; note: string; tone?: string; to?: string }) {
-  const body = <><span>{label}</span><strong>{value}</strong><small>{note}</small></>;
+  const body = <><span>{label}</span><strong className="nominal-wrap">{value}</strong><small>{note}</small></>;
   return to ? <Link to={to} className={`metric metric-${tone} metric-link`}>{body}</Link> : <div className={`metric metric-${tone}`}>{body}</div>;
+}
+
+export function MoneyDisplay({ amount, currency, className }: { amount: number; currency: string; className?: string }) {
+  return <span className={`nominal-wrap ${className ?? ''}`.trim()}>{formatMoney(amount, currency)}</span>;
 }
 
 export function ActivityRows({ events }: { events: AuditEvent[] }) {
@@ -67,7 +71,7 @@ export function OperationStatus({ data, unavailable = false }: { data: Autopilot
     {data.marketplaceNotice && <div className="notice notice-warning" role="status"><strong>{data.marketplaceNotice.quotaExhausted ? 'Kuota akun Freelancer habis pada percobaan terakhir' : 'Pengiriman bid terakhir gagal'}</strong><small>Tercatat {formatDate(data.marketplaceNotice.at)}.</small><details className="card-disclosure"><summary>Rincian hasil pengiriman</summary><p>{data.marketplaceNotice.reason}</p>{data.marketplaceNotice.retryAt && <p>Kandidat baru dapat dicoba pada siklus setelah {formatDate(data.marketplaceNotice.retryAt)}. Waktu kuota pulih mengikuti Freelancer.</p>}{data.marketplaceNotice.quotaExhausted && <p><a href="https://www.freelancer.com/dashboard" target="_blank" rel="noreferrer">Periksa jatah bid di Freelancer</a></p>}</details></div>}
     <dl className="operation-facts"><div><dt>Siklus terakhir</dt><dd>{data.lastRunAt ? formatDate(data.lastRunAt) : 'Belum tercatat'}</dd></div><div><dt>Siklus berikutnya</dt><dd>{data.nextRunAt ? formatDate(data.nextRunAt) : 'Tidak terjadwal'}</dd></div><div><dt>Interval saat ini</dt><dd>{data.intervalMinutes === undefined ? 'Tidak tersedia' : `${data.intervalMinutes} menit selama server aktif`}</dd></div><div><dt>Proposal diproses</dt><dd>{data.draftsInProgress ?? 'Tidak diketahui'}</dd></div></dl>
     {data.summary && data.lastRunAt && <p><strong>{data.summary.considered}</strong> proyek terbuka ditinjau, <strong>{data.summary.eligible}</strong> lolos pemeriksaan awal, <strong>{data.lastSubmitted}</strong> bid terkirim pada siklus terakhir.</p>}
-    {reasons.length > 0 && <details className="card-disclosure"><summary>Alasan proyek dilewati ({reasons.length})</summary><ul className="reason-breakdown">{reasons.map(([reason, total]) => <li key={reason}><span>{reason}</span><strong>{total}</strong></li>)}</ul></details>}
+    {reasons.length > 0 && <details className="card-disclosure"><summary>Alasan proyek dilewati ({reasons.length})</summary><ul className="reason-breakdown">{reasons.map(([reason, total]) => <li key={reason}><span>{reason}</span><strong className="nominal-wrap">{total}</strong></li>)}</ul></details>}
     {!!data.searchTerms?.length && <details className="card-disclosure"><summary>Pencarian siklus terakhir</summary><p>{data.searchTerms.join(', ')}</p><p className="form-help">Mengikuti keterampilan dan kata kunci tersimpan, bergiliran per siklus.</p></details>}
   </section>;
 }
@@ -79,4 +83,218 @@ export function useClock(intervalMs: number) {
     return () => clearInterval(id);
   }, [intervalMs]);
   return now;
+}
+
+/** State and hook for tracking virtual keyboard and visual viewport adjustments */
+export interface VisualViewportState {
+  isKeyboardOpen: boolean;
+  keyboardHeight: number;
+  viewportHeight: number;
+  viewportWidth: number;
+  offsetBottom: number;
+}
+
+export function computeViewportState(
+  win?: { innerHeight: number; innerWidth: number; visualViewport?: { height: number; width: number; offsetTop: number } | null | undefined } | null | undefined
+): VisualViewportState {
+  if (!win || !win.visualViewport) {
+    return {
+      isKeyboardOpen: false,
+      keyboardHeight: 0,
+      viewportHeight: win ? win.innerHeight : 800,
+      viewportWidth: win ? win.innerWidth : 1200,
+      offsetBottom: 0,
+    };
+  }
+  const vv = win.visualViewport;
+  const offset = Math.max(0, win.innerHeight - (vv.offsetTop + vv.height));
+  const isKeyboardOpen = offset > 100 || (win.innerHeight - vv.height > 100);
+  return {
+    isKeyboardOpen,
+    keyboardHeight: Math.max(0, win.innerHeight - vv.height),
+    viewportHeight: vv.height,
+    viewportWidth: vv.width,
+    offsetBottom: offset,
+  };
+}
+
+export function useVisualViewport(): VisualViewportState {
+  const [state, setState] = useState<VisualViewportState>(() =>
+    computeViewportState(typeof window !== 'undefined' ? window : undefined)
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.visualViewport) return;
+    const vv = window.visualViewport;
+
+    const handleUpdate = () => {
+      const next = computeViewportState(window);
+      setState(next);
+
+      if (next.isKeyboardOpen && typeof document !== 'undefined' && document.activeElement) {
+        const el = document.activeElement as HTMLElement;
+        if (el && typeof el.tagName === 'string' && ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) {
+          if (typeof el.scrollIntoView === 'function') {
+            try {
+              el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            } catch {
+              el.scrollIntoView();
+            }
+          }
+        }
+      }
+    };
+
+    vv.addEventListener('resize', handleUpdate);
+    vv.addEventListener('scroll', handleUpdate);
+    return () => {
+      vv.removeEventListener('resize', handleUpdate);
+      vv.removeEventListener('scroll', handleUpdate);
+    };
+  }, []);
+
+  return state;
+}
+
+/** Sticky, keyboard-aware action bar with safe area inset and >= 8px action spacing */
+export interface FormActionBarProps {
+  children: ReactNode;
+  note?: ReactNode;
+  sticky?: boolean | undefined;
+  className?: string | undefined;
+  ariaLabel?: string | undefined;
+}
+
+export function FormActionBar({
+  children,
+  note,
+  sticky = true,
+  className = '',
+  ariaLabel = 'Aksi formulir',
+}: FormActionBarProps) {
+  const { isKeyboardOpen, offsetBottom } = useVisualViewport();
+
+  const style: React.CSSProperties | undefined =
+    sticky && isKeyboardOpen && offsetBottom > 0
+      ? { bottom: `${offsetBottom}px` }
+      : undefined;
+
+  return (
+    <div
+      className={`form-actions form-action-bar ${sticky ? 'is-sticky' : ''} ${className}`.trim()}
+      style={style}
+      role="toolbar"
+      aria-label={ariaLabel}
+    >
+      <div className="form-action-buttons">{children}</div>
+      {note && <span className="form-action-note">{note}</span>}
+    </div>
+  );
+}
+
+/** Standalone field error notice rendered close to form controls */
+export function FieldError({ message, id }: { message?: string | null | undefined; id?: string | undefined }) {
+  if (!message) return null;
+  return (
+    <span className="field-error" role="alert" id={id}>
+      <span className="field-error-icon" aria-hidden="true">⚠</span>
+      <span>{message}</span>
+    </span>
+  );
+}
+
+/** Form field container binding label, input, help and inline error */
+export interface FormFieldProps {
+  label?: ReactNode;
+  htmlFor?: string | undefined;
+  help?: ReactNode;
+  error?: string | null | undefined;
+  required?: boolean | undefined;
+  children: ReactNode;
+  className?: string | undefined;
+  id?: string | undefined;
+}
+
+export function FormField({
+  label,
+  htmlFor,
+  help,
+  error,
+  required,
+  children,
+  className = '',
+  id,
+}: FormFieldProps) {
+  const helpId = help && id ? `${id}-help` : undefined;
+  const errorId = error && id ? `${id}-error` : undefined;
+
+  return (
+    <div className={`form-field ${error ? 'has-error' : ''} ${className}`.trim()} id={id}>
+      {label && (
+        <label htmlFor={htmlFor} className="form-field-label">
+          <span>{label}</span>
+          {required && <span className="field-required" aria-hidden="true">*</span>}
+        </label>
+      )}
+      <div className="form-field-control">
+        {children}
+      </div>
+      {error ? <FieldError message={error} id={errorId} /> : null}
+      {help && (
+        <small className="form-field-help" id={helpId}>
+          {help}
+        </small>
+      )}
+    </div>
+  );
+}
+
+/** Number input preserving raw string while typing, enforcing 44px min-height */
+export interface NumFieldProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'> {
+  value: number;
+  onChange: (value: number) => void;
+  error?: string | null | undefined;
+}
+
+export function NumField({ value, onChange, error, ...rest }: NumFieldProps) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => {
+    if (Number(text) !== value) setText(String(value));
+  }, [value]);
+
+  return (
+    <input
+      type="number"
+      required
+      aria-invalid={Boolean(error)}
+      {...rest}
+      value={text}
+      onChange={(event) => {
+        setText(event.target.value);
+        if (event.target.value !== '' && Number.isFinite(Number(event.target.value))) {
+          onChange(Number(event.target.value));
+        }
+      }}
+    />
+  );
+}
+
+/** Extracts field-level errors from an API error response message */
+export function extractFieldErrors(errorMessage?: string | null): Record<string, string> {
+  if (!errorMessage || typeof errorMessage !== 'string') return {};
+  const errors: Record<string, string> = {};
+
+  const parts = errorMessage.split(';').map(part => part.trim());
+  for (const part of parts) {
+    const match = part.match(/(?:^|.*\s)([a-zA-Z0-9_]+):\s*(.+)$/);
+    if (match && match[1] && match[2]) {
+      const field = match[1].trim();
+      const message = match[2].trim();
+      if (!errors[field]) {
+        errors[field] = message;
+      }
+    }
+  }
+
+  return errors;
 }

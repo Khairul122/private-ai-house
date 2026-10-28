@@ -1,4 +1,5 @@
 export function formatMoney(amount: number, currency: string) {
+  if (!Number.isFinite(amount)) return '–';
   try {
     return new Intl.NumberFormat('id-ID', { style: 'currency', currency, minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(amount);
   } catch {
