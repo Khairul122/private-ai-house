@@ -12,12 +12,12 @@ import { OPERATIONS_ROSTER } from '@fvh/domain';
 import { formatMoney, formatDate, activityTitle } from '../components/format.js';
 import { kanbanQuery, officeLearningQuery } from '../api/queries.js';
 import { useLiveUpdates } from '../api/live.js';
-import { StateLabel, useClock } from '../components/ui.js';
+import { StateLabel, useClock, SkipLink, LiveAnnouncer, useAnnouncer } from '../components/ui.js';
 import { CardDataStatus } from '../components/CardDataStatus.js';
 import { isCardQuery } from '../api/card-data.js';
 import { invitationSpot, type OfficeInvitation, overlayEventIsolation, safeReleasePointerCapture } from '../state/office-interaction.js';
 import HermesKanbanCard from '../components/HermesKanbanCard.js';
-import { isTabletShortcut } from './tablet-shortcut.js';
+import { isTabletShortcut, handleDrawerFocusTrap } from './tablet-shortcut.js';
 
 const VisualOffice = lazy(() => import('./VisualOffice.js'));
 
@@ -220,20 +220,59 @@ export default function OfficeShell() {
   const sheetOpen = location.pathname !== '/';
   const tabletGroup = TABLET_GROUPS.find((group) => group.routes.some((route) => route === location.pathname));
   const dashboardData = fresh(dashboard);
+  const { announcement, politeness, announce } = useAnnouncer();
+
+  const prevSheetOpen = useRef(sheetOpen);
+  useEffect(() => {
+    if (sheetOpen && !prevSheetOpen.current) {
+      const title = SHEET_TITLES[location.pathname] ?? 'Halaman';
+      announce(`Tablet dibuka: ${title}`);
+    } else if (!sheetOpen && prevSheetOpen.current) {
+      announce('Tablet ditutup, kembali ke kantor');
+    }
+    prevSheetOpen.current = sheetOpen;
+  }, [sheetOpen, location.pathname, announce]);
+
+  const prevPanel = useRef(panel);
+  useEffect(() => {
+    if (panel && panel !== prevPanel.current) {
+      if (panel === 'owner') announce('Panel Pemilik dibuka');
+      else if (panel === 'agent') announce(selected ? `Panel agen ${selected.name} dibuka` : 'Panel agen dibuka');
+      else if (panel === 'activity') announce('Panel aktivitas kantor dibuka');
+      else if (panel === 'channels') announce('Panel kanal dibuka');
+    } else if (!panel && prevPanel.current) {
+      announce('Panel ditutup');
+    }
+    prevPanel.current = panel;
+  }, [panel, selected, announce]);
 
   useEffect(() => {
     if (!sheetOpen) return;
     const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const onTab = (event: KeyboardEvent) => {
       if (event.key !== 'Tab') return;
-      const items = [...(sheetElement.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]') ?? [])].filter((item) => item.checkVisibility());
-      const first = items[0]; const last = items.at(-1);
-      if (!first || !last) { event.preventDefault(); sheetHeading.current?.focus(); return; }
-      if (event.shiftKey && (document.activeElement === first || !items.includes(document.activeElement as HTMLElement))) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && (document.activeElement === last || !items.includes(document.activeElement as HTMLElement))) { event.preventDefault(); first.focus(); }
+      const sheet = sheetElement.current;
+      if (!sheet) return;
+      const items = [...(sheet.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex="0"]'
+      ) ?? [])].filter((item) => (item.checkVisibility ? item.checkVisibility() : true));
+      handleDrawerFocusTrap(event, {
+        items,
+        heading: sheetHeading.current,
+        activeElement: document.activeElement as HTMLElement | null,
+        contains: (el) => Boolean(el && sheet.contains(el)),
+      });
     };
     document.addEventListener('keydown', onTab);
-    return () => { document.removeEventListener('keydown', onTab); if (returnFocus !== document.body && returnFocus?.isConnected && returnFocus.checkVisibility()) returnFocus.focus(); else tabletButton.current?.focus(); };
+    return () => {
+      document.removeEventListener('keydown', onTab);
+      const isVisible = returnFocus && (returnFocus.checkVisibility ? returnFocus.checkVisibility() : true);
+      if (returnFocus && returnFocus !== document.body && returnFocus.isConnected && isVisible) {
+        returnFocus.focus();
+      } else {
+        tabletButton.current?.focus();
+      }
+    };
   }, [sheetOpen]);
   useEffect(() => { sheetElement.current?.querySelector('.vo3d-sheet-body')?.scrollTo({ top: 0 }); }, [location.pathname]);
 
@@ -299,6 +338,7 @@ export default function OfficeShell() {
     ownerInput.stop(); setSelectedId(null); setPanel(null);
     setArrival(byLift ? { floor: n, at: [LIFT.exit.x, LIFT.exit.z] } : null);
     setFloor(n); fly({ kind: 'overview' });
+    announce(`Berpindah ke Lantai ${n}${byLift ? ' lewat lift' : ''}`);
   };
   useEffect(() => {
     const board = BOARDS.find((slot) => slot.route === location.pathname);
@@ -388,8 +428,10 @@ export default function OfficeShell() {
   };
 
   return <div className="vo3d vo3d-app" ref={stage} style={{ background: phase.sky }}>
+    <SkipLink targetId="vo3d-controls" label="Lewati ke kontrol kantor" onClick={() => { tabletButton.current?.focus(); }} />
+    <LiveAnnouncer message={announcement} politeness={politeness} />
     <div className="vo3d-office-layer" inert={sheetOpen}>
-    <div ref={officeSurface} className="vo3d-canvas" role="img" tabIndex={0} aria-label={`Kantor 3D Mission Control. ${summary}. Tekan Tab untuk membuka tablet. Gunakan tablet dan daftar agen untuk navigasi dengan keyboard.`}>
+    <div ref={officeSurface} className="vo3d-canvas" role="region" tabIndex={0} aria-label={`Kantor 3D Mission Control. ${summary}. Tekan Enter atau Spasi untuk membuka tablet. Gunakan tablet dan daftar agen untuk navigasi dengan keyboard.`}>
       {webgl ? <Suspense fallback={<div className="vo3d-fallback">Memuat kantor visual...</div>}>
         <VisualOffice invitation={invitation} key={floor} floor={floor} ownerStart={arrival?.floor===floor?arrival.at:[OWNER_SPOT.x,OWNER_SPOT.z]} onLift={()=>goToFloor(floor===1?2:1,true)} agents={agents} learning={fresh(learning)} ready={!autopilot.isPending} selectedId={selectedId} ownerSelected={panel === 'owner'} ownerInput={ownerInput} ownerTarget={ownerTarget} ownerVisitVersion={ownerVisitVersion} onOwnerMoving={setOwnerMoving} followId={followId} onSelect={selectAgent} onOwnerSelect={openOwner} onCameraInteract={() => { setFollowId(null); setTour(false); }} command={command} view={view} tour={tour} phase={phase} reducedMotion={reducedMotion} boards={boards} onOpenBoard={openBoard} />
       </Suspense> : <div className="vo3d-fallback">WebGL tidak tersedia di browser ini. Gunakan tablet untuk membuka setiap kartu.</div>}
@@ -418,8 +460,8 @@ export default function OfficeShell() {
     </nav>
     </div>
 
-    <div className="vo3d-float vo3d-tools" {...overlayEventIsolation}>
-      <button ref={tabletButton} type="button" className="vo3d-icon vo3d-tablet-trigger" aria-label="Buka tablet Mission Control" title="Buka tablet (Tab saat fokus di kantor)" onClick={() => navigate('/overview')}><OfficeIcon name="grid" /><span>Tablet <kbd>Tab</kbd></span></button>
+    <div id="vo3d-controls" className="vo3d-float vo3d-tools" {...overlayEventIsolation}>
+      <button ref={tabletButton} type="button" className="vo3d-icon vo3d-tablet-trigger" aria-label="Buka tablet Mission Control" title="Buka tablet (Enter atau Spasi saat fokus di kantor)" onClick={() => navigate('/overview')}><OfficeIcon name="grid" /><span>Tablet <kbd>Enter</kbd></span></button>
       <button ref={ownerButton} type="button" className="vo3d-owner-action" aria-pressed={panel === 'owner'} onClick={openOwner}><OfficeIcon name="target" />Pemilik</button>
       <div className="vo3d-search-wrap"><label className="vo3d-search"><OfficeIcon name="search" /><span className="sr-only">Cari agen atau papan</span>
         <input ref={searchInput} type="search" placeholder="Cari agen atau papan" value={search} onChange={(event) => setSearch(event.target.value)}
@@ -427,7 +469,7 @@ export default function OfficeShell() {
         <kbd>Ctrl K</kbd>
       </label>{matchingBoards.length > 0 && <nav className="vo3d-search-results" aria-label="Hasil pencarian papan">{matchingBoards.map(board => <Link key={board.id} to={board.route} onClick={() => setSearch('')}>{board.label}</Link>)}</nav>}</div>
       {dashboardData && dashboardData.policy.state !== 'draft' && <button type="button" className={`vo3d-kill${dashboardData.policy.state === 'active' ? ' is-danger' : ''}`} disabled={pause.isPending}
-        onClick={() => pause.mutate(dashboardData.policy.state === 'active' ? 'pause' : 'resume')}>{dashboardData.policy.state === 'active' ? 'Jeda automasi' : 'Lanjutkan kebijakan'}</button>}
+        onClick={() => { const nextAction = dashboardData.policy.state === 'active' ? 'pause' : 'resume'; announce(nextAction === 'pause' ? 'Permintaan jeda automasi dikirim' : 'Permintaan melanjutkan kebijakan dikirim', 'assertive'); pause.mutate(nextAction); }}>{dashboardData.policy.state === 'active' ? 'Jeda automasi' : 'Lanjutkan kebijakan'}</button>}
       <button type="button" className="vo3d-icon" aria-pressed={fullscreen} aria-label={fullscreen ? 'Keluar dari layar penuh' : 'Layar penuh'} onClick={() => { if (document.fullscreenElement) void document.exitFullscreen(); else void stage.current?.requestFullscreen?.(); }}><OfficeIcon name="expand" /></button>
     </div>
     {pause.isError && <div className="vo3d-float vo3d-toast" role="alert" {...overlayEventIsolation}>{pause.error.message}</div>}
@@ -560,7 +602,7 @@ export default function OfficeShell() {
     <div className="vo3d-float vo3d-seg" role="toolbar" aria-label="Kontrol tampilan" {...overlayEventIsolation}>
       <button type="button" aria-pressed={view === '3d'} aria-label="Tampilan 3D" title="Tampilan 3D" onClick={() => { setView('3d'); fly({ kind: 'overview' }); }}><OfficeIcon name="cube" /></button>
       <button type="button" aria-pressed={view === 'top'} aria-label="Tampilan denah atas" title="Denah atas" onClick={() => { setView('top'); setTour(false); fly({ kind: 'overview' }); }}><OfficeIcon name="top" /></button>
-      <button type="button" aria-pressed={tour} disabled={reducedMotion} title={reducedMotion ? 'Dinonaktifkan karena preferensi kurangi gerakan' : 'Putar kamera otomatis'} onClick={() => { setFollowId(null); setView('3d'); setTour((on) => !on); }}><OfficeIcon name="play" />Tur</button>
+      <button type="button" aria-pressed={tour} disabled={reducedMotion} aria-label={reducedMotion ? 'Tur kamera dinonaktifkan karena preferensi kurangi gerakan' : 'Tur kamera otomatis'} title={reducedMotion ? 'Dinonaktifkan karena preferensi kurangi gerakan' : 'Putar kamera otomatis'} onClick={() => { setFollowId(null); setView('3d'); setTour((on) => !on); }}><OfficeIcon name="play" />Tur</button>
       <button type="button" aria-label="Pusatkan kamera" title="Pusatkan" onClick={() => fly({ kind: 'overview' })}><OfficeIcon name="target" /></button>
     </div>
     </div>

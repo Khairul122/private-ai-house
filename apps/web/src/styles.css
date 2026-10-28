@@ -20,6 +20,9 @@
   --success: #286344;
   --success-soft: #e5eee7;
   --focus: #9a472d;
+  --target-min: 44px;
+  --target-gap: 8px;
+  --vo-focus: #e8a317;
   --display: Georgia, 'Times New Roman', serif;
   --body: 'Segoe UI', 'Aptos', Arial, sans-serif;
 }
@@ -116,9 +119,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .button-secondary:hover:not(:disabled) { border-color: var(--pine); background: var(--surface-muted); }
 .button-danger { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); }
 .button-danger:hover:not(:disabled) { background: var(--danger); color: #fff; }
-.button-text { min-height: 30px; padding: 5px 8px; border-color: transparent; background: transparent; color: var(--pine); text-decoration: underline; text-underline-offset: 3px; }
+.button-text { position: relative; min-height: 30px; padding: 5px 8px; border-color: transparent; background: transparent; color: var(--pine); text-decoration: underline; text-underline-offset: 3px; }
 :root[data-theme='dark'] .button-text { color: var(--copper); }
 .button-text:hover { background: var(--surface-muted); }
+.button-text::before { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); min-width: var(--target-min, 44px); min-height: var(--target-min, 44px); width: 100%; height: 100%; }
 .button-wide { width: 100%; }
 
 .metrics-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 26px 0 31px; }
@@ -546,6 +550,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .vo3d-tools { top: 16px; right: 16px; display: flex; gap: 8px; padding: 0; border: 0; background: none; box-shadow: none; backdrop-filter: none; }
 .vo3d-search { display: flex; align-items: center; gap: 8px; width: 270px; min-height: 44px; padding: 0 12px; border: 1px solid var(--vo-line); border-radius: 12px; background: var(--vo-card); box-shadow: 0 6px 24px rgba(15, 23, 42, .12); color: var(--vo-muted); }
 .vo3d-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: none; color: var(--vo-ink); }
+.vo3d-search:focus-within { border-color: var(--pine, #294237); outline: 2px solid var(--vo-focus, #e8a317); outline-offset: 2px; box-shadow: 0 8px 24px rgba(15, 23, 42, .16); }
 .vo3d-search kbd { padding: 1px 6px; border: 1px solid var(--vo-line); border-radius: 5px; font-size: 11px; white-space: nowrap; }
 .vo3d-icon { display: grid; width: 44px; height: 44px; flex: none; place-items: center; border: 1px solid var(--vo-line); border-radius: 12px; background: var(--vo-card); box-shadow: 0 6px 24px rgba(15, 23, 42, .12); }
 .vo3d-icon[aria-pressed='true'], .vo3d-seg button[aria-pressed='true'] { border-color: var(--vo-accent); background: var(--vo-accent); color: #fff; }
@@ -602,6 +607,10 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
   .vo3d-roster { top: 320px; max-height: calc(100% - 388px); }
 }
 @media (max-height: 640px) { .vo3d-map { display: none; } }
+/* Skip Link Navigasi Akses Cepat */
+.vo3d-skip-link { position: absolute; top: 12px; left: 12px; z-index: 1000; display: inline-flex; align-items: center; min-height: var(--target-min, 44px); padding: 10px 16px; background: var(--pine, #294237); color: #ffffff; border-radius: 8px; font-size: 13px; font-weight: 700; text-decoration: none; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35); transform: translateY(-160%); transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
+.vo3d-skip-link:focus, .vo3d-skip-link:focus-visible { transform: translateY(0); outline: 3px solid var(--vo-focus, #e8a317); outline-offset: 3px; }
+
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* Mission Control as a full-screen office: pages open as cards over the 3D floor. */
@@ -1008,8 +1017,8 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .operations-team small { color:#4b5d55; line-height:1.6; }
 .operations-page summary { min-height:44px; cursor:pointer; padding:10px 0; }
 .operations-page details { margin:16px 0; }
-.vo3d-floor-picker { display:flex; gap:6px; margin:10px 0; }
-.vo3d-floor-picker button { font-size:12px; min-height:36px; padding:5px 10px; }
+.vo3d-floor-picker { display:flex; gap: var(--target-gap, 8px); margin:10px 0; }
+.vo3d-floor-picker button { font-size:13px; min-height: var(--target-min, 44px); padding:8px 14px; }
 @media(max-width:800px) { .operations-grid { grid-template-columns:minmax(0,1fr); } .operations-team { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media(max-width:480px) { .operations-team { grid-template-columns:minmax(0,1fr); } .operations-actions .button { width:100%; } .operations-tabs { gap:6px; } .operations-tabs button { flex:1 1 130px; } }
 /* The worker and drafts use the office sheet's existing colors and controls. */
