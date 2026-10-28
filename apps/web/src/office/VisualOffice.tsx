@@ -9,8 +9,11 @@ import type { OwnerInput } from '../state/owner-input.js';
 import { createOwnerMotion, setOwnerDestination, stepOwnerMotion, stopOwnerMotion } from '../state/owner-motion.js';
 import { OfficeAgent as OfficeAgentCharacter, spokenOfficeTurn } from './OfficeAgent.js';
 import { OfficeEnvironment } from './OfficeEnvironment.js';
+import { StabilityObserver } from './StabilityObserver.js';
+import { CanvasLifecycleListener } from './CanvasLifecycleListener.js';
+import type { WebglLifecycleController } from './webgl-lifecycle.js';
 import OfficeObjects from './OfficeObjects.js';
-import { bindCanvasGestureIsolation, createGestureTracker, invitationSpot, type GestureTracker, type OfficeInvitation } from '../state/office-interaction.js';
+import { createGestureTracker, invitationSpot, type OfficeInvitation } from '../state/office-interaction.js';
 import { createOfficeLife, updateOfficeLife, type OfficeLife } from '../state/office-life.js';
 import {
   COMPACT_CAMERA_BOUNDS,
@@ -23,12 +26,15 @@ import {
 } from '../state/camera-motion.js';
 
 export type CameraCommand = { kind: 'overview' | 'zone' | 'agent' | 'board' | 'owner'; id?: string; n: number };
+export type SavedCameraState = { floor: 1 | 2; commandN: number; view: '3d' | 'top'; position: [number, number, number]; target: [number, number, number] };
 /** Live summary drawn on a wall board; lines come from real API data. */
 export type BoardContent = { id: BoardId; title: string; lines: string[]; accent: string; alert?: boolean };
 type Phase = ReturnType<typeof dayPhase>;
 type V3 = [number, number, number];
 
 export type VisualOfficeProps = {
+  lifecycle: WebglLifecycleController;
+  savedCameraState: { current: SavedCameraState | null };
   invitation: OfficeInvitation;
   floor: 1 | 2;
   ownerStart: P2;
@@ -56,7 +62,6 @@ export type VisualOfficeProps = {
   onOpenCommunity?: (() => void) | undefined;
   reducedEffects?: boolean | undefined;
   onFpsSample?: ((fps: number, dtMs: number) => void) | undefined;
-  onCanvasCreated?: ((gl: THREE.WebGLRenderer) => (() => void) | void) | undefined;
   frameloopActive?: boolean | undefined;
 };
 
@@ -457,14 +462,18 @@ function zoneTarget(id: string | undefined) {
   return zone ? { x: zone.x, z: zone.z, dist: Math.max(zone.w, zone.d) * 1.35 + 6 } : null;
 }
 
-function CameraRig({ command, view, tour, spots, reducedMotion, followId, positions, onInteract }: { command: CameraCommand; view: '3d' | 'top'; tour: boolean; spots: Map<string, Spot>; reducedMotion: boolean; followId: string | null; positions: Map<string, THREE.Vector3>; onInteract: () => void }) {
+export function CameraRig({ command, view, tour, spots, reducedMotion, followId, positions, onInteract, floor, savedCameraState }: { command: CameraCommand; view: '3d' | 'top'; tour: boolean; spots: Map<string, Spot>; reducedMotion: boolean; followId: string | null; positions: Map<string, THREE.Vector3>; onInteract: () => void; floor: 1 | 2; savedCameraState: { current: SavedCameraState | null } }) {
   const { camera, gl, size } = useThree();
   const controls = useMemo(() => new OrbitControls(camera), [camera]);
   const fly = useRef<{ target: THREE.Vector3; position: THREE.Vector3; trackId: string | null; anchor: THREE.Vector3 } | null>(null);
   const manual = useRef(false);
+  const restoreCamera = useRef(savedCameraState.current?.floor === floor
+    && savedCameraState.current.commandN === command.n && savedCameraState.current.view === view
+    ? savedCameraState.current : null);
   const interact = useRef(onInteract);
   interact.current = onInteract;
   const aspect = size.width / Math.max(size.height, 1);
+  const initialAspect = useRef(aspect);
   const isCompact = isCompactViewport(size.width) || aspect < 1;
 
   useEffect(() => {
@@ -474,7 +483,6 @@ function CameraRig({ command, view, tour, spots, reducedMotion, followId, positi
     controls.minDistance = isCompact ? COMPACT_CAMERA_BOUNDS.minDistance : 7;
     controls.maxDistance = isCompact ? COMPACT_CAMERA_BOUNDS.maxDistance : 90;
     controls.screenSpacePanning = false;
-    controls.target.set(-3, 0, 0);
     controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
     controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
     const cancel = () => { manual.current = true; fly.current = null; interact.current(); };
@@ -483,11 +491,28 @@ function CameraRig({ command, view, tour, spots, reducedMotion, followId, positi
   }, [controls, gl, isCompact]);
 
   useEffect(() => {
+    if (restoreCamera.current) {
+      camera.position.fromArray(restoreCamera.current.position);
+      controls.target.fromArray(restoreCamera.current.target);
+      manual.current = true;
+    } else {
+      controls.target.set(-3, 0, 0);
+    }
+  }, [camera, controls]);
+
+  useEffect(() => {
     controls.enableRotate = view === '3d';
     controls.maxPolarAngle = view === 'top' ? 0.001 : 1.2;
   }, [controls, view]);
 
   useEffect(() => {
+    if (restoreCamera.current?.commandN === command.n && restoreCamera.current.view === view
+      && initialAspect.current === aspect) {
+      fly.current = null;
+      controls.update();
+      return;
+    }
+    restoreCamera.current = null;
     // Narrow screens need the camera further back to fit the same floor,
     // bounded by compact policy so the office remains visible and selectable.
     const fit = getCompactCameraFit(aspect, isCompact);
@@ -544,25 +569,13 @@ function CameraRig({ command, view, tour, spots, reducedMotion, followId, positi
     controls.autoRotateSpeed = 0.7;
     controls.update();
     clampCameraBounds(camera.position, controls.target, { isCompact, margin: command.kind === 'board' && view === '3d' ? 4 : 0 });
+    savedCameraState.current = { floor, commandN: command.n, view, position: camera.position.toArray(), target: controls.target.toArray() };
   });
   return null;
 }
 
 function OfficeLifeTick({ life, agents, reducedMotion }: { life: OfficeLife; agents: OfficeAgent[]; reducedMotion: boolean }) {
   useFrame(({ clock }) => updateOfficeLife(life, agents, clock.elapsedTime, reducedMotion), -1);
-  return null;
-}
-
-function CanvasLifecycleListener({ onCreated }: { onCreated?: ((gl: THREE.WebGLRenderer) => (() => void) | void) | undefined }) {
-  const gl = useThree((state) => state.gl);
-  useEffect(() => {
-    const unbind = onCreated?.(gl);
-    return () => {
-      if (typeof unbind === 'function') {
-        unbind();
-      }
-    };
-  }, [gl, onCreated]);
   return null;
 }
 
@@ -590,15 +603,7 @@ function Lights({ phase, reducedEffects }: { phase: Phase; reducedEffects?: bool
   </>;
 }
 
-function CanvasGestureBridge({ tracker }: { tracker: GestureTracker }) {
-  const { gl } = useThree();
-  useEffect(() => {
-    return bindCanvasGestureIsolation(gl.domElement, tracker);
-  }, [gl, tracker]);
-  return null;
-}
-
-export default function VisualOffice({ invitation, floor, ownerStart, onLift, agents, learning, ready, selectedId, ownerSelected, ownerInput, ownerTarget, ownerVisitVersion, onOwnerMoving, followId, onSelect, onOwnerSelect, onCameraInteract, command, view, tour, phase, reducedMotion, boards, onOpenBoard, onOpenCommunity, reducedEffects, onFpsSample, onCanvasCreated, frameloopActive }: VisualOfficeProps) {
+export default function VisualOffice({ lifecycle, savedCameraState, invitation, floor, ownerStart, onLift, agents, learning, ready, selectedId, ownerSelected, ownerInput, ownerTarget, ownerVisitVersion, onOwnerMoving, followId, onSelect, onOwnerSelect, onCameraInteract, command, view, tour, phase, reducedMotion, boards, onOpenBoard, onOpenCommunity, reducedEffects, onFpsSample, frameloopActive }: VisualOfficeProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [hoveredBoard, setHoveredBoard] = useState<BoardId | null>(null);
   const spots = useMemo(() => spotsFor(agents), [agents]);
@@ -645,8 +650,8 @@ export default function VisualOffice({ invitation, floor, ownerStart, onLift, ag
   useEffect(() => { document.body.style.cursor = hoveredId || hoveredBoard ? 'pointer' : ''; return () => { document.body.style.cursor = ''; }; }, [hoveredId, hoveredBoard]);
   const isLoopActive = visible && (frameloopActive ?? true);
   return <Canvas style={{ touchAction: 'none' }} frameloop={isLoopActive ? 'always' : 'never'} shadows={!reducedEffects} dpr={reducedEffects ? 0.85 : dpr} camera={{ position: [20, 28, 38], fov: 38, near: 0.5, far: 400 }} onPointerMissed={() => handleSelect(null)}>
-    <CanvasLifecycleListener onCreated={onCanvasCreated} />
-    <CanvasGestureBridge tracker={tracker} />
+    <CanvasLifecycleListener lifecycle={lifecycle} tracker={tracker} />
+    <StabilityObserver lifecycle={lifecycle} />
     <FpsTracker onFpsSample={onFpsSample} />
     <OfficeLifeTick life={life} agents={agents} reducedMotion={reducedMotion} />
     <Lights phase={phase} reducedEffects={reducedEffects} />
@@ -661,7 +666,7 @@ export default function VisualOffice({ invitation, floor, ownerStart, onLift, ag
         onSelect={handleSelect} onHover={setHoveredId} reducedMotion={reducedMotion} positions={positions} life={life} invitation={agent.id === invitation?.id ? invitedSpot : undefined} spokenMessage={spokenOfficeTurn(learning, agent.id)} /> : null;
     })}
     <OwnerCharacter start={ownerStart} onLift={handleLift} destination={ownerTarget} request={ownerVisitVersion} selected={ownerSelected} hovered={hoveredId === 'owner'} input={ownerInput} onMoving={onOwnerMoving} onSelect={handleOwnerSelect} onHover={setHoveredId} reducedMotion={reducedMotion} positions={positions} />
-    <CameraRig command={command} view={view} tour={tour} spots={spots} reducedMotion={reducedMotion} followId={followId} positions={positions} onInteract={onCameraInteract} />
+    <CameraRig command={command} view={view} tour={tour} spots={spots} reducedMotion={reducedMotion} followId={followId} positions={positions} onInteract={onCameraInteract} floor={floor} savedCameraState={savedCameraState} />
   </Canvas>;
 }
 
