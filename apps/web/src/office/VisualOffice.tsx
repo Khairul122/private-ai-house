@@ -12,7 +12,15 @@ import { OfficeEnvironment } from './OfficeEnvironment.js';
 import OfficeObjects from './OfficeObjects.js';
 import { bindCanvasGestureIsolation, createGestureTracker, invitationSpot, type GestureTracker, type OfficeInvitation } from '../state/office-interaction.js';
 import { createOfficeLife, updateOfficeLife, type OfficeLife } from '../state/office-life.js';
-import { clampCameraPan, followCamera } from '../state/camera-motion.js';
+import {
+  COMPACT_CAMERA_BOUNDS,
+  clampCameraBounds,
+  followCamera,
+  getBoardCameraFraming,
+  getCompactCameraFit,
+  isCompactViewport,
+  resolveOfficeDpr,
+} from '../state/camera-motion.js';
 
 export type CameraCommand = { kind: 'overview' | 'zone' | 'agent' | 'board' | 'owner'; id?: string; n: number };
 /** Live summary drawn on a wall board; lines come from real API data. */
@@ -453,13 +461,14 @@ function CameraRig({ command, view, tour, spots, reducedMotion, followId, positi
   const interact = useRef(onInteract);
   interact.current = onInteract;
   const aspect = size.width / Math.max(size.height, 1);
+  const isCompact = isCompactViewport(size.width) || aspect < 1;
 
   useEffect(() => {
     controls.connect(gl.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
-    controls.minDistance = 7;
-    controls.maxDistance = 90;
+    controls.minDistance = isCompact ? COMPACT_CAMERA_BOUNDS.minDistance : 7;
+    controls.maxDistance = isCompact ? COMPACT_CAMERA_BOUNDS.maxDistance : 90;
     controls.screenSpacePanning = false;
     controls.target.set(-3, 0, 0);
     controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
@@ -467,7 +476,7 @@ function CameraRig({ command, view, tour, spots, reducedMotion, followId, positi
     const cancel = () => { manual.current = true; fly.current = null; interact.current(); };
     controls.addEventListener('start', cancel);
     return () => { controls.removeEventListener('start', cancel); controls.dispose(); };
-  }, [controls, gl]);
+  }, [controls, gl, isCompact]);
 
   useEffect(() => {
     controls.enableRotate = view === '3d';
@@ -475,8 +484,9 @@ function CameraRig({ command, view, tour, spots, reducedMotion, followId, positi
   }, [controls, view]);
 
   useEffect(() => {
-    // Narrow screens need the camera further back to fit the same floor.
-    const fit = Math.max(1, 1.5 / aspect);
+    // Narrow screens need the camera further back to fit the same floor,
+    // bounded by compact policy so the office remains visible and selectable.
+    const fit = getCompactCameraFit(aspect, isCompact);
     let target = { x: -3, z: 0, dist: 41 * fit };
     if (command.kind === 'zone') target = zoneTarget(command.id) ?? target;
     if (command.kind === 'agent' && command.id) {
@@ -495,17 +505,16 @@ function CameraRig({ command, view, tour, spots, reducedMotion, followId, positi
     let goal = { target: focus, position: focus.clone().addScaledVector(direction, target.dist) };
     const board = command.kind === 'board' && view === '3d' ? BOARDS.find((slot) => slot.id === command.id) : undefined;
     if (board) {
-      // Face the board square-on from slightly above so its text is readable.
-      // Boards open alongside a card on the right, so aim right of the board to keep it in the free left area.
-      const [nx, nz] = board.normal;
-      const boardFocus = new THREE.Vector3(board.x + nz * 4.5, board.y, board.z - nx * 4.5);
-      goal = { target: boardFocus, position: boardFocus.clone().add(new THREE.Vector3(nx * 9 * fit, 2.5, nz * 9 * fit)) };
+      // Board viewing: squarely centered on compact displays, laterally shifted on desktop for drawer clearance.
+      const framing = getBoardCameraFraming(board, fit, isCompact);
+      const boardFocus = new THREE.Vector3(framing.focus.x, framing.focus.y, framing.focus.z);
+      goal = { target: boardFocus, position: new THREE.Vector3(framing.position.x, framing.position.y, framing.position.z) };
     }
     manual.current = false;
     if (reducedMotion) { controls.target.copy(goal.target); camera.position.copy(goal.position); fly.current = null; }
     else fly.current = { ...goal, trackId: followId, anchor: goal.target.clone() };
     // spots intentionally omitted: re-run only on explicit commands, not on every state poll.
-  }, [command.n, view, aspect, reducedMotion]);
+  }, [command.n, view, aspect, reducedMotion, isCompact]);
 
   useFrame((_, dt) => {
     const goal = fly.current;
@@ -530,7 +539,7 @@ function CameraRig({ command, view, tour, spots, reducedMotion, followId, positi
     controls.autoRotate = tour && !followId && !manual.current && !reducedMotion && view === '3d';
     controls.autoRotateSpeed = 0.7;
     controls.update();
-    clampCameraPan(camera.position, controls.target, command.kind === 'board' && view === '3d' ? 4 : 0);
+    clampCameraBounds(camera.position, controls.target, { isCompact, margin: command.kind === 'board' && view === '3d' ? 4 : 0 });
   });
   return null;
 }
@@ -586,13 +595,28 @@ export default function VisualOffice({ invitation, floor, ownerStart, onLift, ag
     if (tracker.canSelectMesh()) onOpenCommunity();
   } : undefined;
   const [visible, setVisible] = useState(() => !document.hidden);
+  const [dpr, setDpr] = useState(() =>
+    resolveOfficeDpr(
+      typeof window !== 'undefined' ? window.innerWidth : 1200,
+      typeof window !== 'undefined' ? window.devicePixelRatio : 1,
+    ),
+  );
+
+  useEffect(() => {
+    const updateDpr = () => {
+      setDpr(resolveOfficeDpr(window.innerWidth, window.devicePixelRatio));
+    };
+    window.addEventListener('resize', updateDpr);
+    return () => window.removeEventListener('resize', updateDpr);
+  }, []);
+
   useEffect(() => {
     const update = () => setVisible(!document.hidden);
     document.addEventListener('visibilitychange', update);
     return () => document.removeEventListener('visibilitychange', update);
   }, []);
   useEffect(() => { document.body.style.cursor = hoveredId || hoveredBoard ? 'pointer' : ''; return () => { document.body.style.cursor = ''; }; }, [hoveredId, hoveredBoard]);
-  return <Canvas style={{ touchAction: 'none' }} frameloop={visible ? 'always' : 'never'} shadows dpr={1} camera={{ position: [20, 28, 38], fov: 38, near: 0.5, far: 400 }} onPointerMissed={() => handleSelect(null)}>
+  return <Canvas style={{ touchAction: 'none' }} frameloop={visible ? 'always' : 'never'} shadows dpr={dpr} camera={{ position: [20, 28, 38], fov: 38, near: 0.5, far: 400 }} onPointerMissed={() => handleSelect(null)}>
     <CanvasGestureBridge tracker={tracker} />
     <OfficeLifeTick life={life} agents={agents} reducedMotion={reducedMotion} />
     <Lights phase={phase} />

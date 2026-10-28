@@ -20,10 +20,11 @@ import HermesKanbanCard from '../components/HermesKanbanCard.js';
 import { isTabletShortcut } from './tablet-shortcut.js';
 import { useVisualViewport, useMediaQuery } from './visual-viewport.js';
 import { useScrollLock } from './scroll-lock.js';
+import { getAlternativeBoards, getSecondaryControls } from '../state/compact-controls.js';
 
 const VisualOffice = lazy(() => import('./VisualOffice.js'));
 
-type OfficeIconName = 'grid' | 'search' | 'expand' | 'cube' | 'top' | 'play' | 'target' | 'users' | 'close' | 'sun';
+type OfficeIconName = 'grid' | 'search' | 'expand' | 'cube' | 'top' | 'play' | 'target' | 'users' | 'close' | 'sun' | 'map' | 'menu';
 
 function OfficeIcon({ name }: { name: OfficeIconName }) {
   const paths: Record<OfficeIconName, ReactNode> = {
@@ -37,6 +38,8 @@ function OfficeIcon({ name }: { name: OfficeIconName }) {
     users: <><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-4-6" /></>,
     close: <path d="M6 6l12 12M18 6 6 18" />,
     sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></>,
+    map: <><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21" /><line x1="9" y1="3" x2="9" y2="18" /><line x1="15" y1="6" x2="15" y2="21" /></>,
+    menu: <><line x1="4" y1="6" x2="20" y2="6" /><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="18" x2="20" y2="18" /></>,
   };
   return <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
@@ -205,6 +208,9 @@ export default function OfficeShell() {
   const [tour, setTour] = useState(false);
   const [search, setSearch] = useState('');
   const [fullscreen, setFullscreen] = useState(false);
+  const [targetMenuOpen, setTargetMenuOpen] = useState(false);
+  const [targetTab, setTargetTab] = useState<'boards' | 'zones' | 'agents' | 'controls'>('boards');
+  const [minimapOpen, setMinimapOpen] = useState(false);
   const [changes, setChanges] = useState<StateChange[]>([]);
   const previous = useRef<Map<string, AgentState> | null>(null);
   const [webgl] = useState(() => {
@@ -399,6 +405,8 @@ export default function OfficeShell() {
           setConfirmKill(null);
           return;
         }
+        if (targetMenuOpen) { event.preventDefault(); setTargetMenuOpen(false); return; }
+        if (minimapOpen) { event.preventDefault(); setMinimapOpen(false); return; }
         if (location.pathname !== '/') {
           event.preventDefault();
           navigate('/');
@@ -407,6 +415,7 @@ export default function OfficeShell() {
         if (panel) {
           event.preventDefault();
           setPanel(null);
+          ownerButton.current?.focus();
           return;
         }
       }
@@ -686,23 +695,86 @@ export default function OfficeShell() {
       </div>
     </aside>}
 
-    {!panel && !sheetOpen && <figure className="vo3d-float vo3d-map" aria-hidden="true" {...overlayEventIsolation}>
-      <svg viewBox={`${FLOOR.minX} ${FLOOR.minZ} ${width} ${depth}`}>
+    {!panel && !sheetOpen && <figure className={`vo3d-float vo3d-map${minimapOpen ? ' is-open' : ''}`} aria-label="Denah kantor minimap" {...overlayEventIsolation}>
+      <div className="vo3d-map-head">
+        <span>Lt {floor} · Peta Denah</span>
+        <button type="button" className="vo3d-map-close" aria-label="Tutup peta minimap" onClick={() => setMinimapOpen(false)}><OfficeIcon name="close" /></button>
+      </div>
+      <svg viewBox={`${FLOOR.minX} ${FLOOR.minZ} ${width} ${depth}`} role="img" aria-label="Denah interaktif kantor">
         <rect x={FLOOR.minX} y={FLOOR.minZ} width={width} height={depth} rx="1" fill="#f3efe6" />
-        {ZONES.map((zone) => <g key={zone.id} onClick={() => fly({ kind: 'zone', id: zone.id })}>
+        {ZONES.map((zone) => <g key={zone.id} onClick={() => { fly({ kind: 'zone', id: zone.id }); setMinimapOpen(false); }}>
           <rect x={zone.x - zone.w / 2} y={zone.z - zone.d / 2} width={zone.w} height={zone.d} rx="0.6" fill={zone.id === 'workspace' ? 'none' : '#e3ece0'} stroke="#c8cfc4" strokeWidth="0.15" strokeDasharray={zone.id === 'workspace' ? '0.6 0.4' : undefined} />
           {zone.id !== 'workspace' && <text x={zone.x} y={zone.z + 0.6} textAnchor="middle" fontSize="1.6" fill="#3b4650">{zone.label}</text>}
         </g>)}
-        {(floor===1?PODS:FLOOR_TWO_PODS).map((pod) => <rect key={pod.id} x={pod.x - 2.3} y={pod.z - 2.3} width="4.6" height="4.6" rx="0.5" fill={pod.color} opacity="0.3" onClick={() => selectAgent(pod.id)} />)}
-        {agents.map((agent) => { const spot = spots.get(agent.id); return spot ? <circle key={agent.id} cx={spot.x} cy={spot.z} r="0.75" fill={STATE_COLORS[agent.state]} stroke="#fff" strokeWidth="0.3" /> : null; })}
+        {(floor===1?PODS:FLOOR_TWO_PODS).map((pod) => <rect key={pod.id} x={pod.x - 2.3} y={pod.z - 2.3} width="4.6" height="4.6" rx="0.5" fill={pod.color} opacity="0.3" onClick={() => { selectAgent(pod.id); setMinimapOpen(false); }} />)}
+        {agents.map((agent) => { const spot = spots.get(agent.id); return spot ? <circle key={agent.id} cx={spot.x} cy={spot.z} r="0.75" fill={STATE_COLORS[agent.state]} stroke="#fff" strokeWidth="0.3" onClick={() => { selectAgent(agent.id); setMinimapOpen(false); }} /> : null; })}
       </svg>
-      <p>Lt {floor} · titik = posisi tujuan tiap agen</p>
+      <p>Klik zona atau agen untuk terbang ke target.</p>
     </figure>}
 
+    {targetMenuOpen && !sheetOpen && <aside className="vo3d-float vo3d-panel vo3d-target-menu" role="dialog" aria-modal="true" aria-label="Menu navigasi & kontrol alternatif" onClick={(e) => e.stopPropagation()} {...overlayEventIsolation}>
+      <div className="vo3d-tabs" role="tablist" aria-label="Kategori navigasi alternatif">
+        {([['boards', 'Papan'], ['zones', 'Zona'], ['agents', 'Agen'], ['controls', 'Kontrol']] as const).map(([id, label]) => (
+          <button key={id} type="button" role="tab" aria-selected={targetTab === id} onClick={() => setTargetTab(id)}>{label}</button>
+        ))}
+        <button type="button" className="vo3d-close" aria-label="Tutup menu alternatif" onClick={() => setTargetMenuOpen(false)}><OfficeIcon name="close" /></button>
+      </div>
+      <div className="vo3d-panel-body" role="tabpanel">
+        {targetTab === 'boards' && <div className="vo3d-target-list">
+          <p className="vo3d-hint">Pilih papan untuk membuka kartu modul kerja:</p>
+          {getAlternativeBoards(floor).map((b) => (
+            <button key={b.id} type="button" className="vo3d-target-item" onClick={() => { setTargetMenuOpen(false); openBoard(b.id); }}>
+              <strong>{b.label}</strong>
+              <small>{b.route}</small>
+            </button>
+          ))}
+        </div>}
+        {targetTab === 'zones' && <div className="vo3d-target-list">
+          <p className="vo3d-hint">Pilih zona untuk memusatkan kamera ke ruangan:</p>
+          {ZONES.map((z) => (
+            <button key={z.id} type="button" className="vo3d-target-item" onClick={() => { setTargetMenuOpen(false); fly({ kind: 'zone', id: z.id }); }}>
+              <strong>{z.label}</strong>
+              <small>{[...spots.values()].filter((spot) => zoneOf(spot) === z.id).length} agen di ruangan</small>
+            </button>
+          ))}
+        </div>}
+        {targetTab === 'agents' && <div className="vo3d-target-list">
+          <p className="vo3d-hint">Pilih agen untuk mengarahkan kamera dan berinteraksi:</p>
+          {agents.map((a) => (
+            <button key={a.id} type="button" className="vo3d-target-item" onClick={() => { setTargetMenuOpen(false); selectAgent(a.id); }}>
+              <span className="vo3d-state-dot" style={{ background: STATE_COLORS[a.state] }} />
+              <strong>{a.name}</strong>
+              <small>{STATE_LABELS[a.state]} · {a.room ? ROOM_LABELS[a.room] : 'Tidak di lantai'}</small>
+            </button>
+          ))}
+        </div>}
+        {targetTab === 'controls' && <div className="vo3d-target-list">
+          <p className="vo3d-hint">Kontrol sekunder tampilan dan denah kantor:</p>
+          {getSecondaryControls({ view, tour, floor, minimapOpen, reducedMotion }).map((ctrl) => (
+            <button key={ctrl.id} type="button" className={`vo3d-target-item${ctrl.active ? ' is-active' : ''}`} disabled={ctrl.disabled} aria-label={ctrl.ariaLabel} onClick={() => {
+              if (ctrl.id === 'view-3d') { setView('3d'); fly({ kind: 'overview' }); setTargetMenuOpen(false); }
+              else if (ctrl.id === 'view-top') { setView('top'); setTour(false); fly({ kind: 'overview' }); setTargetMenuOpen(false); }
+              else if (ctrl.id === 'tour') { setFollowId(null); setView('3d'); setTour((t) => !t); setTargetMenuOpen(false); }
+              else if (ctrl.id === 'overview') { fly({ kind: 'overview' }); setTargetMenuOpen(false); }
+              else if (ctrl.id === 'toggle-map') { setMinimapOpen((m) => !m); setTargetMenuOpen(false); }
+              else if (ctrl.id === 'toggle-floor') { goToFloor(floor === 1 ? 2 : 1); setTargetMenuOpen(false); }
+            }}>
+              <strong>{ctrl.label}</strong>
+              <small>{ctrl.description}</small>
+            </button>
+          ))}
+        </div>}
+      </div>
+    </aside>}
+
     <nav className="vo3d-float vo3d-dock" aria-label="Navigasi ruangan" {...overlayEventIsolation}>
+      <button className="vo3d-dock-panel vo3d-dock-target-btn" type="button" aria-pressed={targetMenuOpen} aria-label="Pilih papan, zona, atau kontrol alternatif" onClick={() => { setTargetMenuOpen((o) => !o); setTargetTab('boards'); }}>
+        Papan
+      </button>
       {ZONES.map((zone) => { const count = [...spots.values()].filter((spot) => zoneOf(spot) === zone.id).length; return <button key={zone.id} type="button" aria-label={`${zone.label}, ${count} agen`} aria-pressed={command.kind === 'zone' && command.id === zone.id} onClick={() => fly({ kind: 'zone', id: zone.id })}>
         {zone.label}<span className="vo3d-dock-count" aria-hidden="true">{count}</span>
       </button>; })}
+      <button className="vo3d-dock-panel" type="button" aria-pressed={minimapOpen} aria-label={minimapOpen ? 'Tutup peta minimap' : 'Buka peta minimap'} onClick={() => setMinimapOpen((o) => !o)}>Peta</button>
       <button className="vo3d-dock-panel" type="button" aria-pressed={panel === 'activity'} onClick={(e) => { if (!panel) panelTrigger.current = e.currentTarget; setPanel(panel === 'activity' ? null : 'activity'); }}>Aktivitas</button>
       <button className="vo3d-dock-panel" type="button" aria-pressed={panel === 'channels'} onClick={(e) => { if (!panel) panelTrigger.current = e.currentTarget; setPanel(panel === 'channels' ? null : 'channels'); }}>Kanal</button>
     </nav>
@@ -712,6 +784,7 @@ export default function OfficeShell() {
       <button type="button" aria-pressed={view === 'top'} aria-label="Tampilan denah atas" title="Denah atas" onClick={() => { setView('top'); setTour(false); fly({ kind: 'overview' }); }}><OfficeIcon name="top" /></button>
       <button type="button" aria-pressed={tour} disabled={reducedMotion} title={reducedMotion ? 'Dinonaktifkan karena preferensi kurangi gerakan' : 'Putar kamera otomatis'} onClick={() => { setFollowId(null); setView('3d'); setTour((on) => !on); }}><OfficeIcon name="play" />Tur</button>
       <button type="button" aria-label="Pusatkan kamera" title="Pusatkan" onClick={() => fly({ kind: 'overview' })}><OfficeIcon name="target" /></button>
+      <button type="button" className="vo3d-seg-menu-btn" aria-pressed={targetMenuOpen} aria-label="Menu navigasi & kontrol alternatif" title="Menu alternatif" onClick={() => setTargetMenuOpen((o) => !o)}><OfficeIcon name="menu" /></button>
     </div>
     </div>
 

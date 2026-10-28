@@ -689,9 +689,21 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .vo3d-seg button { display: flex; align-items: center; gap: 6px; min-height: 44px; min-width: 44px; justify-content: center; padding: 0 10px; border: 1px solid transparent; border-radius: 10px; background: none; color: var(--vo-muted); font-size: 13px; font-weight: 600; }
 .vo3d-seg button:hover { color: var(--vo-ink); background: rgba(31, 41, 51, .06); }
 .vo3d-map { top: 76px; right: 16px; width: 230px; margin: 0; padding: 10px; }
+.vo3d-map-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; font-size: 11px; font-weight: 700; color: #294237; }
+.vo3d-map-close { display: none; background: none; border: 0; padding: 2px; cursor: pointer; border-radius: 4px; }
 .vo3d-map svg { display: block; width: 100%; height: auto; }
-.vo3d-map rect, .vo3d-map text { cursor: pointer; }
+.vo3d-map rect, .vo3d-map text, .vo3d-map circle { cursor: pointer; }
 .vo3d-map p { margin: 4px 0 0; color: var(--vo-muted); font-size: 10px; }
+.vo3d-target-menu { width: min(380px, calc(100vw - 24px)); max-height: 75vh; z-index: 35; }
+.vo3d-target-list { display: grid; gap: 6px; }
+.vo3d-target-item { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--vo-line); border-radius: 8px; background: var(--vo-card); text-align: left; cursor: pointer; transition: background 0.15s ease, border-color 0.15s ease; }
+.vo3d-target-item:hover { background: #eef3ef; border-color: var(--vo-focus); }
+.vo3d-target-item.is-active { background: #294237; color: #fff; border-color: #294237; }
+.vo3d-target-item.is-active small { color: #d0ded4; }
+.vo3d-target-item strong { font-size: 13px; font-weight: 600; }
+.vo3d-target-item small { font-size: 11px; color: var(--vo-muted); }
+.vo3d-target-item .vo3d-state-dot { display: inline-block; margin-right: 6px; }
+.vo3d-seg-menu-btn { display: flex; }
 .vo3d-panel { top: 76px; right: 16px; display: flex; width: 320px; max-height: calc(100% - 170px); flex-direction: column; overflow: hidden; }
 .vo3d-tabs { display: flex; align-items: center; gap: 2px; padding: 6px; border-bottom: 1px solid var(--vo-line); }
 .vo3d-tabs button { min-height: 44px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: var(--vo-muted); font-size: 13px; font-weight: 600; }
@@ -711,7 +723,24 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .vo3d-feed li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1px 8px; }
 .vo3d-feed small { color: var(--vo-muted); font-size: 11px; }
 .vo3d-feed .state-label { grid-row: span 2; align-self: center; }
-@media (max-width: 1100px) { .vo3d-map { display: none; } .vo3d-search { width: 200px; } }
+@media (max-width: 1100px) {
+  .vo3d-map { display: none; }
+  .vo3d-map.is-open {
+    display: block;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(340px, calc(100vw - 24px));
+    max-height: 80vh;
+    z-index: 45;
+    background: var(--vo-card);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+    border: 2px solid var(--vo-line);
+  }
+  .vo3d-map.is-open .vo3d-map-close { display: grid; place-items: center; width: 32px; height: 32px; }
+  .vo3d-search { width: 200px; }
+}
 @media (max-width: 760px) {
   .vo3d { height: calc(100vh - 150px); min-height: 520px; border-radius: 12px; }
   .vo3d-card { top: 12px; left: 12px; padding: 10px 12px; width: calc(100% - 24px); max-width: 340px; }
@@ -740,11 +769,36 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
     -webkit-overflow-scrolling: touch;
     padding-bottom: max(16px, var(--safe-area-bottom));
   }
+  .vo3d-target-menu {
+    top: auto;
+    right: 0;
+    bottom: env(safe-area-inset-bottom, 0px);
+    left: 0;
+    width: 100%;
+    max-height: 60%;
+    border-radius: 16px 16px 0 0;
+    z-index: 40;
+    overscroll-behavior: contain;
+  }
+}
+@media (max-width: 420px) {
+  .vo3d-dock { bottom: 66px; gap: 2px; padding: 3px 5px; }
+  .vo3d-dock button { min-height: 44px; padding: 0 8px; font-size: 12px; gap: 4px; }
+  .vo3d-dock-count { min-width: 20px; height: 20px; font-size: 11px; }
+  .vo3d-seg { bottom: 10px; left: 10px; gap: 3px; padding: 3px; }
+  .vo3d-seg button { min-height: 44px; min-width: 40px; padding: 0 6px; font-size: 12px; }
+  .vo3d-target-menu { max-height: 70%; }
 }
 @media (max-width: 360px) {
   html, body { min-width: 0; }
   .vo3d-roster-toggle { top: 270px; }
   .vo3d-roster { top: 320px; max-height: calc(100% - 388px); }
+  .vo3d-dock { bottom: 62px; left: 6px; right: 6px; max-width: calc(100% - 12px); padding: 2px 4px; }
+  .vo3d-dock button { min-height: 44px; padding: 0 6px; font-size: 11px; }
+  .vo3d-seg { bottom: 8px; left: 6px; gap: 2px; padding: 2px; }
+  .vo3d-seg button { min-height: 44px; min-width: 38px; padding: 0 4px; font-size: 11px; }
+  .vo3d-tools { top: 8px; left: 8px; right: 8px; gap: 4px; }
+  .vo3d-tools .vo3d-icon, .vo3d-tools .vo3d-owner-action, .vo3d-tools .vo3d-kill { min-height: 44px; }
 }
 @media (max-height: 640px) { .vo3d-map { display: none; } }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
