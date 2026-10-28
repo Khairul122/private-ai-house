@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { cloneElement, Fragment, isValidElement, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import type { AuditEvent, Autopilot, Opportunity } from '../api/api.js';
 import { formatDate, formatMoney, activityTitle } from './format.js';
@@ -203,6 +203,20 @@ export function FieldError({ message, id }: { message?: string | null | undefine
   );
 }
 
+/** Control props passed to children when using render prop API */
+export interface FormFieldControlProps {
+  id?: string | undefined;
+  'aria-invalid'?: boolean | 'true' | 'false' | undefined;
+  'aria-describedby'?: string | undefined;
+}
+
+export interface FormFieldMeta {
+  error?: string | null | undefined;
+  helpId?: string | undefined;
+  errorId?: string | undefined;
+  controlId?: string | undefined;
+}
+
 /** Form field container binding label, input, help and inline error */
 export interface FormFieldProps {
   label?: ReactNode;
@@ -210,7 +224,7 @@ export interface FormFieldProps {
   help?: ReactNode;
   error?: string | null | undefined;
   required?: boolean | undefined;
-  children: ReactNode;
+  children: ReactNode | ((controlProps: FormFieldControlProps, meta: FormFieldMeta) => ReactNode);
   className?: string | undefined;
   id?: string | undefined;
 }
@@ -225,19 +239,80 @@ export function FormField({
   className = '',
   id,
 }: FormFieldProps) {
-  const helpId = help && id ? `${id}-help` : undefined;
-  const errorId = error && id ? `${id}-error` : undefined;
+  const generatedId = useId();
+  const rawChildId = isValidElement(children) ? (children.props as Record<string, unknown> | undefined)?.id : undefined;
+  const rawBaseId = id || htmlFor || (typeof rawChildId === 'string' ? rawChildId : undefined) || `field-${generatedId.replace(/:/g, '')}`;
+  const baseId = String(rawBaseId);
+
+  const helpId = help ? `${baseId}-help` : undefined;
+  const errorId = error ? `${baseId}-error` : undefined;
+
+  const controlId = htmlFor || (typeof rawChildId === 'string' ? rawChildId : undefined) || `${baseId}-control`;
+  const effectiveLabelFor = htmlFor || (typeof rawChildId === 'string' ? rawChildId : undefined) || controlId;
+
+  const describedByParts: string[] = [];
+  if (error && errorId) describedByParts.push(errorId);
+  if (help && helpId) describedByParts.push(helpId);
+
+  const renderControl = () => {
+    if (typeof children === 'function') {
+      const controlProps: FormFieldControlProps = {
+        id: controlId,
+        ...(error ? { 'aria-invalid': true } : {}),
+        ...(describedByParts.length > 0 ? { 'aria-describedby': describedByParts.join(' ') } : {}),
+      };
+      const meta: FormFieldMeta = {
+        error: error ?? undefined,
+        helpId,
+        errorId,
+        controlId,
+      };
+      return children(controlProps, meta);
+    }
+
+    if (isValidElement(children) && children.type !== Fragment) {
+      const childProps = (children.props || {}) as Record<string, unknown>;
+      const existingDescribedBy = childProps['aria-describedby'];
+
+      const combinedParts = [...describedByParts];
+      if (typeof existingDescribedBy === 'string' && existingDescribedBy.trim()) {
+        for (const part of existingDescribedBy.split(/\s+/)) {
+          if (part && !combinedParts.includes(part)) {
+            combinedParts.push(part);
+          }
+        }
+      }
+
+      const injectedProps: Record<string, unknown> = {};
+      if (!childProps.id && controlId) {
+        injectedProps.id = controlId;
+      }
+      if (error) {
+        injectedProps['aria-invalid'] = true;
+      }
+      if (combinedParts.length > 0) {
+        injectedProps['aria-describedby'] = combinedParts.join(' ');
+      }
+      if (error && 'error' in childProps && childProps.error === undefined) {
+        injectedProps.error = error;
+      }
+
+      return cloneElement(children, injectedProps);
+    }
+
+    return children;
+  };
 
   return (
     <div className={`form-field ${error ? 'has-error' : ''} ${className}`.trim()} id={id}>
       {label && (
-        <label htmlFor={htmlFor} className="form-field-label">
+        <label htmlFor={effectiveLabelFor} className="form-field-label">
           <span>{label}</span>
           {required && <span className="field-required" aria-hidden="true">*</span>}
         </label>
       )}
       <div className="form-field-control">
-        {children}
+        {renderControl()}
       </div>
       {error ? <FieldError message={error} id={errorId} /> : null}
       {help && (
@@ -249,6 +324,30 @@ export function FormField({
   );
 }
 
+/** Parses a raw input string to finite number or null when empty/incomplete */
+export function parseNumInputValue(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (trimmed === '') return null;
+  const num = Number(trimmed);
+  return Number.isFinite(num) ? num : null;
+}
+
+/** Determines if external numeric value changed outside local editing flow */
+export function shouldSyncExternalNumValue(
+  currentText: string,
+  externalValue: number,
+  lastCommittedValue: number
+): boolean {
+  if (lastCommittedValue === externalValue) {
+    return false;
+  }
+  const parsed = Number(currentText.trim());
+  if (currentText.trim() === '' || !Number.isFinite(parsed) || parsed !== externalValue) {
+    return true;
+  }
+  return false;
+}
+
 /** Number input preserving raw string while typing, enforcing 44px min-height */
 export interface NumFieldProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'> {
   value: number;
@@ -257,23 +356,42 @@ export interface NumFieldProps extends Omit<React.InputHTMLAttributes<HTMLInputE
 }
 
 export function NumField({ value, onChange, error, ...rest }: NumFieldProps) {
-  const [text, setText] = useState(String(value));
+  const [text, setText] = useState(() => (Number.isFinite(value) ? String(value) : ''));
+  const lastCommittedRef = useRef(value);
+
+  // Synchronize only when external value changed from outside
   useEffect(() => {
-    if (Number(text) !== value) setText(String(value));
-  }, [value]);
+    if (shouldSyncExternalNumValue(text, value, lastCommittedRef.current)) {
+      lastCommittedRef.current = value;
+      setText(Number.isFinite(value) ? String(value) : '');
+    } else if (lastCommittedRef.current !== value && Number(text.trim()) === value) {
+      lastCommittedRef.current = value;
+    }
+  }, [value, text]);
+
+  const ariaInvalid = Boolean(error) || rest['aria-invalid'] === true || rest['aria-invalid'] === 'true' || undefined;
 
   return (
     <input
       type="number"
       required
-      aria-invalid={Boolean(error)}
       {...rest}
+      aria-invalid={ariaInvalid}
       value={text}
       onChange={(event) => {
-        setText(event.target.value);
-        if (event.target.value !== '' && Number.isFinite(Number(event.target.value))) {
-          onChange(Number(event.target.value));
+        const next = event.target.value;
+        setText(next);
+        const parsed = parseNumInputValue(next);
+        if (parsed !== null) {
+          lastCommittedRef.current = parsed;
+          onChange(parsed);
         }
+      }}
+      onBlur={(event) => {
+        if (parseNumInputValue(text) === null) {
+          setText(Number.isFinite(value) ? String(value) : '');
+        }
+        rest.onBlur?.(event);
       }}
     />
   );

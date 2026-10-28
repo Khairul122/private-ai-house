@@ -52,14 +52,14 @@ export default function ProfilePage() {
     <form className="form-section" onSubmit={(event) => { event.preventDefault(); if (profile && window.confirm('Simpan perubahan profil? Jika kebijakan sedang aktif, kebijakan akan kembali menjadi draf dan autopilot live berhenti sampai Anda meninjaunya.')) save.mutate(profile); }}>
       <section className="form-card"><div className="section-heading"><div><p className="eyebrow">Arah layanan</p><h2>Bidang utama dan spesialisasi</h2></div></div>
         <div className="form-grid">
-          <FormField label="Bidang utama" error={fieldErrors.primaryField} id="field-primaryField">
-            <select value={profile.primaryField} onChange={(event) => setProfile({ ...profile, primaryField: event.target.value })}>
+          <FormField label="Bidang utama" error={fieldErrors.primaryField} id="field-primaryField" htmlFor="profile-primaryField">
+            <select id="profile-primaryField" value={profile.primaryField} onChange={(event) => setProfile({ ...profile, primaryField: event.target.value })}>
               <option value="">Pilih bidang utama</option>
               {fields.map((field) => <option key={field}>{field}</option>)}
             </select>
           </FormField>
-          <FormField label="Bahasa kerja" error={fieldErrors.language} id="field-language">
-            <select value={profile.language} onChange={(event) => setProfile({ ...profile, language: event.target.value })}>
+          <FormField label="Bahasa kerja" error={fieldErrors.language} id="field-language" htmlFor="profile-language">
+            <select id="profile-language" value={profile.language} onChange={(event) => setProfile({ ...profile, language: event.target.value })}>
               <option value="id">Bahasa Indonesia</option>
               <option value="en">English</option>
               <option value="id-en">Indonesia dan English</option>
@@ -71,30 +71,30 @@ export default function ProfilePage() {
           {fieldErrors.specializations && <p className="field-error" role="alert">{fieldErrors.specializations}</p>}
           <div className="specialty-grid">{[...new Set([...profile.specializations, ...fields])].map((field) => { const checked = profile.specializations.includes(field); return <label key={field} className="check-row"><input type="checkbox" checked={checked} disabled={!checked && profile.specializations.length >= MAX_SPECIALIZATIONS} onChange={() => toggleSpecialty(field)} /><span>{field}</span></label>; })}</div></fieldset>
         <div className="search-inline">
-          <FormField label="Tambahkan spesialisasi teknis" id="field-newSpecialty" className="search-field">
-            <input maxLength={80} value={newSpecialty} onChange={(event) => setNewSpecialty(event.target.value)} placeholder="Misalnya: React atau Docker" />
+          <FormField label="Tambahkan spesialisasi teknis" id="field-newSpecialty" htmlFor="profile-newSpecialty" className="search-field">
+            <input id="profile-newSpecialty" maxLength={80} value={newSpecialty} onChange={(event) => setNewSpecialty(event.target.value)} placeholder="Misalnya: React atau Docker" />
           </FormField>
           <button className="button button-secondary" type="button" disabled={profile.specializations.length >= MAX_SPECIALIZATIONS || !newSpecialty.trim() || profile.specializations.some((item) => item.toLowerCase() === newSpecialty.trim().toLowerCase())} onClick={() => { setProfile({ ...profile, specializations: [...profile.specializations, newSpecialty.trim()] }); setNewSpecialty(''); }}>Tambah spesialisasi</button>
         </div>
       </section>
       <section className="form-card"><div className="section-heading"><div><p className="eyebrow">Batas layanan</p><h2>Tarif dan konteks kerja</h2></div></div>
         <div className="form-grid form-grid-three">
-          <FormField label="Mata uang" error={fieldErrors.currency} id="field-currency">
-            <select value={profile.currency} onChange={(event) => setProfile({ ...profile, currency: event.target.value })}>
+          <FormField label="Mata uang" error={fieldErrors.currency} id="field-currency" htmlFor="profile-currency">
+            <select id="profile-currency" value={profile.currency} onChange={(event) => setProfile({ ...profile, currency: event.target.value })}>
               <option value="USD">USD</option>
               <option value="IDR">IDR</option>
               <option value="EUR">EUR</option>
               <option value="SGD">SGD</option>
             </select>
           </FormField>
-          <FormField label="Tarif minimum" error={fieldErrors.minPrice} id="field-minPrice">
-            <NumField min="0" value={profile.minPrice} error={fieldErrors.minPrice} onChange={(value) => setProfile({ ...profile, minPrice: value })} />
+          <FormField label="Tarif minimum" error={fieldErrors.minPrice} id="field-minPrice" htmlFor="profile-minPrice">
+            <NumField id="profile-minPrice" min="0" value={profile.minPrice} error={fieldErrors.minPrice} onChange={(value) => setProfile({ ...profile, minPrice: value })} />
           </FormField>
-          <FormField label="Tarif maksimum" error={fieldErrors.maxPrice} id="field-maxPrice">
-            <NumField min="0" value={profile.maxPrice} error={fieldErrors.maxPrice} onChange={(value) => setProfile({ ...profile, maxPrice: value })} />
+          <FormField label="Tarif maksimum" error={fieldErrors.maxPrice} id="field-maxPrice" htmlFor="profile-maxPrice">
+            <NumField id="profile-maxPrice" min="0" value={profile.maxPrice} error={fieldErrors.maxPrice} onChange={(value) => setProfile({ ...profile, maxPrice: value })} />
           </FormField>
-          <FormField label="Zona waktu" error={fieldErrors.timezone} id="field-timezone">
-            <input value={profile.timezone} onChange={(event) => setProfile({ ...profile, timezone: event.target.value })} />
+          <FormField label="Zona waktu" error={fieldErrors.timezone} id="field-timezone" htmlFor="profile-timezone">
+            <input id="profile-timezone" value={profile.timezone} onChange={(event) => setProfile({ ...profile, timezone: event.target.value })} />
           </FormField>
         </div>
       </section>
@@ -103,14 +103,14 @@ export default function ProfilePage() {
         {profile.facts.length > 0 ? <ul className="fact-list">{profile.facts.map((fact, index) => <li key={`${fact.label}-${index}`}><div><strong className="nominal-wrap">{fact.label}</strong><p className="nominal-wrap">{fact.value}</p><small className="nominal-wrap">{fact.source}</small></div><button className="button button-text" type="button" aria-label={`Hapus fakta ${fact.label}`} onClick={() => setProfile({ ...profile, facts: profile.facts.filter((_, factIndex) => factIndex !== index) })}>Hapus fakta</button></li>)}</ul> : <div className="empty-inline">Belum ada fakta profil yang disimpan. Tambahkan bukti kerja lewat bagian di bawah.</div>}
         <details className="card-disclosure"><summary>Tambah fakta beserta sumber bukti</summary>
           <div className="fact-entry">
-            <FormField label="Nama fakta" id="fact-label">
-              <input value={newFact.label} onChange={(event) => setNewFact({ ...newFact, label: event.target.value })} placeholder="Contoh: Sistem inventori" />
+            <FormField label="Nama fakta" id="fact-label" htmlFor="newFact-label">
+              <input id="newFact-label" value={newFact.label} onChange={(event) => setNewFact({ ...newFact, label: event.target.value })} placeholder="Contoh: Sistem inventori" />
             </FormField>
-            <FormField label="Nilai atau hasil" id="fact-value">
-              <input value={newFact.value} onChange={(event) => setNewFact({ ...newFact, value: event.target.value })} placeholder="Isi hanya yang benar" />
+            <FormField label="Nilai atau hasil" id="fact-value" htmlFor="newFact-value">
+              <input id="newFact-value" value={newFact.value} onChange={(event) => setNewFact({ ...newFact, value: event.target.value })} placeholder="Isi hanya yang benar" />
             </FormField>
-            <FormField label="Sumber bukti" id="fact-source">
-              <input value={newFact.source} onChange={(event) => setNewFact({ ...newFact, source: event.target.value })} placeholder="URL, repositori, atau catatan" />
+            <FormField label="Sumber bukti" id="fact-source" htmlFor="newFact-source">
+              <input id="newFact-source" value={newFact.source} onChange={(event) => setNewFact({ ...newFact, source: event.target.value })} placeholder="URL, repositori, atau catatan" />
             </FormField>
             <button type="button" className="button button-secondary" onClick={addFact} disabled={!newFact.label.trim() || !newFact.value.trim() || !newFact.source.trim()}>Tambah fakta</button>
           </div>

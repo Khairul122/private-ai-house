@@ -9,6 +9,8 @@ import {
   MoneyDisplay,
   extractFieldErrors,
   computeViewportState,
+  parseNumInputValue,
+  shouldSyncExternalNumValue,
 } from './ui.js';
 import { formatMoney } from './format.js';
 
@@ -173,6 +175,143 @@ describe('FormField and FieldError inline error rendering', () => {
     expect(html).toContain('field-error-icon');
   });
 
+  it('wires aria-invalid and aria-describedby with errorId to child input control', () => {
+    const html = renderToStaticMarkup(
+      <FormField
+        label="Tarif minimum"
+        error="Tarif minimum tidak boleh kurang dari 1"
+        id="field-min-price"
+      >
+        <input type="number" id="min-price-input" />
+      </FormField>
+    );
+
+    expect(html).toContain('aria-invalid="true"');
+    expect(html).toContain('aria-describedby="field-min-price-error"');
+    expect(html).toContain('id="field-min-price-error"');
+  });
+
+  it('wires aria-describedby containing both error and help IDs to child control', () => {
+    const html = renderToStaticMarkup(
+      <FormField
+        label="Tarif minimum"
+        error="Nilai tidak valid"
+        help="Gunakan mata uang USD"
+        id="field-min-price"
+      >
+        <input type="number" id="min-price-input" />
+      </FormField>
+    );
+
+    expect(html).toContain('aria-invalid="true"');
+    expect(html).toContain('aria-describedby="field-min-price-error field-min-price-help"');
+    expect(html).toContain('id="field-min-price-error"');
+    expect(html).toContain('id="field-min-price-help"');
+  });
+
+  it('preserves existing child aria-describedby and merges help and error IDs', () => {
+    const html = renderToStaticMarkup(
+      <FormField
+        label="Tarif minimum"
+        error="Nilai tidak valid"
+        help="Bantuan tarif"
+        id="field-min-price"
+      >
+        <input type="number" id="min-price-input" aria-describedby="custom-hint" />
+      </FormField>
+    );
+
+    expect(html).toContain('aria-describedby="field-min-price-error field-min-price-help custom-hint"');
+  });
+
+  it('wires helpId to aria-describedby without aria-invalid when field has no error', () => {
+    const html = renderToStaticMarkup(
+      <FormField
+        label="Zona waktu"
+        help="Contoh: Asia/Jakarta"
+        id="field-timezone"
+      >
+        <input id="timezone-input" />
+      </FormField>
+    );
+
+    expect(html).not.toContain('aria-invalid');
+    expect(html).toContain('aria-describedby="field-timezone-help"');
+    expect(html).toContain('id="field-timezone-help"');
+  });
+
+  it('binds label htmlFor and control id automatically when htmlFor is provided', () => {
+    const html = renderToStaticMarkup(
+      <FormField
+        label="Zona waktu"
+        htmlFor="tz-control"
+        id="field-timezone"
+      >
+        <input />
+      </FormField>
+    );
+
+    expect(html).toContain('for="tz-control"');
+    expect(html).toContain('id="tz-control"');
+  });
+
+  it('supports explicit render prop API to wire accessibility props to controls', () => {
+    const html = renderToStaticMarkup(
+      <FormField
+        label="Catatan"
+        error="Catatan wajib diisi"
+        id="field-notes"
+        htmlFor="notes-textarea"
+      >
+        {(props) => <textarea {...props} rows={4} />}
+      </FormField>
+    );
+
+    expect(html).toContain('for="notes-textarea"');
+    expect(html).toContain('id="notes-textarea"');
+    expect(html).toContain('aria-invalid="true"');
+    expect(html).toContain('aria-describedby="field-notes-error"');
+    expect(html).toContain('Catatan wajib diisi');
+  });
+
+  it('wires accessibility attributes to select and textarea elements seamlessly', () => {
+    const html = renderToStaticMarkup(
+      <FormField
+        label="Bahasa kerja"
+        error="Pilih bahasa"
+        id="field-lang"
+        htmlFor="lang-select"
+      >
+        <select>
+          <option value="id">Bahasa Indonesia</option>
+        </select>
+      </FormField>
+    );
+
+    expect(html).toContain('for="lang-select"');
+    expect(html).toContain('id="lang-select"');
+    expect(html).toContain('aria-invalid="true"');
+    expect(html).toContain('aria-describedby="field-lang-error"');
+  });
+
+  it('wires NumField inside FormField with matching error and describedBy IDs', () => {
+    const html = renderToStaticMarkup(
+      <FormField
+        label="Tarif minimum"
+        error="Tarif minimum tidak boleh 0"
+        id="field-min-price"
+        htmlFor="profile-min-price"
+      >
+        <NumField value={0} onChange={() => undefined} />
+      </FormField>
+    );
+
+    expect(html).toContain('for="profile-min-price"');
+    expect(html).toContain('id="profile-min-price"');
+    expect(html).toContain('aria-invalid="true"');
+    expect(html).toContain('aria-describedby="field-min-price-error"');
+  });
+
   it('parses structured API validation error issues to target specific fields', () => {
     const apiError = 'Data profil tidak valid minPrice: Number must be greater than 0; specializations: Minimal 1 spesialisasi';
     const parsed = extractFieldErrors(apiError);
@@ -216,6 +355,58 @@ describe('NumField component', () => {
     );
 
     expect(html).toContain('aria-invalid="true"');
+  });
+
+  it('spreads aria-describedby and other attributes onto input element', () => {
+    const html = renderToStaticMarkup(
+      <NumField
+        value={25}
+        id="policy-scan-input"
+        aria-describedby="policy-scan-error policy-scan-help"
+        onChange={() => undefined}
+      />
+    );
+
+    expect(html).toContain('id="policy-scan-input"');
+    expect(html).toContain('aria-describedby="policy-scan-error policy-scan-help"');
+  });
+
+  it('parses numeric input strings and returns null for empty or incomplete text', () => {
+    expect(parseNumInputValue('150')).toBe(150);
+    expect(parseNumInputValue('-25')).toBe(-25);
+    expect(parseNumInputValue('3.14')).toBe(3.14);
+    expect(parseNumInputValue('0')).toBe(0);
+
+    expect(parseNumInputValue('')).toBeNull();
+    expect(parseNumInputValue('   ')).toBeNull();
+    expect(parseNumInputValue('-')).toBeNull();
+    expect(parseNumInputValue('.')).toBeNull();
+    expect(parseNumInputValue('abc')).toBeNull();
+  });
+
+  it('preserves raw text during editing and does not sync while lastCommitted equals externalValue', () => {
+    // While user clears input to type a new value, externalValue is still 150
+    expect(shouldSyncExternalNumValue('', 150, 150)).toBe(false);
+
+    // While user types a negative sign
+    expect(shouldSyncExternalNumValue('-', 150, 150)).toBe(false);
+
+    // While user types decimal point
+    expect(shouldSyncExternalNumValue('15.', 15, 15)).toBe(false);
+
+    // While user types leading zero
+    expect(shouldSyncExternalNumValue('05', 5, 5)).toBe(false);
+  });
+
+  it('syncs input text when externalValue changes from outside', () => {
+    // External reset from 150 to 0 (e.g. cancel button)
+    expect(shouldSyncExternalNumValue('150', 0, 150)).toBe(true);
+
+    // External reset while user had cleared input
+    expect(shouldSyncExternalNumValue('', 50, 150)).toBe(true);
+
+    // External value changed but current text already matches new value
+    expect(shouldSyncExternalNumValue('100', 100, 50)).toBe(false);
   });
 });
 
