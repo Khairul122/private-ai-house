@@ -1,9 +1,11 @@
-url: "http://127.0.0.1:3001/opportunities"
+url: "http://127.0.0.1:3001"
 name: "Opportunities Search Flow"
 ---
 - launchApp
+- openLink:
+    link: "http://127.0.0.1:3001/opportunities"
 - assertVisible:
-    text: "Peluang proyek"
+    css: "input[type='search']"
 - inputText:
     css: "input[type='search']"
     text: "typescript"

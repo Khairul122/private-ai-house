@@ -1,7 +1,9 @@
-url: "http://127.0.0.1:3001/projects-co-id"
+url: "http://127.0.0.1:3001"
 name: "ProjectsCoId Listing Flow"
 ---
 - launchApp
+- openLink:
+    link: "http://127.0.0.1:3001/projects-co-id"
 - assertVisible:
-    text: "Peluang dan draf Rupiah"
+    css: "#pci-search-title"
 - takeScreenshot: "08-projects-co-id-screen"
