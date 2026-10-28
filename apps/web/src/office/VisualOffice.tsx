@@ -423,9 +423,8 @@ function boardTexture(content: BoardContent, reducedEffects = false) {
   canvas.height = height;
   const ctx = canvas.getContext('2d')!;
   const scale = width / 1024;
-  const yScale = height / 366;
   const x = (value: number) => value * scale;
-  const y = (value: number) => value * yScale;
+  const y = (value: number) => value * scale;
   const fit = (text: string, max: number) => {
     let value = text;
     while (ctx.measureText(value).width > max && value.length > 4) value = `${value.slice(0, -2)}…`;

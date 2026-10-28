@@ -131,6 +131,18 @@ describe('PerformanceController state machine', () => {
     expect(add).toHaveBeenCalledWith('visibilitychange', expect.any(Function));
     unsubscribe();
     expect(remove).toHaveBeenCalledWith('visibilitychange', expect.any(Function));
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(controller.getMetrics().lastFps).toBe(60);
+  });
+
+  it('resets to normal and clears fallback dismissal', () => {
+    const controller = new PerformanceController();
+    frames(controller, 20, 50);
+    controller.reset();
+    expect(controller.getStatus()).toBe('normal');
+    expect(controller.getMetrics().fallbackDismissed).toBe(false);
+    expect(controller.getMetrics().lastFps).toBe(60);
   });
 
   it('dismisses fallback offer and prevents re-prompt', () => {
