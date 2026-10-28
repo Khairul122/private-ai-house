@@ -212,14 +212,33 @@ export default function OfficeShell() {
     });
   }
 
+  const unbindCanvasRef = useRef<(() => void) | null>(null);
+
+  const isWebglActive = webglStatus === 'ready' || webglStatus === 'restoring';
+  const webgl = isWebglActive;
+
   useEffect(() => {
     return () => {
+      if (unbindCanvasRef.current) {
+        unbindCanvasRef.current();
+        unbindCanvasRef.current = null;
+      }
       lifecycleRef.current?.destroy();
     };
   }, []);
 
+  useEffect(() => {
+    if (!isWebglActive && unbindCanvasRef.current) {
+      unbindCanvasRef.current();
+      unbindCanvasRef.current = null;
+    }
+  }, [isWebglActive]);
+
   const handleFpsSample = useCallback((fps: number, dtMs: number) => {
     setCurrentFps(fps);
+    if (lifecycleRef.current?.getStatus() === 'ready') {
+      lifecycleRef.current.markStable();
+    }
     const newStatus = perfControllerRef.current?.update(fps, dtMs);
     if (newStatus && newStatus !== perfStatus) {
       setPerfStatus(newStatus);
@@ -227,8 +246,19 @@ export default function OfficeShell() {
   }, [perfStatus]);
 
   const handleCanvasCreated = useCallback((gl: THREE.WebGLRenderer) => {
+    if (unbindCanvasRef.current) {
+      unbindCanvasRef.current();
+      unbindCanvasRef.current = null;
+    }
     if (lifecycleRef.current) {
-      return lifecycleRef.current.attachToCanvas(gl.domElement);
+      const unbind = lifecycleRef.current.attachToCanvas(gl.domElement);
+      unbindCanvasRef.current = unbind;
+      return () => {
+        unbind();
+        if (unbindCanvasRef.current === unbind) {
+          unbindCanvasRef.current = null;
+        }
+      };
     }
   }, []);
 
@@ -239,8 +269,6 @@ export default function OfficeShell() {
     lifecycleRef.current?.retry();
   }, []);
 
-  const isWebglActive = webglStatus === 'ready' || webglStatus === 'restoring';
-  const webgl = isWebglActive;
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const now = useClock(30_000);
   const phase = dayPhase(now.getHours());

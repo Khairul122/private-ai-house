@@ -81,25 +81,109 @@ describe('WebglLifecycleController', () => {
     expect(controller.getStatus()).toBe('ready');
   });
 
-  it('enforces retry limit of 1 per context loss sequence', () => {
-    const fallbackFn = vi.fn();
+  it('allows two separate context losses where each loss gets one restore attempt', () => {
+    const restoreFn = vi.fn();
     const controller = new WebglLifecycleController({
       maxRetriesPerLoss: 1,
-      onFallback: fallbackFn,
+      onRestore: restoreFn,
     });
 
     // 1st context loss and restore
     controller.handleContextLost({ preventDefault: () => {} });
+    expect(controller.getStatus()).toBe('context-lost');
     controller.handleContextRestored('normal');
     expect(controller.getStatus()).toBe('ready');
     expect(controller.getRetryCount()).toBe(1);
+    expect(restoreFn).toHaveBeenCalledTimes(1);
 
-    // 2nd context loss and restore without markStable()
+    // 2nd separate context loss and restore (both allowed without fallback)
+    controller.handleContextLost({ preventDefault: () => {} });
+    expect(controller.getStatus()).toBe('context-lost');
+    controller.handleContextRestored('reduced-effects');
+    expect(controller.getStatus()).toBe('ready');
+    expect(controller.getRetryCount()).toBe(1);
+    expect(restoreFn).toHaveBeenCalledTimes(2);
+    expect(controller.getCurrentMode()).toBe('reduced-effects');
+  });
+
+  it('ignores duplicate webglcontextrestored events when already restored and ready', () => {
+    const restoreFn = vi.fn();
+    const controller = new WebglLifecycleController({
+      onRestore: restoreFn,
+    });
+
+    controller.handleContextLost({ preventDefault: () => {} });
+    controller.handleContextRestored('normal');
+    expect(controller.getStatus()).toBe('ready');
+    expect(restoreFn).toHaveBeenCalledTimes(1);
+
+    // Duplicate restore event while already in ready state
+    controller.handleContextRestored('reduced-effects');
+    expect(controller.getStatus()).toBe('ready');
+    expect(restoreFn).toHaveBeenCalledTimes(1); // Not called again
+    expect(controller.getCurrentMode()).toBe('normal');
+  });
+
+  it('ignores late webglcontextrestored events arriving after timeout fallback', () => {
+    const restoreFn = vi.fn();
+    const fallbackFn = vi.fn();
+    const controller = new WebglLifecycleController({
+      restoreTimeoutMs: 5000,
+      onRestore: restoreFn,
+      onFallback: fallbackFn,
+    });
+
+    controller.handleContextLost({ preventDefault: () => {} });
+    vi.advanceTimersByTime(5000);
+    expect(controller.getStatus()).toBe('fallback');
+    expect(controller.getFallbackReason()).toBe('context_lost_timeout');
+    expect(fallbackFn).toHaveBeenCalledWith('context_lost_timeout', undefined);
+
+    // Late webglcontextrestored arrives after timeout has activated fallback
+    controller.handleContextRestored('normal');
+    expect(controller.getStatus()).toBe('fallback');
+    expect(controller.getFallbackReason()).toBe('context_lost_timeout');
+    expect(restoreFn).not.toHaveBeenCalled();
+  });
+
+  it('enforces retry limit when maxRetriesPerLoss is exceeded', () => {
+    const fallbackFn = vi.fn();
+    const controller = new WebglLifecycleController({
+      maxRetriesPerLoss: 0,
+      onFallback: fallbackFn,
+    });
+
     controller.handleContextLost({ preventDefault: () => {} });
     controller.handleContextRestored('normal');
 
     expect(controller.getStatus()).toBe('fallback');
     expect(controller.getFallbackReason()).toBe('retry_limit_exceeded');
+    expect(fallbackFn).toHaveBeenCalledWith('retry_limit_exceeded', undefined);
+  });
+
+  it('enforces retry limit of 1 per context loss sequence if consecutive loss occurs during restore', () => {
+    const fallbackFn = vi.fn();
+    let controllerInstance: WebglLifecycleController;
+    controllerInstance = new WebglLifecycleController({
+      maxRetriesPerLoss: 1,
+      onFallback: fallbackFn,
+      onRestore: () => {
+        // Simulate immediate context loss during restore before achieving stability
+        controllerInstance.handleContextLost({ preventDefault: () => {} });
+      },
+    });
+
+    controllerInstance.handleContextLost({ preventDefault: () => {} });
+    controllerInstance.handleContextRestored('normal');
+
+    // Context is now lost again with retryCount already at 1
+    expect(controllerInstance.getStatus()).toBe('context-lost');
+    expect(controllerInstance.getRetryCount()).toBe(1);
+
+    // Second restore attempt on the same unstable sequence exceeds retry limit
+    controllerInstance.handleContextRestored('normal');
+    expect(controllerInstance.getStatus()).toBe('fallback');
+    expect(controllerInstance.getFallbackReason()).toBe('retry_limit_exceeded');
     expect(fallbackFn).toHaveBeenCalledWith('retry_limit_exceeded', undefined);
   });
 
@@ -146,6 +230,11 @@ describe('WebglLifecycleController', () => {
     unbind();
     expect(mockCanvas.removeEventListener).toHaveBeenCalledWith('webglcontextlost', expect.any(Function));
     expect(mockCanvas.removeEventListener).toHaveBeenCalledWith('webglcontextrestored', expect.any(Function));
+
+    // Advancing timers should not trigger fallback because unbind cleared the timeout timer
+    vi.advanceTimersByTime(5000);
+    // Remains in context-lost because unbind cancelled the pending timer
+    expect(controller.getStatus()).toBe('context-lost');
   });
 
   it('supports explicit retry from fallback state', () => {

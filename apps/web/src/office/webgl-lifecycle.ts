@@ -58,6 +58,12 @@ export class WebglLifecycleController {
     }
 
     this.clearTimeoutTimer();
+
+    // If the controller was previously in ready/stable state, this initiates a new context loss sequence.
+    if (this.status === 'ready') {
+      this.retryCount = 0;
+    }
+
     this.status = 'context-lost';
     this.fallbackReason = undefined;
 
@@ -76,6 +82,13 @@ export class WebglLifecycleController {
    * Cancels timeout and enforces the 1-retry limit.
    */
   handleContextRestored(preferredMode?: 'normal' | 'reduced-effects'): void {
+    // Ignore events if not currently context-lost or restoring.
+    // This prevents late restored events (after timeout fallback) or duplicate restored events
+    // from re-initializing resources or resetting fallback.
+    if (this.status !== 'context-lost' && this.status !== 'restoring') {
+      return;
+    }
+
     this.clearTimeoutTimer();
 
     if (this.retryCount >= this.maxRetriesPerLoss) {
@@ -92,10 +105,13 @@ export class WebglLifecycleController {
     }
 
     // Re-initialize resources exactly once for this restore event
-    this.status = 'ready';
     this.onLoopControl?.(true);
     this.onRestore?.(this.currentMode);
-    this.onStatusChange?.('ready');
+
+    if (this.status === 'restoring') {
+      this.status = 'ready';
+      this.onStatusChange?.('ready');
+    }
   }
 
   /**

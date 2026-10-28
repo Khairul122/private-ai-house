@@ -48,7 +48,7 @@ export type VisualOfficeProps = {
   onOpenCommunity?: (() => void) | undefined;
   reducedEffects?: boolean | undefined;
   onFpsSample?: ((fps: number, dtMs: number) => void) | undefined;
-  onCanvasCreated?: ((gl: THREE.WebGLRenderer) => void) | undefined;
+  onCanvasCreated?: ((gl: THREE.WebGLRenderer) => (() => void) | void) | undefined;
   frameloopActive?: boolean | undefined;
 };
 
@@ -544,6 +544,19 @@ function OfficeLifeTick({ life, agents, reducedMotion }: { life: OfficeLife; age
   return null;
 }
 
+function CanvasLifecycleListener({ onCreated }: { onCreated?: ((gl: THREE.WebGLRenderer) => (() => void) | void) | undefined }) {
+  const gl = useThree((state) => state.gl);
+  useEffect(() => {
+    const unbind = onCreated?.(gl);
+    return () => {
+      if (typeof unbind === 'function') {
+        unbind();
+      }
+    };
+  }, [gl, onCreated]);
+  return null;
+}
+
 function FpsTracker({ onFpsSample }: { onFpsSample?: ((fps: number, dtMs: number) => void) | undefined }) {
   useFrame((_, dt) => {
     if (onFpsSample) {
@@ -583,7 +596,8 @@ export default function VisualOffice({ invitation, floor, ownerStart, onLift, ag
   }, []);
   useEffect(() => { document.body.style.cursor = hoveredId || hoveredBoard ? 'pointer' : ''; return () => { document.body.style.cursor = ''; }; }, [hoveredId, hoveredBoard]);
   const isLoopActive = visible && (frameloopActive ?? true);
-  return <Canvas frameloop={isLoopActive ? 'always' : 'never'} shadows={!reducedEffects} dpr={reducedEffects ? 0.85 : 1} camera={{ position: [20, 28, 38], fov: 38, near: 0.5, far: 400 }} onPointerMissed={() => onSelect(null)} onCreated={(state) => onCanvasCreated?.(state.gl)}>
+  return <Canvas frameloop={isLoopActive ? 'always' : 'never'} shadows={!reducedEffects} dpr={reducedEffects ? 0.85 : 1} camera={{ position: [20, 28, 38], fov: 38, near: 0.5, far: 400 }} onPointerMissed={() => onSelect(null)}>
+    <CanvasLifecycleListener onCreated={onCanvasCreated} />
     <FpsTracker onFpsSample={onFpsSample} />
     <OfficeLifeTick life={life} agents={agents} reducedMotion={reducedMotion} />
     <Lights phase={phase} reducedEffects={reducedEffects} />
