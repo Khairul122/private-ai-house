@@ -58,17 +58,28 @@ function TaskResult({ id }: { id: string }) {
   </div>;
 }
 
-function TaskCard({ task }: { task: HermesKanbanTask }) {
+export function evaluateHermesTaskMove(task: HermesKanbanTask, targetTitle: string): { allowed: boolean; reason: string } {
+  if (targetTitle === 'Antre' && ['blocked', 'scheduled'].includes(task.status)) {
+    return { allowed: true, reason: 'Lanjutkan kartu dari kontrol perpindahan.' };
+  }
+  return {
+    allowed: false,
+    reason: `Perpindahan ke "${targetTitle}" gagal: status kartu Hermes dikelola otomatis oleh eksekusi agen.`,
+  };
+}
+
+export function TaskCard({ task, initialMoveError = '' }: { task: HermesKanbanTask; initialMoveError?: string }) {
   const [open, setOpen] = useState(false);
-  const [moveError, setMoveError] = useState('');
+  const [moveError, setMoveError] = useState(initialMoveError);
   const cache = useQueryClient();
   const currentStage = kanbanStage(task);
   const currentColumn = COLUMNS.find((col) => col.statuses.includes(currentStage));
 
   const handleTaskMove = async (targetTitle: string) => {
-    if (targetTitle === 'Antre' && ['blocked', 'scheduled'].includes(task.status)) {
+    const evaluation = evaluateHermesTaskMove(task, targetTitle);
+    if (evaluation.allowed) {
       try {
-        await api(`/hermes-kanban/tasks/${task.id}/recover`, jsonRequest('POST', { message: 'Lanjutkan kartu dari kontrol perpindahan.', resume: true }));
+        await api(`/hermes-kanban/tasks/${task.id}/recover`, jsonRequest('POST', { message: evaluation.reason, resume: true }));
         setMoveError('');
         await cache.invalidateQueries({ queryKey: ['hermes-kanban'] });
       } catch (err) {
@@ -76,7 +87,7 @@ function TaskCard({ task }: { task: HermesKanbanTask }) {
       }
       return;
     }
-    setMoveError(`Perpindahan ke "${targetTitle}" gagal: status kartu Hermes dikelola otomatis oleh eksekusi agen.`);
+    setMoveError(evaluation.reason);
   };
   return <article className="kanban-card">
     <div className="kanban-card-top">

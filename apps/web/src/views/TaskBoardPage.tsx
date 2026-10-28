@@ -9,6 +9,26 @@ import { formatMoney } from '../components/format.js';
 
 const KANBAN_LIMIT = 12;
 
+export function evaluateTaskBoardMove(
+  p: Opportunity,
+  targetColId: string,
+  targetColTitle: string,
+): { allowed: boolean; reason: string } {
+  if (p.source === 'projects_co_id' && targetColId === 'archived' && p.status === 'open') {
+    return { allowed: true, reason: 'Peluang projects.co.id dapat dilewati oleh pemilik.' };
+  }
+  if (targetColId === 'active') {
+    return {
+      allowed: false,
+      reason: `Perpindahan ke "${targetColTitle}" gagal: konfirmasi marketplace diperlukan sesuai kebijakan.`,
+    };
+  }
+  return {
+    allowed: false,
+    reason: `Perpindahan ke "${targetColTitle}" gagal: status kartu dikelola otomatis oleh kebijakan dan sistem.`,
+  };
+}
+
 export default function TaskBoardPage() {
   const [filter, setFilter] = useState('');
   const [source, setSource] = useSourceFilter();
@@ -56,7 +76,8 @@ export default function TaskBoardPage() {
   const handleMove = async (p: Opportunity, targetColId: string) => {
     const targetCol = columns.find((c) => c.id === targetColId);
     if (!targetCol) return;
-    if (p.source === 'projects_co_id' && targetColId === 'archived' && p.status === 'open') {
+    const evaluation = evaluateTaskBoardMove(p, targetColId, targetCol.title);
+    if (evaluation.allowed) {
       try {
         await api(`/projects-co-id/projects/${encodeURIComponent(p.id)}/skip`, jsonRequest('POST', { confirm: true }));
         setMoveErrors((prev) => { const next = { ...prev }; delete next[p.id]; return next; });
@@ -67,17 +88,7 @@ export default function TaskBoardPage() {
         return;
       }
     }
-    if (targetColId === 'active') {
-      setMoveErrors((prev) => ({
-        ...prev,
-        [p.id]: `Perpindahan ke "${targetCol.title}" gagal: konfirmasi marketplace diperlukan sesuai kebijakan.`,
-      }));
-    } else {
-      setMoveErrors((prev) => ({
-        ...prev,
-        [p.id]: `Perpindahan ke "${targetCol.title}" gagal: status kartu dikelola otomatis oleh kebijakan dan sistem.`,
-      }));
-    }
+    setMoveErrors((prev) => ({ ...prev, [p.id]: evaluation.reason }));
   };
 
   return <>

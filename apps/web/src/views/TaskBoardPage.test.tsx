@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
-import TaskBoardPage from './TaskBoardPage.js';
+import TaskBoardPage, { evaluateTaskBoardMove } from './TaskBoardPage.js';
 import type { BidDraft, Opportunity } from '../api/api.js';
 
 function renderTaskBoard(data: Array<Opportunity & { latestDraft: BidDraft | null }> | null, isError = false) {
@@ -66,6 +66,40 @@ describe('TaskBoardPage responsive kanban stack and move controls', () => {
     expect(html).toContain('aria-label="Pindahkan peluang Migrasi PostgreSQL Supabase ke tahap lain"');
     expect(html).toContain('Pindahkan ke…');
     expect(html).toContain('Freelancer.com · PT Teknologi Mandiri');
+  });
+
+  it('evaluates task board move attempts and enforces policy and confirmation rules', () => {
+    // Attempting to move to active column fails because marketplace confirmation is required
+    const failToActive = evaluateTaskBoardMove(sampleOpportunity, 'active', 'Terkirim & Diskusi');
+    expect(failToActive.allowed).toBe(false);
+    expect(failToActive.reason).toContain('Perpindahan ke "Terkirim & Diskusi" gagal');
+    expect(failToActive.reason).toContain('konfirmasi marketplace diperlukan sesuai kebijakan');
+
+    // Attempting to move to drafting column fails because status is managed automatically
+    const failToDrafting = evaluateTaskBoardMove(sampleOpportunity, 'drafting', 'Draf & Review');
+    expect(failToDrafting.allowed).toBe(false);
+    expect(failToDrafting.reason).toContain('status kartu dikelola otomatis oleh kebijakan dan sistem');
+
+    // projects.co.id opportunity that is open can be skipped to archived by owner
+    const projectsCoIdOpp: Opportunity = {
+      ...sampleOpportunity,
+      id: 'pco-123',
+      source: 'projects_co_id',
+      status: 'open',
+    };
+    const allowSkip = evaluateTaskBoardMove(projectsCoIdOpp, 'archived', 'Selesai / Dilewati');
+    expect(allowSkip.allowed).toBe(true);
+    expect(allowSkip.reason).toContain('Peluang projects.co.id dapat dilewati oleh pemilik');
+  });
+
+  it('provides keyboard-accessible select options and disables current column option', () => {
+    const html = renderTaskBoard([sampleOpportunity]);
+    // The card is in 'Antrean Peluang' (queue), so the Antrean Peluang option should be disabled
+    expect(html).toMatch(/<option[^>]*value="queue"[^>]*disabled=""[^>]*>Antrean Peluang<\/option>/);
+    // Other options are enabled for keyboard selection
+    expect(html).toContain('<option value="drafting">Draf &amp; Review</option>');
+    expect(html).toContain('<option value="active">Terkirim &amp; Diskusi</option>');
+    expect(html).toContain('<option value="archived">Selesai / Dilewati</option>');
   });
 
   it('keeps API error notice and does not turn into an empty state', () => {

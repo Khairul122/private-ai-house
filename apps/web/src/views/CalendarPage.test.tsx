@@ -201,4 +201,37 @@ describe('CalendarPage mobile agenda, status, and error states', () => {
 
     expect(html).toContain('Belum ada tenggat proyek klien.');
   });
+
+  it('defaults to agenda view on mobile screens <=760px when view query param is omitted', () => {
+    const originalWindow = globalThis.window;
+    globalThis.window = {
+      ...originalWindow,
+      matchMedia: (query: string) => ({
+        matches: query === '(max-width: 760px)',
+        media: query,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+      }),
+    } as unknown as Window & typeof globalThis;
+
+    try {
+      const client = setupClient({});
+      const html = renderToStaticMarkup(
+        <QueryClientProvider client={client}>
+          <MemoryRouter initialEntries={['/calendar']}>
+            <CalendarPage />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+
+      expect(html).toContain('calendar-agenda-view');
+      expect(html).toContain('calendar-agenda-list');
+    } finally {
+      globalThis.window = originalWindow;
+    }
+  });
 });

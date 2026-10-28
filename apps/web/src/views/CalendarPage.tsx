@@ -105,9 +105,11 @@ function OperationsCalendar({ policy, work, workPending, workError }: { policy: 
   const autopilotQuery = useQuery({ queryKey: ['autopilot'], queryFn: () => api<Autopilot>('/autopilot'), refetchInterval: 10_000 });
   const [searchParams, setSearchParams] = useSearchParams();
   const queryView = searchParams.get('view') as CalendarView | null;
-  const [view, setView] = useState<CalendarView>(() => (
-    queryView && ['agenda', 'day', 'month', 'year'].includes(queryView) ? queryView : 'month'
-  ));
+  const [view, setView] = useState<CalendarView>(() => {
+    if (queryView && ['agenda', 'day', 'month', 'year'].includes(queryView)) return queryView;
+    if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(max-width: 760px)').matches) return 'agenda';
+    return 'month';
+  });
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
   const [logLimit, setLogLimit] = useState(30);
   const agendaQuery = useQuery({ queryKey: ['agenda', 'summary'], queryFn: () => api<AgendaSummary>('/agenda/activity?days=180'), refetchInterval: 30_000 });
