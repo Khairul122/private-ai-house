@@ -8,7 +8,7 @@ export default function ActivityPage() {
   const [limit, setLimit] = useState(100);
   const [filter, setFilter] = useState<'all' | 'allowed' | 'blocked' | 'recorded' | 'failed'>('all');
   const [source, setSource] = useSourceFilter();
-  const [search, setSearch] = useState(() => new URLSearchParams(window.location.search).get('q') ?? '');
+  const [search, setSearch] = useState(() => (typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('q') ?? '' : ''));
   const query = useQuery({ queryKey: ['activity', limit], queryFn: () => api<AuditEvent[]>('/activity?limit=' + limit), refetchInterval: 10_000 });
   if (query.isPending) return <LoadingPanel label="Membaca jejak aktivitas..." />;
   if (query.isError) return <ErrorNotice message="Log aktivitas belum dapat dimuat." onRetry={() => query.refetch()} />;

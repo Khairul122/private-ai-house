@@ -62,6 +62,7 @@ function HealthCard() {
 export default function CapabilitiesPage() {
   const queryClient = useQueryClient();
   const [notice, setNotice] = useState(() => {
+    if (typeof window === 'undefined') return '';
     const oauthResult = new URLSearchParams(window.location.search).get('linkedin');
     return oauthResult === 'connected'
       ? 'LinkedIn terhubung. Profil ringan berhasil diverifikasi.'
@@ -69,6 +70,7 @@ export default function CapabilitiesPage() {
   });
   const [noticeError, setNoticeError] = useState(false);
   useEffect(() => {
+    if (typeof window === 'undefined') return;
     const url = new URL(window.location.href);
     if (url.searchParams.has('linkedin')) {
       url.searchParams.delete('linkedin');
@@ -116,7 +118,7 @@ export default function CapabilitiesPage() {
         <p className="form-help">Status di kanan adalah hasil verifikasi baca terakhir. Rincian operasi di bawah adalah kemampuan yang tercatat, bukan tes baru.</p>
         <dl className="card-facts">{reads.map(([label, ok]) => <div key={label}><dt>{label[0]!.toUpperCase() + label.slice(1)}</dt><dd>{ok ? 'Terbaca pada verifikasi terakhir' : 'Belum terverifikasi'}</dd></div>)}</dl>
         <details className="card-disclosure"><summary>Rincian kemampuan API dan bukti pemeriksaan</summary>
-        {data.marketplace.map((item) => <div className="capability-row" key={item.operation}><div><strong>{operationName(item.operation)}</strong><p>{item.evidence}</p></div><div className="capability-status">{item.sandboxVerification ? <span title={'Diperiksa ' + formatDate(item.sandboxVerification.checkedAt)} className={'sandbox-http-status ' + (item.sandboxVerification.statusCode === 200 ? 'sandbox-http-ok' : '')}>{item.sandboxVerification.statusCode === null ? 'Hasil tidak diketahui · Sandbox' : 'HTTP ' + item.sandboxVerification.statusCode + ' · Sandbox'}</span> : <StateLabel state={item.status} />}</div></div>)}
+        {data.marketplace.map((item) => <div className="capability-row capability-card" key={item.operation}><div><strong>{operationName(item.operation)}</strong><p>{item.evidence}</p></div><div className="capability-status">{item.sandboxVerification ? <span title={'Diperiksa ' + formatDate(item.sandboxVerification.checkedAt)} className={'sandbox-http-status ' + (item.sandboxVerification.statusCode === 200 ? 'sandbox-http-ok' : '')}>{item.sandboxVerification.statusCode === null ? 'Hasil tidak diketahui · Sandbox' : 'HTTP ' + item.sandboxVerification.statusCode + ' · Sandbox'}</span> : <StateLabel state={item.status} />}</div></div>)}
         <h3 className="health-subtitle">Hasil production terakhir</h3>
         <div className="production-capability-status">
           {data.marketplace.filter((item) => ['submit_bid', 'edit_profile', 'send_message'].includes(item.operation)).map((item) => <div key={item.operation}><strong>{operationName(item.operation)}</strong><StateLabel state={item.status} /><span>{item.productionVerification ? item.productionVerification.statusCode === null ? 'Hasil tidak diketahui · Production' : 'HTTP ' + item.productionVerification.statusCode + ' · Production' : 'Belum ada hasil live production'}</span></div>)}

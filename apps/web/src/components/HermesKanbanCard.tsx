@@ -60,6 +60,24 @@ function TaskResult({ id }: { id: string }) {
 
 function TaskCard({ task }: { task: HermesKanbanTask }) {
   const [open, setOpen] = useState(false);
+  const [moveError, setMoveError] = useState('');
+  const cache = useQueryClient();
+  const currentStage = kanbanStage(task);
+  const currentColumn = COLUMNS.find((col) => col.statuses.includes(currentStage));
+
+  const handleTaskMove = async (targetTitle: string) => {
+    if (targetTitle === 'Antre' && ['blocked', 'scheduled'].includes(task.status)) {
+      try {
+        await api(`/hermes-kanban/tasks/${task.id}/recover`, jsonRequest('POST', { message: 'Lanjutkan kartu dari kontrol perpindahan.', resume: true }));
+        setMoveError('');
+        await cache.invalidateQueries({ queryKey: ['hermes-kanban'] });
+      } catch (err) {
+        setMoveError(err instanceof Error ? err.message : 'Perpindahan kartu gagal.');
+      }
+      return;
+    }
+    setMoveError(`Perpindahan ke "${targetTitle}" gagal: status kartu Hermes dikelola otomatis oleh eksekusi agen.`);
+  };
   return <article className="kanban-card">
     <div className="kanban-card-top">
       <span className="kanban-card-client">{employee(task.assignee)}</span>
@@ -70,7 +88,19 @@ function TaskCard({ task }: { task: HermesKanbanTask }) {
     {task.error && <p className="notice notice-error">{task.error}</p>}
     {task.goalStatus && <p className="form-help">Status tujuan keseluruhan. Kartu rencana: {STATUS[task.status] ?? task.status}.</p>}
     {task.goalError && <p role="alert">{task.goalError}</p>}
-    <button type="button" className="button button-secondary" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? 'Tutup hasil' : 'Lihat hasil & tindak lanjut'}</button>
+    {moveError && <p className="notice notice-error kanban-move-error" role="alert">{moveError}</p>}
+    <div className="kanban-card-action">
+      <div className="kanban-move-control">
+        <label className="kanban-move-label">
+          <span className="sr-only">Pindahkan ke</span>
+          <select aria-label={`Pindahkan tugas ${task.title} ke tahap lain`} className="kanban-move-select" value="" onChange={(e) => void handleTaskMove(e.target.value)}>
+            <option value="" disabled>Pindahkan ke…</option>
+            {COLUMNS.map((col) => <option key={col.title} value={col.title} disabled={col.title === currentColumn?.title}>{col.title}</option>)}
+          </select>
+        </label>
+      </div>
+      <button type="button" className="button button-secondary" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? 'Tutup hasil' : 'Lihat hasil & tindak lanjut'}</button>
+    </div>
     {open && <TaskResult id={task.resultId ?? task.id} />}
   </article>;
 }

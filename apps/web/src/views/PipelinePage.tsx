@@ -46,9 +46,9 @@ export default function PipelinePage() {
       ? <EmptyState title="Belum ada proyek di pipeline" description="Pipeline terisi setelah pemindaian proyek berhasil. Periksa integrasi dan status operasi untuk langkah berikutnya." action={<><Link to="/opportunities" className="button button-secondary">Buka peluang</Link><Link to="/capabilities" className="button button-secondary">Periksa integrasi</Link></>} />
       : <EmptyState title="Tidak ada proyek yang cocok dengan filter" description="Filter saat ini tidak menemukan judul, klien, tahap, atau sumber yang sesuai. Hapus filter untuk melihat seluruh pipeline." action={<button className="button button-secondary" type="button" onClick={resetFilters}>Hapus semua filter</button>} />)}
     <div className="pipeline-list">{visible.slice(0, shown).map((project) => (
-      <article className="pipeline-row" key={project.id}>
+      <article className="pipeline-row pipeline-card" key={project.id}>
         <div style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
-          <p className="eyebrow">{project.clientName} / {opportunitySource(project.source)}</p>
+          <div className="pipeline-meta"><span className="pipeline-id">ID: {project.id}</span><span className="pipeline-source">{opportunitySource(project.source)}</span><span className="pipeline-date">{formatDate(project.createdAt || project.latestDraft?.createdAt || '')}</span></div><p className="eyebrow">{project.clientName} / {opportunitySource(project.source)}</p>
           <h2><Link to={projectLink(project)}>{project.title}</Link></h2>
           <p>{project.latestDraft ? project.latestDraft.proposal.slice(0, 180) : 'Belum ada proposal tersimpan. Buka detail untuk meninjau peluang.'}</p>
         </div>

@@ -328,6 +328,22 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .agent-task { margin: 6px 0 10px; font-size: 12px; color: var(--ink); line-height: 1.4; }
 .agent-foot { display: flex; align-items: center; justify-content: space-between; padding-top: 8px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
 
+@media (min-width: 761px) {
+  .kanban-board, .vo3d-sheet-body .kanban-board {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(260px, 1fr));
+    gap: 14px;
+    margin-top: 18px;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    overscroll-behavior-x: contain;
+    padding-bottom: 12px;
+  }
+  .kanban-column, .vo3d-sheet-body .kanban-column {
+    scroll-snap-align: start;
+    min-height: 480px;
+  }
+}
 .kanban-board { display: grid; grid-template-columns: repeat(4, minmax(260px, 1fr)); gap: 14px; margin-top: 18px; overflow-x: auto; padding-bottom: 12px; }
 .kanban-column { display: flex; flex-direction: column; gap: 10px; padding: 12px; background: var(--surface-muted); border: 1px solid var(--line); border-radius: 4px; min-height: 480px; }
 .kanban-col-head { display: flex; align-items: center; justify-content: space-between; padding-bottom: 8px; border-bottom: 2px solid var(--line); }
@@ -339,6 +355,39 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 .kanban-card-budget { font-size: 12px; font-weight: 700; color: var(--copper); }
 .kanban-card-score { font-size: 11px; font-weight: 600; }
 .kanban-card-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
+
+/* Meta & kartu responsif: pipeline, audit, invoice, kanban */
+.pipeline-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; font-size: 11px; }
+.pipeline-id { font-weight: 700; color: var(--muted); }
+.pipeline-source { display: inline-flex; padding: 2px 6px; border-radius: 4px; background: var(--surface-muted); color: var(--ink); font-weight: 600; font-size: 10px; }
+.pipeline-date { color: var(--muted); font-size: 11px; }
+
+.activity-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 4px; }
+.audit-source { display: inline-flex; padding: 2px 6px; border-radius: 4px; background: var(--surface-muted); color: var(--copper); font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; }
+.activity-details { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.activity-resource, .activity-policy-ver, .activity-id { color: var(--muted); font-size: 11px; }
+
+.invoice-meta { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
+.invoice-id { font-weight: 700; color: var(--ink); font-size: 12px; }
+.invoice-status { font-size: 11px; }
+.invoice-amount { font-size: 16px; color: var(--copper); font-weight: 700; display: block; margin: 4px 0; }
+.invoice-due { display: block; color: var(--muted); font-size: 11px; margin-top: 4px; }
+.invoice-project { font-size: 13px; font-weight: 600; }
+
+.kanban-move-control { display: inline-flex; align-items: center; min-width: 140px; }
+.kanban-move-label { display: flex; width: 100%; }
+.kanban-move-select { width: 100%; min-height: 38px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font-size: 11px; font-weight: 600; cursor: pointer; }
+.kanban-move-select:focus { outline: 2px solid var(--pine); outline-offset: 1px; }
+.kanban-move-error { margin: 6px 0; font-size: 12px; }
+
+.calendar-agenda-view { display: flex; flex-direction: column; gap: 12px; }
+.calendar-agenda-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.calendar-event-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 4px; }
+.calendar-event-source { font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--copper); background: var(--surface-muted); padding: 2px 6px; border-radius: 4px; }
+.calendar-event-status { font-size: 11px; font-weight: 600; color: var(--muted); }
+
+/* Grafik minimum 280px */
+.meter-track, .meter-row, .reason-meter, progress { min-width: 280px; }
 
 .calendar-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 18px; }
 .calendar-card { padding: 18px; border: 1px solid var(--line); background: var(--surface); }
@@ -474,7 +523,33 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
   .search-field { width: 100%; }
   .filter-note { justify-items: start; }
   .opportunity-row h2 { font-size: 21px; }
-  .pipeline-row { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+  /* Kanban mobile vertical stack <=760px */
+  .kanban-board, .vo3d-sheet-body .kanban-board { display: flex; flex-direction: column; gap: 14px; overflow-x: visible; }
+  .kanban-column, .vo3d-sheet-body .kanban-column { width: 100%; min-height: auto; }
+  .kanban-card-action, .vo3d-sheet-body .kanban-card-action { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+  .kanban-card-action .button, .kanban-move-control { width: 100%; }
+
+  /* Pipeline card <=760px */
+  .pipeline-row, .vo3d-sheet-body .pipeline-row { display: flex; flex-direction: column; align-items: stretch; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+  .pipeline-state { display: flex; align-items: center; justify-content: space-between; width: 100%; }
+  .pipeline-row > .button, .vo3d-sheet-body .pipeline-row > .button { width: 100%; text-align: center; }
+
+  /* Audit card <=760px */
+  .activity-row, .vo3d-sheet-body .activity-row { display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); margin-bottom: 8px; }
+  .activity-mark { display: none; }
+  .activity-row .state-label { align-self: flex-start; }
+
+  /* Invoice card <=760px */
+  .invoice-card, .operations-row.invoice-card, .deadline-item.invoice-card { display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); margin-bottom: 8px; }
+  .invoice-action, .operations-row .invoice-action, .deadline-item .invoice-action { width: 100%; text-align: center; }
+
+  /* Knowledge Hub & Capabilities responsive cards <=760px */
+  .source-row, .vo3d-sheet-body .source-row { display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); margin-bottom: 8px; }
+  .source-actions { display: flex; flex-wrap: wrap; gap: 8px; width: 100%; }
+  .source-actions .button { flex: 1; text-align: center; }
+  .capability-row, .vo3d-sheet-body .capability-row { display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); margin-bottom: 8px; }
+  .capability-row .capability-status, .capability-row .state-label { align-self: flex-start; }
+  .health-row { display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); margin-bottom: 8px; }
   .pipeline-row > .button { grid-column: 1 / -1; justify-self: stretch; }
   .form-grid, .form-grid-three { grid-template-columns: minmax(0, 1fr); }
   .specialty-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -822,6 +897,9 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: .85; }
 @media (max-width: 960px) {
   .vo3d-sheet-body .overview-grid, .vo3d-sheet-body .policy-summary-grid, .vo3d-sheet-body .capability-grid, .vo3d-sheet-body .form-section { grid-template-columns: minmax(0, 1fr); }
   .vo3d-sheet-body .kanban-board { grid-template-columns: repeat(4, minmax(240px, 78%)); }
+}
+@media (max-width: 760px) {
+  .vo3d-sheet-body .kanban-board { display: flex; flex-direction: column; overflow-x: visible; }
 }
 @media (max-width: 560px) {
   .vo3d-sheet { --card-pad: 14px; }

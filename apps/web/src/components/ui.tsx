@@ -39,16 +39,26 @@ export function Metric({ label, value, note, tone = 'plain', to }: { label: stri
   return to ? <Link to={to} className={`metric metric-${tone} metric-link`}>{body}</Link> : <div className={`metric metric-${tone}`}>{body}</div>;
 }
 
+export function auditSource(event: AuditEvent): string {
+  if (event.type.startsWith('projects_co_id.') || event.resourceId.startsWith('projects_co_id')) return 'projects.co.id';
+  if (event.type.startsWith('marketplace.') || event.type.startsWith('freelancer.') || event.type.startsWith('autopilot.')) return 'Freelancer';
+  if (event.type.startsWith('github.')) return 'GitHub';
+  if (event.type.startsWith('linkedin.')) return 'LinkedIn';
+  if (event.type.startsWith('hermes.')) return 'Hermes';
+  if (event.type.startsWith('operations.')) return 'Operasi';
+  return 'Sistem';
+}
+
 export function ActivityRows({ events }: { events: AuditEvent[] }) {
   if (!events.length) return <EmptyState title="Belum ada aktivitas" description="Perubahan kebijakan, draf, bid, dan impor akan muncul di sini." />;
   return <ol className="activity-list">
     {events.map((event) => (
-      <li key={event.id} className="activity-row">
+      <li key={event.id} className="activity-row activity-card">
         <span className={`activity-mark activity-mark-${event.status}`} aria-hidden="true" />
-        <div className="activity-copy">
+        <div className="activity-copy"><div className="activity-meta"><span className="audit-source">{auditSource(event)}</span><small className="activity-time">{formatDate(event.createdAt)}</small></div>
           <strong>{activityTitle(event.type)}</strong>
           <p>{event.reason}</p>
-          <small>{formatDate(event.createdAt)}</small>
+          <div className="activity-details">{event.resourceId && <small className="activity-resource">Sumber daya: {event.resourceId}</small>}{event.policyVersion !== null && <small className="activity-policy-ver">Kebijakan v{event.policyVersion}</small>}<small className="activity-id">ID: {event.id}</small></div>
           {event.payloadHash && <small className="local-reference">Hash payload: {event.payloadHash.slice(0, 16)}...</small>}
         </div>
         <StateLabel state={event.status} />
